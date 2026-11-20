@@ -300,6 +300,164 @@ async def test_selected_create_subject_never_needs_llm(db, product, fmt, capabil
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fmt,platform,agent,artifact_kind", [
+    ("post", "vk", "content_factory", "content_request"),
+    ("story", "vk", "content_creative", "creative_request"),
+    ("short_video", "vk_clips", "content_creative", "creative_request"),
+    ("static_image", "instagram_reels", "content_creative", "creative_request"),
+    ("package", None, "content_factory", "content_request"),
+])
+async def test_all_create_formats_queue_only_after_user_approval(
+        db, product, fmt, platform, agent, artifact_kind):
+    """The same bare Create topic works for every non-paid material type."""
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Почему теряются заявки в маленьком бизнесе"
+    preferences = {"format": fmt, "platform": platform, "topic": topic,
+                   "audience": "Владельцы бизнеса",
+                   "editorial_brief": "Без неподтверждённых обещаний"}
+    if fmt == "story":
+        preferences.update(frame_count=4, image_model="auto", aspect_ratio="9:16")
+    if fmt == "static_image":
+        preferences.update(image_model="gemini", aspect_ratio="4:5")
+
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="approval-" + fmt, creation=CreateHints(**preferences))
+    answer = result["messages"][-1]
+    assert answer["intent"] == "execute"
+    confirmation = next(block for block in answer["blocks"] if block["type"] == "confirm")
+    assert confirmation["editable"]["format"] == fmt
+    assert confirmation["editable"]["topic"] == topic
+    assert confirmation["editable"]["audience"] == "Владельцы бизнеса"
+    assert tasks(db, agent) == []  # no paid work, generation, or publishing
+    if fmt == "story":
+        assert confirmation["editable"]["frame_count"] == 4
+        assert confirmation["editable"]["image_model"] == "auto"
+    if fmt == "static_image":
+        assert confirmation["editable"]["aspect_ratio"] == "4:5"
+        assert confirmation["editable"]["image_model"] == "gemini"
+
+    await service.confirm(
+        db, context(db, product), confirmation["confirmation_id"],
+        accept=True, revision=0)
+    job = tasks(db, agent)[0]
+    source = db.scalar(select(Artifact).where(
+        Artifact.task_id == job.id, Artifact.kind == artifact_kind))
+    request = json.loads(source.content)
+    assert request["topic"] == topic
+    assert request["audience"] == "Владельцы бизнеса"
+    assert request["editorial_brief"] == "Без неподтверждённых обещаний"
+    if fmt == "post":
+        assert request["channel"] == platform
+    elif fmt in {"story", "short_video", "static_image"}:
+        assert request["format"] == fmt
+        assert request["platform"] == platform
+        if fmt == "story":
+            assert request["frame_count"] == 4
+        if fmt == "static_image":
+            assert request["aspect_ratio"] == "4:5"
+            assert request["image_model"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_create_story_subject_does_not_override_selected_frame_count(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Как придумать 10 историй для клиентов"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="subject-mentions-ten-stories", creation=CreateHints(
+            format="story", platform="vk", frame_count=4, topic=topic))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "story"
+    assert card["editable"]["frame_count"] == 4
+    assert card["editable"]["platform"] == "vk"
+
+
+@pytest.mark.asyncio
+async def test_create_image_subject_does_not_override_selected_ratio_or_platform(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Почему вертикальное видео во ВКонтакте привлекает клиентов"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="subject-mentions-vk-vertical", creation=CreateHints(
+            format="static_image", topic=topic, platform="telegram",
+            aspect_ratio="1:1", image_model="auto"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "static_image"
+    assert card["editable"]["platform"] == "telegram"
+    assert card["editable"]["aspect_ratio"] == "1:1"
+
+
+@pytest.mark.asyncio
+async def test_create_post_subject_about_illustrated_posts_remains_selected_post(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Почему посты с картинками лучше продают"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="subject-illustrated-posts", creation=CreateHints(
+            format="post", topic=topic, platform="vk"))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == "post"
+    assert card["editable"]["platform"] == "vk"
+    assert card["editable"]["topic"] == topic
+
+
+@pytest.mark.asyncio
+async def test_simple_video_selected_in_create_uses_paid_approval_without_llm(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    topic = "Как CRM помогает не потерять заявки"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="whiteboard-create", creation=CreateHints(
+            format="whiteboard", topic=topic))
+    answer = result["messages"][-1]
+    assert answer["intent"] == "execute"
+    card = next(block for block in answer["blocks"] if block["type"] == "confirm")
+    assert card["paid"] is True
+    assert any("платная" in line.lower() for line in card["details"])
+    assert tasks(db, "content_factory") == []
+    assert tasks(db, "content_creative") == []
+    videos = tasks(db, "whiteboard_renderer")
+    assert len(videos) == 1
+    assert videos[0].status == TaskStatus.WAITING_APPROVAL
+    await service.confirm(
+        db, context(db, product), card["confirmation_id"],
+        accept=False)
+    db.expire_all()
+    assert videos[0].status == TaskStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_create_whiteboard_short_topic_returns_validation_without_task(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    result = await service.handle_message(
+        db, context(db, product), None, text="CRM?",
+        client_key="short-whiteboard", creation=CreateHints(
+            format="whiteboard", topic="CRM?"))
+    answer = result["messages"][-1]
+    assert not any(block["type"] == "confirm" for block in answer["blocks"])
+    assert tasks(db, "whiteboard_renderer") == []
+
+
+def test_create_whiteboard_cannot_accept_unrelated_image_and_platform_options():
+    from app.dispatcher.editable import CreateHints
+    from pydantic import ValidationError
+
+    for data in ({"platform": "vk"},
+                 {"frame_count": 4},
+                 {"image_model": "openai"},
+                 {"aspect_ratio": "4:5"}):
+        with pytest.raises(ValidationError):
+            CreateHints(format="whiteboard", topic="Как увеличить повторные продажи", **data)
+
+
+@pytest.mark.asyncio
 async def test_topic_hint_cannot_override_different_text_or_launch_work(db, product):
     from app.dispatcher.editable import CreateHints
 

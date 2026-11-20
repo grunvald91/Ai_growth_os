@@ -202,9 +202,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
-    assert '/studio/assets/create-studio.js?v=history-20261104' in page.text
+    assert '/studio/assets/create-studio.js?v=create-matrix-v2-20261120' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-topic-v1-20261120' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-matrix-v2-20261120' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -235,7 +235,7 @@ def test_create_has_only_dispatcher_submit_and_reusable_details(live):
     assert "hints.topic = text;" in dispatcher
     assert "creation: creationHints()" not in dispatcher
     assert "frame_count:selected==='story'" in dispatcher
-    assert "editorial_brief:b || null" in dispatcher
+    assert "editorial_brief:selected==='whiteboard' ? null : b || null" in dispatcher
 
 
 def test_create_image_model_is_single_select_and_confirmable(live):
@@ -277,7 +277,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=21' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-topic-v1-20261120' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-matrix-v2-20261120' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text

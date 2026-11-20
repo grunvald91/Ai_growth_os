@@ -67,7 +67,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     base = f"/studio/products/{pid}"
     formats = [
         ("post", "Пост", "Стратег и редактор создают текст для одной площадки."),
-        ("article", "Статья", "Для статей пока используйте SEO-завод. Отдельный однократный режим статьи ещё не подключён."),
+        ("article", "Статья · SEO-завод", "Статьи создаются в отдельном SEO-заводе. Эта карточка открывает SEO-раздел; нижняя строка «Создать» используется для остальных форматов."),
         ("story", "Stories", "Сценарий и готовые изображения каждого экрана. Доступны PNG и ZIP."),
         ("static_image", "Изображение", "Готовая картинка PNG с возможностью скачать файл."),
         ("short_video", "Видеосценарий", "Сценарий, кадры и озвучка, без готового MP4."),
@@ -472,10 +472,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-topic-v1-20261120', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-matrix-v2-20261120', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=history-20261104"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-topic-v1-20261120"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=create-matrix-v2-20261120"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-matrix-v2-20261120"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'

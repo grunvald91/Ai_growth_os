@@ -63,7 +63,7 @@ class EditCreation(BaseModel):
 class CreateHints(BaseModel):
     """Create-page selection and optional settings; executor still requires approval."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    format: Literal["post", "story", "short_video", "static_image", "package"] | None = None
+    format: Literal["post", "story", "short_video", "static_image", "whiteboard", "package"] | None = None
     # The Create page explicitly asks for a topic. Sending that topic separately
     # prevents the LLM classifier from rejecting an already selected capability.
     topic: str | None = Field(default=None, min_length=3, max_length=300)
@@ -81,14 +81,18 @@ class CreateHints(BaseModel):
                 raise ValueError("Тема, площадка, пропорции и количество требуют выбранного формата")
         elif self.format != "story" and self.frame_count is not None:
             raise ValueError("Количество экранов можно задавать только для Stories")
-        if self.format == "package" and self.platform:
-            raise ValueError("Для пакета площадка не указывается")
+        if self.format in ("package", "whiteboard") and self.platform:
+            raise ValueError("Для пакета и простого видео площадка здесь не выбирается")
         if self.platform and self.platform not in CHANNELS[self.format]:
             raise ValueError("Несовместимая площадка и формат")
         if self.image_model not in (None, "none") and self.format not in {"story", "static_image", None}:
             raise ValueError("Model selection only applies to Stories and images")
         if self.aspect_ratio is not None and self.format not in {"story", "static_image", None}:
             raise ValueError("Aspect ratio only applies to images")
+        if self.format == "whiteboard" and (self.frame_count is not None
+                                            or self.image_model not in (None, "none")
+                                            or self.aspect_ratio is not None):
+            raise ValueError("Настройки изображений и Stories не применяются к простому видео")
         if self.format == "story" and self.aspect_ratio not in (None, "9:16"):
             raise ValueError("Stories must be vertical 9:16")
         return self

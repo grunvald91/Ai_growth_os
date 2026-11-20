@@ -69,7 +69,9 @@
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
     const context=document.getElementById('sg-create-context');
-    context.textContent='Выбрано: '+names[key]+'. Введите тему в нижней строке и отправьте — перед созданием появится подтверждение.';
+    context.textContent=key==='whiteboard'
+      ? 'Выбрано: Простое видео (обычно около 30 секунд). Введите тему в нижней строке и отправьте. Перед платной генерацией появится запрос подтверждения.'
+      : 'Выбрано: '+names[key]+'. Введите тему в нижней строке и отправьте — перед созданием появится подтверждение.';
     const advanced=document.getElementById('sg-create-advanced');
     if(advanced) advanced.hidden=key==='whiteboard';
     if(key==='whiteboard'){

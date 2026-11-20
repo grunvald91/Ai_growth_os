@@ -328,7 +328,8 @@ async def run_readonly_plan(ctx: Context, steps: list[PlannedStep]) -> Outcome:
 
 
 
-def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
+def _apply_create_hints(decision: DispatcherDecision, hints, text: str, *,
+                        subject_only: bool = False) -> None:
     """Merge optional UI settings only after dispatcher has determined an action.
 
     Explicitly spoken screen count and channel take precedence over older UI
@@ -352,7 +353,7 @@ def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
         if hints.aspect_ratio:
             params["aspect_ratio"] = hints.aspect_ratio
     if capability == "create_creative" and target == "story":
-        spoken_count = requested_story_count(text)
+        spoken_count = None if subject_only else requested_story_count(text)
         if spoken_count is not None:
             params["frame_count"] = spoken_count
         elif hints.format == "story" and hints.frame_count is not None:
@@ -360,7 +361,7 @@ def _apply_create_hints(decision: DispatcherDecision, hints, text: str) -> None:
     if hints.format != target or not hints.platform:
         return
     # Explicitly spoken platforms override the manual dropdown.
-    explicit_channel = re.search(
+    explicit_channel = None if subject_only else re.search(
         r"(?iu)(?:телеграм|telegram|вконтакте|\bvk\b|инстаграм|instagram|youtube|ютуб|дзен|dzen|tenchat|vc\.ru)",
         text)
     if explicit_channel:
@@ -416,6 +417,11 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     except IntegrityError:
         return {"messages": [], "replayed": True}
 
+    selected_topic_request = (
+        chip is None and creation is not None
+        and creation.topic is not None and creation.format is not None
+        and text.strip() == creation.topic
+    )
     decision: DispatcherDecision | None = None
     model_name: str | None = None
     if chip is not None:
@@ -427,8 +433,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             decision = DispatcherDecision(intent="execute", capability=known.id,
                                           params={k: str(v) for k, v in (chip.get("params") or {}).items()},
                                           confidence=1.0)
-    elif (creation is not None and creation.topic is not None
-          and creation.format is not None and text.strip() == creation.topic):
+    elif selected_topic_request:
         # An explicit Create-format selection plus a topic is already a
         # complete user request. Do not ask the LLM to rediscover the chosen
         # capability: it can incorrectly say that post creation is unsupported.
@@ -439,6 +444,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             topic_params["channel"] = creation.platform or "telegram"
         elif creation.format == "package":
             selected_capability = "create_package"
+        elif creation.format == "whiteboard":
+            # This existing executor creates only a WAITING_APPROVAL draft.
+            # Paid video rendering still needs the owner's explicit confirmation.
+            selected_capability = "whiteboard_video"
         else:
             selected_capability = "create_creative"
             topic_params["format"] = creation.format
@@ -463,7 +472,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     if decision is not None:
         # A request for an illustrated post must produce an image AND ready
         # caption, never silently degrade into text-only create_post.
-        if (chip is None and decision.intent == "execute"
+        if (chip is None and not selected_topic_request and decision.intent == "execute"
                 and decision.capability in {"create_post", "create_creative"}
                 and re.search(r"(?iu)\b(?:пост\w*|публикаци\w*)\b", text)
                 and re.search(r"(?iu)(?:картин\w*|изображени\w*|иллюстраци\w*|фото|обложк\w*)", text)
@@ -486,14 +495,15 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             }
         # For a naturally described image, accept explicit channel/orientation
         # even when the LLM fails to preserve these details.
-        if (decision.intent == "execute" and decision.capability == "create_creative"
+        if (not selected_topic_request and decision.intent == "execute"
+                and decision.capability == "create_creative"
                 and decision.params.get("format") == "static_image"):
             spoken_platform, spoken_ratio = _visual_preferences(text)
             if spoken_platform:
                 decision.params["platform"] = spoken_platform
             if spoken_ratio:
                 decision.params["aspect_ratio"] = spoken_ratio
-        _apply_create_hints(decision, creation, text)
+        _apply_create_hints(decision, creation, text, subject_only=selected_topic_request)
         # Explicit voice/text counts are authoritative without any manual selection.
         if (creation is None and decision.intent == "execute"
                 and decision.capability == "create_creative"
