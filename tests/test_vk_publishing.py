@@ -12,7 +12,7 @@ from app.models.domain import Artifact, Product, Publication
 from app.social_vk import (
     VKStore, begin_oauth, read_oauth_cookie, approved_posts,
     cancel, schedule, deliver_once, redirect_uri, connect_community, connected,
-    community_reference, resolve_community, verify_community_key,
+    community_reference, resolve_community, resolve_publisher_community, verify_community_key,
     begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
     community_oauth_config, community_oauth_redirect,
 )
@@ -219,6 +219,7 @@ def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_p
     ("https://vk.com/public123456", "123456"),
     ("https://m.vk.com/club123456?from=share", "123456"),
     ("https://vk.ru/my_company", "my_company"),
+    ("https://vk.ru/club241947800", "241947800"),
     ("vk.com/my_company", "my_company"),
 ])
 def test_vk_community_reference_accepts_links(value, expected):
@@ -234,6 +235,45 @@ def test_vk_community_reference_accepts_links(value, expected):
 def test_vk_community_reference_rejects_invalid(value):
     with pytest.raises(ValueError):
         community_reference(value)
+
+
+@pytest.mark.asyncio
+async def test_vkr_u_numeric_group_link_does_not_require_public_api_lookup(monkeypatch):
+    """Regression for the real user group: the URL is valid independent of VK token."""
+    from app.comments.vk import VKAdapter
+    calls = []
+
+    async def fake(self, method, token, **params):
+        calls.append((method, params))
+        if method == "groups.getById":
+            raise AssertionError("Numeric group must not require groups.getById")
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192}
+        if method == "groups.getCallbackSettings":
+            assert params["group_id"] == "241947800"
+            return {}
+        raise AssertionError("Unexpected request to " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    account_id, label = await resolve_publisher_community(
+        "test-group-key", "https://vk.ru/club241947800")
+    assert account_id == "241947800"
+    assert label
+    assert calls == []
+    await verify_community_key("test-group-key", account_id)
+    assert [method for method, _ in calls] == [
+        "groups.getTokenPermissions", "groups.getCallbackSettings"]
+
+
+@pytest.mark.asyncio
+async def test_vkr_u_short_name_still_requires_api_lookup(monkeypatch):
+    async def fake(token, reference):
+        assert reference == "https://vk.ru/my_company"
+        return "241947800", "Studio"
+
+    monkeypatch.setattr("app.social_vk.resolve_community", fake)
+    assert await resolve_publisher_community("key", "https://vk.ru/my_company") == (
+        "241947800", "Studio")
 
 
 @pytest.mark.asyncio
@@ -769,6 +809,10 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     assert 'id="sg-vk-token-link" target="_blank" rel="noopener noreferrer" hidden' in owner_html
     assert 'id="sg-vk-token-copy" type="button"' in owner_html
     assert 'id="sg-vk-token-help" role="status" aria-live="polite"' in owner_html
+    assert "двухфакторную аутентификацию (2FA)" in owner_html
+    assert "«Дополнительно»" in owner_html
+    assert "«Работа с API»" in owner_html
+    assert "«Создать ключ»" in owner_html
     assert 'link.removeAttribute("href")' in owner_html
     assert 'id="sg-vk-oauth-community-link"' not in owner_html
     assert 'https://vk.ru/' in owner_html
