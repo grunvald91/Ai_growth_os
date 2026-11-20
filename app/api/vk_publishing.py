@@ -20,7 +20,7 @@ from app.comments.contracts import ConnectInput
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Publication
-from app.vk_service import platform_service_token
+from app.vk_service import platform_service_token, group_app_verified
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
@@ -49,6 +49,21 @@ def feedback(key):
             }.get(key, "")
 
 
+def _can_begin_community_oauth(settings, request: Request) -> bool:
+    try:
+        community_oauth_config(settings)
+    except ValueError:
+        return False
+    if group_app_verified(settings):
+        return True
+    # Until the first real success, only an operator may try legacy OAuth.
+    login = getattr(request.state, "studio_login", None)
+    allowed = {name.strip().casefold() for name in
+               (settings.studio_tune_usernames or "").split(",") if name.strip()}
+    return (bool(login) and login.casefold() in allowed
+            and getattr(request.state, "studio_product_ids", None) is None)
+
+
 def connection_error(key):
     return {
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
@@ -64,7 +79,8 @@ def connection_error(key):
 
 
 @router.get("/studio/products/{product_id}/vk", response_class=HTMLResponse)
-def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Depends(get_db),
+def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
+            db: Session = Depends(get_db),
             settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     channel = connected(db, product_id)
@@ -123,19 +139,17 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
                         '</form>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
-    try:
-        community_oauth_config(settings)
-        group_oauth_ready = True
-    except ValueError:
-        group_oauth_ready = False
+    group_oauth_ready = _can_begin_community_oauth(settings, request)
+    pilot_mode = group_oauth_ready and not group_app_verified(settings)
     oauth_first = (f"""
  <form method="post" action="/studio/products/{product_id}/vk/group-connect" class="sg-fields sg-compact-form">
   <label class="sg-field"><span>Ссылка на сообщество ВКонтакте</span>
    <input type="text" name="community_link" maxlength="255" autocomplete="url"
      placeholder="https://vk.com/my_community" required></label>
-  <button class="btn primary" type="submit">Подключить ВКонтакте</button>
-  <p class="sg-footnote">Вы перейдёте во ВКонтакте, чтобы самостоятельно подтвердить доступ ServGo.
-  Ключи копировать не требуется. Подключение станет активным только после проверки прав.</p>
+  <button class="btn primary" type="submit">{"Проверить вход ВКонтакте" if pilot_mode else "Подключить ВКонтакте"}</button>
+  <p class="sg-footnote">Вы перейдёте во ВКонтакте, чтобы подтвердить доступ ServGo.
+  Ключи копировать не требуется. Подключение станет активным только после проверки прав.
+  {"Пробный режим: совместимость с вашим VK-приложением ещё не подтверждена." if pilot_mode else ""}</p>
  </form>""" if group_oauth_ready else
  '<p class="sg-footnote">Авторизация одним нажатием станет доступна после подключения приложения VK администратором ServGo.</p>')
     enabled = bool(settings.content_vk_autopost_enabled)
@@ -212,6 +226,9 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
 async def vk_group_connect(product_id: UUID, request: Request,
                            db: Session = Depends(get_db), settings=Depends(get_settings)):
     _owner_product(db, product_id)
+    if not _can_begin_community_oauth(settings, request):
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=group_oauth_not_configured", status_code=303)
     fields = await _studio_form(request)
     try:
         url, cookie = await begin_community_oauth(
