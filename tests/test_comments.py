@@ -421,7 +421,7 @@ async def test_vk_connections_require_manager(platform):
         ("groups.getTokenPermissions", {"error": {"error_code": 27, "error_msg": "Not a group token"}}),
     ])
     async with client:
-        with pytest.raises(PlatformError, match="Нужен ключ"):
+        with pytest.raises(PlatformError, match="VK не подтвердил доступ ключа"):
             await gateway.check(platform, "42", "secret")
     assert not pending
 
