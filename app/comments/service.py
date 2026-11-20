@@ -87,18 +87,21 @@ def recent_platform_comment(comment, max_age_days: int) -> bool:
 class CommentService:
     def __init__(self, db: Session, settings, *, llm=None, gateway=None):
         self.db, self.settings, self.llm = db, settings, llm
+        from app.vk_service import platform_service_token
         self.gateway = gateway or CommentGateway(
             proxy_url=settings.comment_platform_proxy_url,
             instagram_graph_version=settings.comment_meta_graph_version,
-            vk_read_token=settings.social_vk_service_token,
+            vk_read_token=platform_service_token(settings),
         )
         self.secrets = CommentSecrets(settings.products_root)
 
     async def channel_token(self, channel, *, for_read=False):
         """VK reads may use the operator's service key; replies use the group's write key."""
         if channel.platform == "vk":
-            if for_read and self.settings.social_vk_service_token:
-                return self.settings.social_vk_service_token
+            if for_read:
+                from app.vk_service import platform_service_token
+                if key := platform_service_token(self.settings):
+                    return key
             from app.social_vk import active_token
             return await active_token(self.settings, channel)
         return self.secrets.load_token(channel.id)
