@@ -143,11 +143,11 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     assert f"/tasks/{task.id}/images/{media.id}" in page.body.decode("utf-8")
     # Owner approval must enforce the visual decision, not just the display badge.
     if expect_state == "ready":
-        approved = approve_material(db, tmp_path, company.id, post.id)
+        approved = approve_material(db, tmp_path, company.id, post.id, facts_confirmed=True)
         assert approved.status == ArtifactStatus.APPROVED
     else:
         with pytest.raises(ReviewError, match="Визуальный критик"):
-            approve_material(db, tmp_path, company.id, post.id)
+            approve_material(db, tmp_path, company.id, post.id, facts_confirmed=True)
         assert post.status == ArtifactStatus.AWAITING_APPROVAL
     assert not list(db.scalars(select(Publication).where(
         Publication.product_id == company.id)))
