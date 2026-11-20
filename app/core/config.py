@@ -122,7 +122,12 @@ class Settings(BaseSettings):
     # Platform-owned read-only service key. Never expose it to the browser or tenants.
     social_vk_service_token: str | None = None
     social_vk_redirect_base: str = "https://servgo.ru"
-    content_vk_autopost_enabled: bool = False
+    # Text VK worker is enabled by default after production preflight: no
+    # post is sent without a company's verified connection and approved intent.
+    # Setting CONTENT_VK_AUTOPOST_ENABLED=false remains an emergency kill switch.
+    content_vk_autopost_enabled: bool = True
+    # Fail closed on old queued posts; never release a stale backlog unexpectedly.
+    content_vk_max_lateness_minutes: int = Field(default=60, ge=1, le=1440)
     content_telegram_max_lateness_minutes: int = 30
     comment_platform_proxy_url: str | None = None
     # New Meta apps use Unified Login (Facebook Login for Business config_id).

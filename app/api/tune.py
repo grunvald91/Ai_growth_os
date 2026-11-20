@@ -31,6 +31,8 @@ from app.api.team_dashboard import _NAMES
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task
+from app.vk_service import (platform_service_token, save_platform_service_token,
+                            delete_platform_service_token, verify_platform_service_token)
 
 router = APIRouter()
 
@@ -96,6 +98,8 @@ main{max-width:1100px;margin:0 auto;padding:20px 16px 60px}h1{font-size:24px;mar
 .card h3{margin:0 0 4px;font-size:16px}.muted{color:var(--muted);font-size:13px}.tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:99px;background:#eef3fb;color:var(--muted);margin-left:6px}
 .tag.changed{background:#fff3df;color:var(--warn)}.tag.ok{background:#e6f5ea;color:var(--ok)}.tag.bad{background:#fdeaea;color:var(--bad)}
 textarea{width:100%;min-height:180px;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid var(--line);border-radius:10px;padding:10px;resize:vertical}
+input[type=text],input[type=password]{display:block;max-width:560px;width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;font:inherit;margin:4px 0 14px}
+input[type=checkbox]{margin:10px 5px 10px 0}
 button{background:var(--accent);color:#fff;border:0;border-radius:9px;padding:8px 14px;font-weight:650;cursor:pointer}button.plain{background:#eef3fb;color:var(--text)}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}details summary{cursor:pointer;color:var(--accent);font-weight:600}
 .notice{padding:10px 14px;border-radius:10px;background:#e6f5ea;color:var(--ok);margin:10px 0}.error{background:#fdeaea;color:var(--bad)}
@@ -109,7 +113,8 @@ ul.v{margin:4px 0;padding-left:18px}.finding{border-left:3px solid var(--line);p
 def page(title: str, active: str, body: str) -> HTMLResponse:
     tabs = "".join(f'<a class="{"on" if key == active else ""}" href="{href}">{label}</a>' for key, href, label in (
         ("prompts", "/studio/tune", "Промпты агентов"), ("work", "/studio/tune/work", "Ход работы"),
-        ("chat", "/studio/chat", "ИИ-чат"), ("models", "/studio/team", "Модели и критик"), ("studio", "/studio", "← В Studio")))
+        ("chat", "/studio/chat", "ИИ-чат"), ("models", "/studio/team", "Модели и критик"),
+        ("vk", "/studio/tune/vk", "VK API"), ("studio", "/studio", "← В Studio")))
     return HTMLResponse(f"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{esc(title)} · Настройка агентов</title>
 <style>{CSS}</style></head><body><header><b>Настройка агентов</b><nav>{tabs}</nav></header>
@@ -339,3 +344,87 @@ def _review_html(data: dict) -> str:
         items.append(f"<p class=\"muted\">Причина: {esc(data['failure_reason'])}</p>")
     return (f"<details{' open' if findings else ''}><summary>Критик: {esc(REVIEW_STATUS.get(status, status))}"
             f"{' · ' + esc(models) if models else ''}</summary>{''.join(items) or '<p class=muted>Замечаний нет.</p>'}</details>")
+
+
+@router.get("/studio/tune/vk", response_class=HTMLResponse)
+def vk_service_settings(result: str = "", owner: str = Depends(require_tune_owner),
+                        settings: Settings = Depends(get_settings)):
+    """Operator-only one-time VK read key setup; never return a saved key."""
+    source = "переменных сервера" if settings.social_vk_service_token else "защищённого хранилища"
+    configured = bool(platform_service_token(settings))
+    note = {
+        "saved": "Ключ сохранён в зашифрованном хранилище. Чтение стены и комментариев проверено.",
+        "wall_only": "Ключ сохранён: чтение стены работает, но проверить комментарии пока нельзя — в указанном сообществе нет доступных записей.",
+        "invalid": "ВКонтакте не подтвердил ключ, ссылку или доступ к стене/комментариям. Ключ не сохранялся.",
+        "removed": "Ключ из зашифрованного хранилища удалён.",
+        "blocked": "Настройка ключа управляется окружением сервера.",
+    }.get(result, "")
+    header = (
+        "<p class='notice'>Сервисный ключ настроен (источник: " + esc(source) + ").</p>"
+        if configured else "<p class='notice error'>Сервисный ключ не настроен. Чтение комментариев VK недоступно.</p>"
+    )
+    form = (
+        "<p class='muted'>Этот ключ управляется через конфигурацию сервера и не может изменяться здесь.</p>"
+        if settings.social_vk_service_token else """
+<form action="/studio/tune/vk" method="post">
+ <p>Вставьте сервисный ключ приложения ВКонтакте и ссылку на открытое сообщество с публикациями.
+ Система проверит чтение стены и комментариев, затем сохранит ключ зашифрованным. Значение ключа после сохранения не показывается.</p>
+ <label>Сервисный ключ приложения VK
+ <input name="token" type="password" autocomplete="off" maxlength="8000" required></label>
+ <label>Сообщество для проверки
+ <input name="community_link" type="text" maxlength="255"
+        placeholder="https://vk.com/my_community" required></label>
+ <div class="row"><button type="submit">Проверить и сохранить</button></div>
+</form>
+<form method="post" action="/studio/tune/vk/remove">
+ <label><input type="checkbox" name="confirm" value="yes" required>
+ Я подтверждаю отключение платформенного ключа VK.</label>
+ <button class="plain" type="submit">Отключить ключ</button>
+</form>
+"""
+    )
+    body = (
+        "<h1>Доступ к комментариям ВКонтакте</h1>"
+        "<p class='lead'>Только владелец ServGo может задать платформенный сервисный ключ. "
+        "Он используется исключительно для чтения публичных записей и комментариев; "
+        "публикации и ответы выполняются ключом конкретного сообщества.</p>"
+        + header + (f"<p class='notice'>{esc(note)}</p>" if note else "")
+        + "<div class='card'><p>Получите сервисный ключ в настройках собственного "
+        "<a href='https://dev.vk.com/' rel='noopener noreferrer'>приложения ВКонтакте</a>. "
+        "Не отправляйте ключ в чат или GitHub.</p>" + form + "</div>"
+        "<p>После настройки вернитесь в страницу сообщества VK нужной компании и нажмите "
+        "«Подключить чтение комментариев». Уже сохранённый ключ сообщества повторно вводить не нужно.</p>"
+    )
+    return page("Ключ VK API", "vk", body)
+
+
+@router.post("/studio/tune/vk", dependencies=[Depends(require_studio_csrf)])
+async def vk_service_save(request: Request, settings: Settings = Depends(get_settings),
+                          owner: str = Depends(require_tune_owner)):
+    fields = await _studio_form(request)
+    token = fields.get("token", "")
+    community_link = fields.get("community_link", "")
+    if settings.social_vk_service_token:
+        result = "blocked"
+    else:
+        try:
+            _, _, comments_checked = await verify_platform_service_token(token, community_link)
+            save_platform_service_token(settings, token)
+            result = "saved" if comments_checked else "wall_only"
+        except (ValueError, LookupError):
+            result = "invalid"
+    return RedirectResponse("/studio/tune/vk?result=" + result, status_code=303)
+
+
+@router.post("/studio/tune/vk/remove", dependencies=[Depends(require_studio_csrf)])
+async def vk_service_remove(request: Request, settings: Settings = Depends(get_settings),
+                            owner: str = Depends(require_tune_owner)):
+    fields = await _studio_form(request)
+    if fields.get("confirm") != "yes":
+        raise HTTPException(422, "Подтвердите отключение ключа VK")
+    try:
+        delete_platform_service_token(settings)
+        result = "removed"
+    except ValueError:
+        result = "blocked"
+    return RedirectResponse("/studio/tune/vk?result=" + result, status_code=303)

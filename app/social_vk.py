@@ -451,6 +451,16 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
             .limit(1).with_for_update(skip_locked=True))
         if pub is None:
             return 0
+        scheduled = pub.scheduled_at
+        if scheduled.tzinfo is None:
+            # SQLite may drop timezone information; publication times are UTC.
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+        if scheduled < now - timedelta(minutes=settings.content_vk_max_lateness_minutes):
+            # When publishing is enabled after an outage, old posts must not
+            # flood the community. Do not call wall.post, or silently retry.
+            pub.status = "failed_before_send"
+            db.commit()
+            return 1
         intent = db.scalar(select(Artifact).where(
             Artifact.product_id == pub.product_id, Artifact.kind == "vk_publish_intent",
             Artifact.title == "VK schedule " + str(pub.id)))

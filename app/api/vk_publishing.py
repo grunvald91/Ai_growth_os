@@ -20,6 +20,7 @@ from app.comments.contracts import ConnectInput
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Publication
+from app.vk_service import platform_service_token
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
@@ -53,6 +54,7 @@ def connection_error(key):
         "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
+        "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
     }.get(key, "")
 
 
@@ -104,9 +106,14 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
         reply_channel = CommentService(db, settings).channel(product_id, "vk")
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
-                             and reply_channel.account_id == channel.account_id)
+                             and reply_channel.account_id == channel.account_id
+                             and (not channel.is_community_token or platform_service_token(settings)))
         current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
                     if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
+        if channel.is_community_token and platform_service_token(settings) and not replies_ready:
+            current += (f'<form method="post" action="/studio/products/{product_id}/vk/connect-comments">'
+                        '<button class="btn secondary" type="submit">Подключить чтение комментариев</button>'
+                        '</form>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     enabled = bool(settings.content_vk_autopost_enabled)
@@ -227,7 +234,7 @@ async def vk_community_key(product_id: UUID, request: Request,
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=save_failed", status_code=303)
     # A community key can write text, but reading public posts needs a separate
     # operator-owned VK service key. Never claim comments work without probing.
-    if not settings.social_vk_service_token:
+    if not platform_service_token(settings):
         return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_post_only",
                                 status_code=303)
     try:
@@ -239,6 +246,26 @@ async def vk_community_key(product_id: UUID, request: Request,
                                 status_code=303)
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key",
                             status_code=303)
+
+
+@router.post("/studio/products/{product_id}/vk/connect-comments")
+async def vk_connect_comments(product_id: UUID, db: Session = Depends(get_db),
+                              settings=Depends(get_settings)):
+    """Reconnect an already verified community without asking for its key again."""
+    _owner_product(db, product_id)
+    channel = connected(db, product_id)
+    if channel is None or not channel.is_community_token or not platform_service_token(settings):
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=comments_connect_failed",
+                                status_code=303)
+    try:
+        key = VKStore(settings.products_root).load_token(channel.id)
+        await CommentService(db, settings).connect(
+            product_id, ConnectInput(platform="vk", account_id=channel.account_id, token=key))
+    except (ValueError, LookupError):
+        db.rollback()
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=comments_connect_failed",
+                                status_code=303)
+    return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key", status_code=303)
 
 
 @router.get(OAUTH_PATH)
