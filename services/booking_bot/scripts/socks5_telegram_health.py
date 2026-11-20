@@ -42,7 +42,7 @@ def curl_probe():
         result = subprocess.run(command, capture_output=True, text=True,
                                 timeout=11, check=False)
         parts = result.stdout.strip().split()
-        http = parts[0] if parts and re.fullmatch(r"\\d{3}", parts[0]) else "000"
+        http = parts[0] if parts and re.fullmatch(r"[0-9]{3}", parts[0]) else "000"
         # Do not let unexpected curl output leak into the persisted state.
         seconds = float(parts[1]) if len(parts) > 1 else time.monotonic() - start
         duration_ms = min(999999, max(0, int(seconds * 1000)))
