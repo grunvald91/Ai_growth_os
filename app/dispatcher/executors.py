@@ -436,7 +436,9 @@ async def describe_create_post(ctx: Context, params: PostParams) -> Confirmation
         title="Подготовить пост?",
         details=[f"Тема: {params.topic}.", f"Площадка: {CHANNEL_LABELS[params.channel]}.",
                  *_context_details(params),
-                 *([f"Изображение: {params.image_ratio}, одна платная генерация."]
+                 *([f"Изображение: {params.image_ratio}.",
+                    "Один платный вызов генератора и один вызов визуального критика. "
+                    "Серьёзный дефект блокирует изображение; мелкие замечания не задерживают материал."]
                    if params.image_model != "none" else []),
                  "Готовые материалы придут на проверку; автоматической публикации нет."],
         params=params.model_dump(exclude_none=True), confirm_label="Создать",
@@ -449,7 +451,9 @@ async def create_post(ctx: Context, params: PostParams) -> Outcome:
     try:
         if params.image_model != "none":
             from app.content.creative_images import resolve_model
+            from app.content.vk_image_critic import critic_profile
             resolve_model(ctx.settings, params.image_model)
+            critic_profile(ctx.settings)
         task = queue_content(ctx.db, ctx.product.id, params.topic, format="post", channel=params.channel,
                              audience=params.audience, editorial_brief=params.editorial_brief,
                              image_model=params.image_model, image_ratio=params.image_ratio)
