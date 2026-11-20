@@ -45,3 +45,13 @@ Sources:
 - https://habr.com/ru/docs/companies/design/ (editorial quality principles; not VK-specific ratios)
 - https://habr.com/ru/articles/1070282/ (cross-posting transport pitfalls; WebP and PNG size inflation)
 - https://tapbox.ru/blog/razmery-kartinok-dlya-socsetey-i-max (comparison of organic-post and advertising dimensions)
+
+## Mandatory visual critic (November 2026)
+- **Always on for an opt-in VK post image**, independent of the global text critic flag. The critic sees the actual final image bytes together with the finalized post title and body through a multimodal vision endpoint. It does not review only the image prompt.
+- One generated image -> exactly one vision analysis request. Approved user-facing budget: one image generation call plus one image critic call. Critic model: existing ClaudeHub `gemini-flash-3.8` vision route if `XAI_API_KEY` is set; otherwise `gpt-4.1-mini` via OpenAI if `OPENAI_API_KEY` is set. No automatic retry or provider fallback.
+- Issues are classified `critical` or `minor`, with confidence `high` or `uncertain`. **Only a high-confidence critical issue in a non-style category blocks.** Minor artifacts, illustrative simplification, style preferences and unproven claims about defects do not trigger a paid redraw or publication blocker.
+- Truly serious problems: subject entirely unrelated to the key argument, a directly contradicted main claim, visibly invented brands/results, clearly dangerous content, severe geometric/anatomical faults, essential information unreadable or cut off.
+- If review fails, times out or returns invalid JSON, the image and post are preserved but `image_state=review_unavailable`; no automatic publication or repeated paid attempt. `vk_image_critique_intent` is committed *before* calling the provider. `vk_image_critique` is a stored audit record with policy, model, title/body fingerprint, image SHA256, detailed issues, and verdict.
+- An image may be marked ready only by a matching approved critic record. `verified_vk_image_approval` validates the audit and content fingerprints. If a user or AI revises the text, the image and critic endorsement are invalidated; it must not be published with a stale picture.
+- Owner views show the picture together with critique status and concrete severe findings; a blocked image is still reviewable and downloadable. No automated regeneration of rejected pictures is included in this phase.
+- Publication remains blocked for posts requesting an image until the separate VK photo-upload authorization and API path is verified; this PR does **not** assert live VK image publishing.
