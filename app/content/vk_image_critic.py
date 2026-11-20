@@ -150,6 +150,34 @@ class VKImageVisionReviewer:
         return result
 
 
+def verified_vk_image_approval(db, post: Artifact, image: Artifact) -> bool:
+    """Never trust a raw 'ready' flag without a matching persisted critic verdict."""
+    try:
+        data = json.loads(post.content)
+        if (data.get("image_state") != "ready" or
+                data.get("image_review_state") != "approved" or
+                str(image.id) != str(data.get("image_artifact_id")) or
+                data.get("image_sha256") != json.loads(image.content).get("sha256")):
+            return False
+        key = UUID(str(data["image_review_artifact_id"]))
+        review = db.scalar(select(Artifact).where(
+            Artifact.id == key,
+            Artifact.product_id == post.product_id,
+            Artifact.task_id == post.task_id,
+            Artifact.kind == "vk_image_critique",
+        ))
+        if review is None:
+            return False
+        verdict = json.loads(review.content)
+        return (verdict.get("decision") == "approved" and
+                verdict.get("policy") == REVIEW_POLICY and
+                verdict.get("image_sha256") == data["image_sha256"] and
+                verdict.get("post_sha256") == _post_digest(data) and
+                not VKImageReview.model_validate(verdict["review"]).blocked)
+    except (KeyError, ValueError, TypeError):
+        return False
+
+
 async def review_vk_post_image(db, settings, *, product, task, post,
                                reviewer: VKImageVisionReviewer | None = None):
     """One saved verdict per post/image pair, no repeated billed call.
