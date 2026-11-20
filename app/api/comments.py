@@ -134,9 +134,9 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
                 if key == "vk":
                     controls = (f'<div class="c-actions"><a class="btn primary" '
                                 f'href="/studio/products/{product_id}/vk">Подключить ВКонтакте</a></div>'
-                                '<p class="c-meta">Используйте обычную ссылку сообщества и вход через VK ID: '
-                                'искать ID и вручную копировать токен не нужно. '
-                                'ServGo проверит доступ к чтению, а публикация проверяется отдельно.</p>')
+                                '<p class="c-meta">Используйте ссылку и ключ сообщества: '
+                                'числовой ID не нужен; потребуется ключ сообщества из его настроек. '
+                                'ServGo проверит права для текстовой публикации; чтение комментариев проверяется отдельно.</p>')
                 if key == "instagram":
                     if instagram_oauth_configured(svc.settings):
                         controls = (f'<div class="c-actions"><a class="btn primary" '
@@ -156,7 +156,7 @@ def page(product_id: UUID, tab: str = "inbox", platform: str = "all", status: st
             guide_title = "Как подключить" if key == "vk" else "Как получить ID и токен"
             cards.append(f'<section class="panel c-platform"><div class="c-card-head"><h2>{esc(item["name"])}</h2><span class="chip {"blue" if channel else ""}">{esc(badge)}</span></div><p class="c-meta">{"Доступ напрямую" if key in {"vk", "vk_video"} else "Через зарубежный сервер" if item["live"] else "Ручной режим"}</p><details class="c-guide"><summary>{guide_title} · {len(item["steps"])} шага</summary><ol>{steps}</ol>{docs}</details><p>{esc(item["limits"])}</p>{poll_status}{controls}</section>')
         content = ('<section class="panel c-platform-intro"><h2>Подключите аккаунты бизнеса</h2>'
-            '<p>ВКонтакте подключается по обычной ссылке на сообщество через VK ID, без поиска числового ID. Instagram можно подключить через Meta.</p>'
+            '<p>ВКонтакте подключается по обычной ссылке и ключу сообщества, без поиска числового ID. Instagram можно подключить через Meta.</p>'
             '<p>Для некоторых других площадок пока нужны ID аккаунта и токен доступа. Токен — не пароль, а ключ для работы через API.</p>'
             '<p>Для Google и Meta потребуется приложение в кабинете разработчика. Если его ещё нет, подготовку доступа выполняет владелец аккаунта или разработчик интеграции. Для ручной работы подключение не требуется: откройте «Проверка ответов».</p></section>'
             '<div class="c-platform-grid">' + ''.join(cards) + '</div>')
