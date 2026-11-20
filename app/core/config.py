@@ -119,6 +119,8 @@ class Settings(BaseSettings):
     content_telegram_autopost_enabled: bool = False
     # VK ID web app ID, canonical OAuth callback and explicit publish kill switch.
     social_vk_client_id: str | None = None
+    # Platform-owned read-only service key. Never expose it to the browser or tenants.
+    social_vk_service_token: str | None = None
     social_vk_redirect_base: str = "https://servgo.ru"
     content_vk_autopost_enabled: bool = False
     content_telegram_max_lateness_minutes: int = 30

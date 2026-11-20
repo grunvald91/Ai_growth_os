@@ -90,8 +90,18 @@ class CommentService:
         self.gateway = gateway or CommentGateway(
             proxy_url=settings.comment_platform_proxy_url,
             instagram_graph_version=settings.comment_meta_graph_version,
+            vk_read_token=settings.social_vk_service_token,
         )
         self.secrets = CommentSecrets(settings.products_root)
+
+    async def channel_token(self, channel, *, for_read=False):
+        """VK reads may use the operator's service key; replies use the group's write key."""
+        if channel.platform == "vk":
+            if for_read and self.settings.social_vk_service_token:
+                return self.settings.social_vk_service_token
+            from app.social_vk import active_token
+            return await active_token(self.settings, channel)
+        return self.secrets.load_token(channel.id)
 
     def product(self, product_id, *, lock=False):
         from app.models.domain import Product
@@ -284,7 +294,7 @@ class CommentService:
                 pass
 
         try:
-            token = self.secrets.load_token(channel.id)
+            token = await self.channel_token(channel, for_read=True)
             rows, cursor = await self.gateway.fetch(channel, token)
         except Exception as exc:
             if not background:
@@ -634,7 +644,7 @@ class CommentService:
             tool_call_id=call.id, channel=comment.platform, status="sending")
         self.db.add(publication)
         comment.status = "sending"
-        token = self.secrets.load_token(channel.id)
+        token = await self.channel_token(channel)
         # Durable claim before HTTP: retries/restarts cannot send twice.
         self.db.commit()
         try:

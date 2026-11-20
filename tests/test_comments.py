@@ -416,10 +416,14 @@ async def test_threads_wrong_root_owner_never_creates_container():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("platform", ["vk", "vk_video"])
 async def test_vk_connections_require_manager(platform):
-    client, gateway, _, _ = mock_gateway([("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 0}]}})])
+    client, gateway, _, pending = mock_gateway([
+        ("groups.getById", {"response": {"groups": [{"id": 42, "is_admin": 0}]}}),
+        ("groups.getTokenPermissions", {"error": {"error_code": 27, "error_msg": "Not a group token"}}),
+    ])
     async with client:
-        with pytest.raises(PlatformError, match="пользовательский токен"):
+        with pytest.raises(PlatformError, match="Нужен ключ"):
             await gateway.check(platform, "42", "secret")
+    assert not pending
 
 
 @pytest.mark.asyncio
@@ -490,7 +494,10 @@ def test_new_platforms_have_separate_live_cards_and_accept_connections(ctx):
     html = client_for(ctx).get(f"/studio/products/{product.id}/comments?tab=platforms").text
     for platform in ("threads", "vk", "vk_video"):
         assert ConnectInput(platform=platform, account_id="42", token="secret").platform == platform
+    for platform in ("threads", "vk_video"):
         assert f'data-platform="{platform}"' in html
+    assert 'data-platform="vk"' not in html
+    assert f'href="/studio/products/{product.id}/vk"' in html
     assert "threads_manage_replies" in html and "VK Видео" in html and "video.createComment" in html
 
 
@@ -559,8 +566,9 @@ def test_live_connection_guides_have_action_links_and_manual_token_explanation(c
     from app.comments.platforms import PLATFORMS
     _, product, _, _, _ = ctx
     html = client_for(ctx).get(f'/studio/products/{product.id}/comments?tab=platforms').text
-    assert 'Для Instagram используйте кнопку «Подключить через Meta»' in html
-    assert 'в прежнем Instagram Login пока действует ручная проверка токена' in html
+    assert 'Instagram можно подключить через Meta' in html
+    assert 'ВКонтакте подключается по обычной ссылке' in html
+    assert f'href="/studio/products/{product.id}/vk"' in html
     assert 'https://t.me/BotFather' in html
     assert 'https://developers.google.com/oauthplayground/' in html
     for platform in PLATFORMS.values():

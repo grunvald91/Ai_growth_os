@@ -10,10 +10,12 @@ class PlatformError(ValueError):
 
 
 class CommentGateway:
-    def __init__(self, client=None, *, proxy_url=None, instagram_graph_version="v27.0"):
+    def __init__(self, client=None, *, proxy_url=None, instagram_graph_version="v27.0",
+                 vk_read_token=None):
         self.client = client
         self.proxy_url = proxy_url
         self.instagram_graph_version = instagram_graph_version
+        self.vk_read_token = vk_read_token
 
     def instagram_base(self, channel):
         auth = (channel.cursor or {}).get("_auth") or {}
