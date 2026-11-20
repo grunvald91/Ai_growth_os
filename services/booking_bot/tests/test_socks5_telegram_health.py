@@ -74,6 +74,21 @@ class TestSockHealth(unittest.TestCase):
         self.assertEqual(result["consecutive_failures"], 1)
         self.assertEqual(result["state"], "suspect")
 
+    def test_stateless_actions_probe_never_writes_status_file(self):
+        with redirect_stdout(self.stdout):
+            rc = health.stateless_check(
+                probe=lambda: sample(), sleep=lambda x: None)
+        self.assertEqual(rc, 0)
+        self.assertFalse(self.path.exists())
+
+    def test_stateless_probe_returns_nonzero_for_unavailable_telegram(self):
+        with redirect_stdout(self.stdout):
+            rc = health.stateless_check(
+                probe=lambda: sample(False, "000", 28), sleep=lambda x: None,
+                diagnose_failure=lambda last: {"reason": "telegram_socks_timeout"})
+        self.assertEqual(rc, 1)
+        self.assertIn("SOCKS5_TELEGRAM_STATELESS", self.stdout.getvalue())
+
     def test_curl_must_use_remote_dns_verified_https_and_no_token(self):
         mock_result = subprocess.CompletedProcess(args=[], returncode=0,
                                                   stdout="302 0.311", stderr="")
