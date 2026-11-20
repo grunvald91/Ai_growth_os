@@ -1,0 +1,50 @@
+name: VK post image end-to-end
+
+on:
+  pull_request:
+    paths:
+      - 'app/content/quick_post.py'
+      - 'app/content/service.py'
+      - 'app/content/creative_images.py'
+      - 'app/content/vk_post_image.py'
+      - 'app/content/vk_image_critic.py'
+      - 'app/api/content_studio.py'
+      - 'app/api/creative_image_gallery.py'
+      - 'app/dispatcher/**'
+      - 'tests/test_vk_post_image.py'
+      - 'tests/test_vk_image_critic.py'
+      - 'tests/test_vk_post_image_e2e.py'
+      - '.github/workflows/vk-post-image-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vk-post-image-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-e2e:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: End-to-end post, image and critic through Studio
+        env:
+          XAI_API_KEY: ''
+          OPENAI_API_KEY: ''
+        run: >-
+          python -m pytest -q
+          tests/test_vk_post_image_e2e.py
+          tests/test_vk_image_critic.py
+          tests/test_vk_post_image.py
+          tests/test_quick_post.py
+      - name: Verify image and critique Python syntax
+        run: python -m compileall -q app/content/vk_post_image.py app/content/vk_image_critic.py
