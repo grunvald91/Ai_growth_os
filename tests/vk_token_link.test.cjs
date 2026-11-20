@@ -56,6 +56,7 @@ test("specific community names and numeric IDs lead straight to token settings",
     ["https://vk.com/my_community", "https://vk.ru/my_community?act=tokens"],
     ["vk.ru/public123456", "https://vk.ru/public123456?act=tokens"],
     ["123456", "https://vk.ru/club123456?act=tokens"],
+    ["https://vk.ru/club241947800", "https://vk.ru/club241947800?act=tokens"],
     ["https://m.vk.com/club9", "https://vk.ru/club9?act=tokens"],
   ]) {
     input.value = value;
