@@ -26,6 +26,7 @@ async def test_visual_only_repair_never_calls_story_image_generation_or_tts_and_
         _,state,approval,payload=records(db,owner_task(db,product,repair_id))
         assert payload.visual_repair_from==source_id and payload.inherited_calls==13
         assert json.loads(state.content)['calls']==13 and approval.status=='pending'
+        assert json.loads(state.content)['attempts_started']==13
         assert queue_visual_repair(db,settings,product,source_id).id==repair_id
     with client() as browser:
         page=browser.get(f'/studio/products/{product}/whiteboard/{repair_id}')
@@ -97,3 +98,23 @@ async def test_repair_endpoint_is_owner_scoped_and_creates_only_one_pending_appr
         pending=next(t for t in tasks if t.id!=source)
         assert pending.status==TaskStatus.WAITING_APPROVAL
         assert records(db,pending)[2].status=='pending'
+
+
+@pytest.mark.asyncio
+async def test_visual_repair_cannot_reuse_refunded_prior_attempts_as_paid_budget(environment):
+    factory,settings,product,_=environment
+    source=new_job(environment,maximum=25)
+    approve(environment,source)
+    await run_whiteboard_once(factory,settings,factory=fake_factory,readiness=ready)
+    with factory() as db:
+        task=owner_task(db,product,source)
+        _,state,_,_=records(db,task)
+        value=json.loads(state.content)
+        assert value['calls']==13
+        # Simulate extra begun provider calls that received HTTP 502,
+        # then were refunded only by the historical logical ledger.
+        value['attempts_started']=23
+        state.content=json.dumps(value)
+        db.commit()
+        with pytest.raises(ReadinessError,match='repair_budget'):
+            queue_visual_repair(db,settings,product,source)
