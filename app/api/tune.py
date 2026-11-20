@@ -376,8 +376,10 @@ def vk_service_settings(result: str = "", owner: str = Depends(require_tune_owne
  <p>Вставьте сервисный ключ приложения ВКонтакте и ссылку на открытое сообщество с публикациями.
  Система проверит чтение стены и комментариев, затем сохранит ключ зашифрованным. Значение ключа после сохранения не показывается.</p>
  <label>Сервисный ключ приложения VK
+ <a href="https://dev.vk.com/" target="_blank" rel="noopener noreferrer">Открыть приложение VK</a>
  <input name="token" type="password" autocomplete="off" maxlength="8000" required></label>
  <label>Сообщество для проверки
+ <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a>
  <input name="community_link" type="text" maxlength="255"
         placeholder="https://vk.com/my_community" required></label>
  <div class="row"><button type="submit">Проверить и сохранить</button></div>
@@ -404,8 +406,10 @@ def vk_service_settings(result: str = "", owner: str = Depends(require_tune_owne
         if app_source_locked else """
 <form method="post" action="/studio/tune/vk/app">
  <label>ID приложения VK для авторизации сообщества
+ <a href="https://dev.vk.com/" target="_blank" rel="noopener noreferrer">Открыть кабинет VK для разработчиков</a>
  <input type="text" name="app_id" inputmode="numeric" maxlength="20" autocomplete="off" required></label>
  <label>Защищённый ключ приложения (client_secret)
+ <a href="https://dev.vk.com/" target="_blank" rel="noopener noreferrer">Найти ключ в настройках приложения</a>
  <input type="password" name="app_secret" maxlength="500" autocomplete="off" required></label>
  <div class="row"><button type="submit">Сохранить приложение</button></div>
 </form>

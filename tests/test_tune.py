@@ -156,6 +156,9 @@ def test_operator_can_set_encrypted_vk_read_key_but_company_user_cannot(tmp_path
             page = c.get("/studio/tune/vk", auth=("owner", "owner-pass"))
             assert page.status_code == 200
             assert "Сервисный ключ не настроен" in page.text
+            assert 'href="https://dev.vk.com/"' in page.text
+            assert 'href="https://vk.com/groups"' in page.text
+            assert 'target="_blank" rel="noopener noreferrer"' in page.text
             saved = c.post("/studio/tune/vk", auth=("owner", "owner-pass"),
                            headers={"Origin": "https://growth.servgo.ru"},
                            data={"token": "read-service-key-not-for-ui",
@@ -208,6 +211,8 @@ def test_vk_group_oauth_app_is_operator_only_and_secret_is_never_in_html(tmp_pat
             page = client.get("/studio/tune/vk", auth=("owner", "owner-pass"))
             assert page.status_code == 200
             assert "secret-only-studio" not in page.text
+            assert page.text.count('href="https://dev.vk.com/"') >= 3
+            assert "Найти ключ в настройках приложения" in page.text
             mark_group_app_verified(settings)
             assert group_app_verified(settings)
             rotated = client.post("/studio/tune/vk/app", auth=("owner", "owner-pass"),

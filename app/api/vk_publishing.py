@@ -57,11 +57,8 @@ def _can_begin_community_oauth(settings, request: Request) -> bool:
     if group_app_verified(settings):
         return True
     # Until the first real success, only an operator may try legacy OAuth.
-    login = getattr(request.state, "studio_login", None)
-    allowed = {name.strip().casefold() for name in
-               (settings.studio_tune_usernames or "").split(",") if name.strip()}
-    return (bool(login) and login.casefold() in allowed
-            and getattr(request.state, "studio_product_ids", None) is None)
+    # Use exactly the same allowlist and organization scope as /studio/tune.
+    return _is_tune_owner(settings, request)
 
 
 def _is_tune_owner(settings, request: Request) -> bool:
@@ -168,7 +165,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
     settings_link = _vk_owner_settings_link(settings, request, product_id)
     oauth_first = (f"""
  <form method="post" action="/studio/products/{product_id}/vk/group-connect" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте</span>
+  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
    <input type="text" name="community_link" maxlength="255" autocomplete="url"
      placeholder="https://vk.com/my_community" required></label>
   <button class="btn primary" type="submit">{"Проверить вход ВКонтакте" if pilot_mode else "Подключить ВКонтакте"}</button>
@@ -192,10 +189,10 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  {oauth_first}
  <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Ссылка на сообщество</span>
+  <label class="sg-field"><span>Ссылка на сообщество <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
    <input name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
-  <label class="sg-field"><span>Ключ сообщества</span>
+  <label class="sg-field"><span>Ключ сообщества <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Перейти к сообществу</a></span>
    <input name="access_token" type="password" maxlength="8000" autocomplete="off"
       placeholder="Ключ из настроек сообщества" required></label>
   <button class="btn primary" type="submit">Проверить и подключить публикации</button>
