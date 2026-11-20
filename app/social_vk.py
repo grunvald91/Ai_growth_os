@@ -113,12 +113,17 @@ async def verify_community_key(token, account_id):
     """Read-only check that this is a community key with access to this group."""
     adapter = VKAdapter(CommentGateway(), "vk")
     try:
-        await adapter.call("groups.getTokenPermissions", token)
+        permissions = await adapter.call("groups.getTokenPermissions", token)
+        # A successful API call alone is not sufficient: wall permission must be granted.
+        mask = int(permissions.get("mask") or 0) if isinstance(permissions, dict) else 0
+        if not mask & 8192:
+            raise ValueError("Ключ VK не имеет права доступа к стене")
+        # Ensures the key is bound to *this* community, not merely any VK group.
         await adapter.call("groups.getCallbackSettings", token, group_id=account_id)
-    except ValueError:
+    except (ValueError, TypeError):
         raise ValueError(
-            "Ключ не даёт доступ к настройкам этого сообщества. "
-            "Создайте ключ в Управление → Работа с API с правами на управление и стену."
+            "Нужен ключ указанного сообщества с правами на стену и управление. "
+            "Создайте его в Управление → Работа с API."
         ) from None
 
 
@@ -366,8 +371,9 @@ def schedule(db, product_id, post_id, when):
     channel = connected(db, product_id)
     if channel is None:
         raise ValueError("Подключите сообщество VK")
-    if channel.is_community_token:
-        raise ValueError("Ключ сообщества VK не подходит для wall.post. Подключите VK ID с доступом к публикациям")
+    # Community keys can publish text to their own wall in live VK API v5.199,
+    # even though the published method schema lists 'user' tokens only.
+    # Preserve explicit owner approval and mark actual capability only after wall.post.
     post = db.scalar(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.id == post_id,
         Artifact.kind == "channel_text",
@@ -454,7 +460,6 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
         try:
             data = json.loads(intent.content) if intent else {}
             if (intent is None or intent.status != ArtifactStatus.APPROVED
-                    or (channel is not None and channel.is_community_token)
                     or post is None or post.status != ArtifactStatus.APPROVED
                     or channel is None or str(channel.id) != data.get("channel_id")
                     or channel.account_id != data.get("group_id")
