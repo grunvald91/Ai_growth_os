@@ -2529,12 +2529,38 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         req_data = parse_json(request)
         if (req_data.get("mode") == "post" and req_data.get("channel") == "vk"
                 and req_data.get("image_model", "none") != "none"):
-            images, invalid_frames = verified_visible_images(
-                db, settings.products_root, product.id, task.id)
-            body += gallery_html(product.id, task.id, images, invalid_frames=invalid_frames)
-            body += ('<p class="sg-footnote">Иллюстрация подготовлена для ВКонтакте. '
-                     'Загрузка фотографии на стену через VK API требует отдельного '
-                     'подключения; текстовый пост не будет отправлен вместо картинки.</p>')
+            newest_post = db.scalar(select(Artifact).where(
+                Artifact.product_id == product.id, Artifact.task_id == task.id,
+                Artifact.kind == "channel_text",
+            ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+            media = parse_json(newest_post) if newest_post else {}
+            state = media.get("image_state")
+            image_id = media.get("image_artifact_id")
+            if state == "ready" and image_id:
+                try:
+                    exact = db.scalar(select(Artifact).where(
+                        Artifact.id == UUID(str(image_id)),
+                        Artifact.product_id == product.id,
+                        Artifact.task_id == task.id,
+                        Artifact.kind == "generated_image",
+                    ))
+                    if exact is None or parse_json(exact).get("sha256") != media.get("image_sha256"):
+                        raise LookupError("Image is not bound to the current post")
+                    verified_gallery_image(db, settings.products_root, product.id, task.id, exact)
+                except (LookupError, ValueError, TypeError, OSError):
+                    body += ('<p class="sg-warning" role="alert">'
+                             'Иллюстрация повреждена или недоступна.</p>')
+                else:
+                    body += gallery_html(product.id, task.id, [exact])
+            elif state == "stale":
+                body += ('<p class="sg-warning" role="status">'
+                         'Текст изменился — прежняя иллюстрация требует обновления.</p>')
+            elif state in {"failed", "pending"}:
+                body += ('<p class="sg-warning" role="status">'
+                         'Генерация иллюстрации не завершена; текст сохранён.</p>')
+            body += ('<p class="sg-footnote">Загрузка фотографии на стену '
+                     'ВКонтакте пока не подключена. Пост с изображением '
+                     'не будет отправлен как текстовый.</p>')
     if task.assigned_agent == "content_creative":
         if task.status == TaskStatus.FAILED:
             diagnostic = db.scalar(select(Artifact).where(
