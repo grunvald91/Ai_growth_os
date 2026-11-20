@@ -91,8 +91,10 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
             if not attempts:
                 raise ValueError("Image file without a recorded paid attempt")
             picture = path.read_bytes()
-            if export_vk_png(picture) != picture:
-                raise ValueError("Unverified VK image file")
+            with Image.open(io.BytesIO(picture)) as recovered:
+                recovered.load()
+                if recovered.format != "PNG" or recovered.size != VK_EXPORT_SIZE:
+                    raise ValueError("Unverified VK image file")
         else:
             if attempts:
                 raise ValueError("Paid image result unknown: do not automatically repeat")
@@ -127,6 +129,15 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
                 "sha256": digest, "prompt": prompt,
             }, ensure_ascii=False),
         )
+        db.commit()
+        for attempt in db.scalars(select(Artifact).where(
+            Artifact.product_id == product.id, Artifact.task_id == task.id,
+            Artifact.kind == "vk_post_image_intent",
+        )):
+            intent_data = json.loads(attempt.content)
+            intent_data["state"] = "completed"
+            intent_data["sha256"] = json.loads(row.content)["sha256"]
+            attempt.content = json.dumps(intent_data)
         db.commit()
     # The image and source post remain one immutable publication candidate.
     meta = json.loads(post.content)
