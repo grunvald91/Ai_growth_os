@@ -90,12 +90,15 @@ class CommentService:
         self.gateway = gateway or CommentGateway(
             proxy_url=settings.comment_platform_proxy_url,
             instagram_graph_version=settings.comment_meta_graph_version,
+            vk_read_token=settings.social_vk_service_token,
         )
         self.secrets = CommentSecrets(settings.products_root)
 
-    async def channel_token(self, channel):
-        """Refresh VK ID credentials before reading/sending, not after a send claim."""
+    async def channel_token(self, channel, *, for_read=False):
+        """VK reads may use the operator's service key; replies use the group's write key."""
         if channel.platform == "vk":
+            if for_read and self.settings.social_vk_service_token:
+                return self.settings.social_vk_service_token
             from app.social_vk import active_token
             return await active_token(self.settings, channel)
         return self.secrets.load_token(channel.id)
@@ -291,7 +294,7 @@ class CommentService:
                 pass
 
         try:
-            token = await self.channel_token(channel)
+            token = await self.channel_token(channel, for_read=True)
             rows, cursor = await self.gateway.fetch(channel, token)
         except Exception as exc:
             if not background:
