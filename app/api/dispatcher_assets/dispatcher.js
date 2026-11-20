@@ -1061,7 +1061,7 @@
   function creationHints() {
     if (!root.classList.contains('sg-create-dispatch')) return null;
     var chosen=root.getAttribute('data-create-format');
-    var selected=/^(post|story|short_video|static_image|package)$/.test(chosen||'') ? chosen : null;
+    var selected=/^(post|story|short_video|static_image|whiteboard|package)$/.test(chosen||'') ? chosen : null;
     var platform=document.getElementById('sg-create-platform');
     var count=document.getElementById('sg-create-count');
     var audience=document.getElementById('sg-create-audience');
@@ -1073,10 +1073,10 @@
     if (!selected && !a && !b) return null;
     return {
       format:selected,
-      platform:selected && selected!=='package' && platform ? platform.value : null,
+      platform:selected && selected!=='package' && selected!=='whiteboard' && platform ? platform.value : null,
       frame_count:selected==='story' && count && count.value ? Number(count.value) : null,
-      audience:a || null,
-      editorial_brief:b || null,
+      audience:selected==='whiteboard' ? null : a || null,
+      editorial_brief:selected==='whiteboard' ? null : b || null,
       image_model:selected==='story'||selected==='static_image'
         ? (imageModel && imageModel.value || 'auto') : null,
       aspect_ratio:selected==='story' ? '9:16'
