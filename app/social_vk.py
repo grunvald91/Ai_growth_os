@@ -137,7 +137,7 @@ async def verify_community_key(token, account_id):
     except (ValueError, TypeError):
         raise ValueError(
             "Нужен ключ указанного сообщества с правами на стену и управление. "
-            "Создайте его в Управление → Работа с API."
+            "Создайте его в Управление → Дополнительно → Работа с API → Ключи доступа."
         ) from None
 
 
