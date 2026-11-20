@@ -436,8 +436,11 @@ async def describe_create_post(ctx: Context, params: PostParams) -> Confirmation
         title="Подготовить пост?",
         details=[f"Тема: {params.topic}.", f"Площадка: {CHANNEL_LABELS[params.channel]}.",
                  *_context_details(params),
-                 "Готовый текст придёт на проверку; автоматической публикации нет."],
+                 *([f"Изображение: {params.image_ratio}, одна платная генерация."]
+                   if params.image_model != "none" else []),
+                 "Готовые материалы придут на проверку; автоматической публикации нет."],
         params=params.model_dump(exclude_none=True), confirm_label="Создать",
+        paid=params.image_model != "none",
     )
 
 
@@ -445,7 +448,8 @@ async def create_post(ctx: Context, params: PostParams) -> Outcome:
     from app.content.service import queue_content
     try:
         task = queue_content(ctx.db, ctx.product.id, params.topic, format="post", channel=params.channel,
-                             audience=params.audience, editorial_brief=params.editorial_brief)
+                             audience=params.audience, editorial_brief=params.editorial_brief,
+                             image_model=params.image_model, image_ratio=params.image_ratio)
     except (ValueError, LookupError):
         ctx.db.rollback()
         return Outcome("Не получилось поставить пост в работу: проверьте тему и площадку.",
