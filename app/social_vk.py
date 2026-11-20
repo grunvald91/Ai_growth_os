@@ -66,7 +66,7 @@ def community_reference(value):
     if not isinstance(value, str) or not value.strip() or len(value) > 255:
         raise ValueError("Вставьте ссылку на сообщество VK")
     raw = value.strip()
-    if raw.startswith(("vk.com/", "www.vk.com/", "m.vk.com/", "vk.ru/", "www.vk.ru/", "m.vk.ru/")):
+    if raw.casefold().startswith(("vk.com/", "www.vk.com/", "m.vk.com/", "vk.ru/", "www.vk.ru/", "m.vk.ru/")):
         raw = "https://" + raw
     if "://" in raw:
         parts = urlsplit(raw)
@@ -137,7 +137,7 @@ async def verify_community_key(token, account_id):
     except (ValueError, TypeError):
         raise ValueError(
             "Нужен ключ указанного сообщества с правами на стену и управление. "
-            "Создайте его в Управление → Работа с API."
+            "Создайте его в Управление → Дополнительно → Работа с API → Ключи доступа."
         ) from None
 
 

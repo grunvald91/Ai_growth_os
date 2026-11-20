@@ -220,6 +220,9 @@ def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_p
     ("https://m.vk.com/club123456?from=share", "123456"),
     ("https://vk.ru/my_company", "my_company"),
     ("https://vk.ru/club241947800", "241947800"),
+    ("VK.RU/club241947800", "241947800"),
+    ("WWW.VK.COM/public241947800", "241947800"),
+    ("HTTPS://VK.RU/club241947800", "241947800"),
     ("vk.com/my_company", "my_company"),
 ])
 def test_vk_community_reference_accepts_links(value, expected):
@@ -312,7 +315,7 @@ async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
             raise ValueError("VK rejected")
         return {}
     monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
-    with pytest.raises(ValueError, match="Нужен ключ"):
+    with pytest.raises(ValueError, match="Управление → Дополнительно → Работа с API → Ключи доступа"):
         await verify_community_key("test-group-key", "123456")
 
 
@@ -820,6 +823,8 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     assert '<a href="/studio/tune/vk"' in owner_html
     assert 'href="https://vk.com/groups"' not in owner_html
     assert 'id="sg-vk-group-link"' in owner_html
+    assert "vk.ru/club241947800" not in owner_html
+    assert "vk.ru/club123456" in owner_html
     assert 'id="sg-vk-community-link"' in owner_html
     assert 'id="sg-vk-token-link"' in owner_html
     assert 'encodeURIComponent(name) + "?act=tokens"' in owner_html
@@ -841,6 +846,60 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     customer_html = customer_response.body.decode()
     assert "/studio/tune/vk" not in customer_html
     assert "Используйте ключ сообщества ниже" in customer_html
+
+
+
+
+def test_vk_page_same_origin_form_passes_csrf_without_relaxing_security(db, tmp_path):
+    """Regression for a browser posting back to the exact VK page.
+
+    The VK GET must send a same-origin policy; CSRF must still reject a null
+    or cross-site Origin even if the page carries the corrected policy.
+    """
+    from types import SimpleNamespace
+    from starlette.requests import Request
+    from app.api.content_studio_auth import StudioOriginError, require_studio_csrf
+    from app.api.vk_publishing import vk_page
+
+    product, _ = business_and_post(db, slug="vk-csrf-page")
+    cfg = Settings(
+        products_root=tmp_path, app_env="production",
+        studio_public_origin="https://growth.servgo.ru",
+        studio_servgo_gateway_enabled=True, _env_file=None,
+    )
+    browser = SimpleNamespace(state=SimpleNamespace(
+        studio_login="customer", studio_product_ids=[str(product.id)]))
+    response = vk_page(product.id, browser, db=db, settings=cfg)
+    assert response.headers["Referrer-Policy"] == "same-origin"
+
+    def post_request(*, origin=None, referer=None, fetch_site="same-origin"):
+        headers = [(b"host", b"servgo.ru"),
+                   (b"x-forwarded-proto", b"https"),
+                   (b"sec-fetch-site", fetch_site.encode("ascii"))]
+        if origin is not None:
+            headers.append((b"origin", origin.encode("ascii")))
+        if referer is not None:
+            headers.append((b"referer", referer.encode("ascii")))
+        return Request({
+            "type": "http", "method": "POST", "scheme": "http",
+            "server": ("servgo.ru", 443),
+            "path": f"/studio/products/{product.id}/vk/community-key",
+            "headers": headers, "query_string": b"",
+        })
+
+    assert require_studio_csrf(
+        post_request(referer=f"https://servgo.ru/studio/products/{product.id}/vk"),
+        cfg,
+    ) is None
+    assert require_studio_csrf(post_request(origin="https://servgo.ru"), cfg) is None
+    for rejected in (
+        post_request(origin="null"),
+        post_request(origin="https://evil.example", fetch_site="cross-site"),
+        post_request(),
+    ):
+        with pytest.raises(StudioOriginError) as error:
+            require_studio_csrf(rejected, cfg)
+        assert error.value.status_code == 403
 
 
 def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
