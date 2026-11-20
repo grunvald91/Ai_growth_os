@@ -629,8 +629,9 @@ async def test_vk_one_click_exchange_verifies_exact_group_and_encrypts_key(monke
     row = await finish_community_oauth(db, settings, payload, "confirmed-code-12345")
     ch = connected(db, company.id)
     from app.vk_service import group_app_verified
-    assert group_app_verified(settings)
+    assert not group_app_verified(settings)  # Consent alone does not prove wall.post.
     assert ch.id == row.id and ch.is_community_token
+    assert ch.auth_type == "community_oauth"
     assert ch.expires_at is not None
     assert VKStore(tmp_path).load_token(row.id) == "new-group-secret-key"
     assert b"new-group-secret-key" not in VKStore(tmp_path).path(row.id).read_bytes()
@@ -677,3 +678,48 @@ def test_vk_group_pilot_gate_before_first_real_success(tmp_path):
     assert not _can_begin_community_oauth(settings, customer)
     mark_group_app_verified(settings)
     assert _can_begin_community_oauth(settings, customer)
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_only_becomes_public_after_real_confirmed_post(monkeypatch, db, tmp_path):
+    from app.comments.vk import VKAdapter
+    from app.vk_service import group_app_verified, group_app_credentials
+    product, post = business_and_post(db, slug="verified-vk-publishing")
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    connect_community(db, settings, product.id, "123456", "community-oauth-test-token",
+                      auth_type="community_oauth")
+    assert not group_app_verified(settings)
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=5))
+    async def api_call(self, method, token, **params):
+        assert method == "wall.post" and token == "community-oauth-test-token"
+        assert params["owner_id"] == -123456 and params["message"] == "Проверка интеграции ServGo"
+        return {"post_id": 888}
+    monkeypatch.setattr(VKAdapter, "call", api_call)
+    assert await deliver_once(lambda: sessions(db), settings, sender=None,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=6)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert group_app_verified(settings)
+    # Rotating the app credentials removes the confirmed global-access state.
+    other = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                     social_vk_community_app_secret="different-studio-secret", _env_file=None)
+    assert not group_app_verified(other)
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_fake_sender_does_not_verify_app(monkeypatch, db, tmp_path):
+    from app.vk_service import group_app_verified
+    product, post = business_and_post(db, slug="not-verified-injected-vk")
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    connect_community(db, settings, product.id, "123456", "community-oauth-test-token",
+                      auth_type="community_oauth")
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=5))
+    async def sender(group, text, guid):
+        return 888
+    assert await deliver_once(lambda: sessions(db), settings, sender=sender,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=6)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert not group_app_verified(settings)
