@@ -74,6 +74,9 @@ async def test_vk_image_saved_and_reused_without_repeat_paid_api(db, tmp_path, m
         assert actual.size == (1080, 1350)
     assert json.loads(post.content)["image_artifact_id"] == str(asset.id)
     assert json.loads(post.content)["image_state"] == "ready"
+    from app.api.content_studio import material_detail_page
+    assert ("/images/" + str(asset.id)) in material_detail_page(
+        db, product, post, root=tmp_path)
     assert len(requests) == 1 and requests[0][2:] == ("4:5", True)
     again = await prepare_vk_post_image(db, settings, product=product, task=task,
                                          post=post, model_choice="auto")
@@ -221,3 +224,6 @@ def test_owner_rewrite_invalidates_old_vk_picture(db):
     assert data["image_model"] == "gemini" and data["image_ratio"] == "4:5"
     assert data["image_state"] == "stale"
     assert "image_artifact_id" not in data and "image_sha256" not in data
+    from app.api.content_studio import material_detail_page
+    assert "прежняя иллюстрация больше не подходит" in material_detail_page(
+        db, product, revised)
