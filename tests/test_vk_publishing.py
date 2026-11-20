@@ -442,3 +442,30 @@ async def test_vk_reply_rejects_conflicting_post_id_with_service_read_token(monk
     with pytest.raises(PlatformError, match="удалён или недоступен"):
         await adapter.send(channel, "community-key", comment, "Ответ")
     assert "wall.createComment" not in methods
+
+
+def test_vk_text_autopost_default_enabled_with_emergency_disable(tmp_path):
+    settings = Settings(products_root=tmp_path)
+    assert settings.content_vk_autopost_enabled is True
+    disabled = Settings(products_root=tmp_path, content_vk_autopost_enabled=False)
+    assert disabled.content_vk_autopost_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_vk_worker_refuses_stale_approved_publications_on_reenable(db, tmp_path):
+    product, post = business_and_post(db, slug="stale-vk-when-worker-starts")
+    attach_vk(db, product.id)
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=5))
+    settings = Settings(products_root=tmp_path, content_vk_max_lateness_minutes=60)
+    sent = []
+
+    async def send(group, text, guid):
+        sent.append((group, text, guid))
+        return 777
+
+    far_later = datetime.now(timezone.utc) + timedelta(hours=3)
+    assert await deliver_once(lambda: sessions(db), settings, sender=send, now=far_later) == 1
+    db.refresh(pub)
+    assert pub.status == "failed_before_send"
+    assert sent == []
+    assert await deliver_once(lambda: sessions(db), settings, sender=send, now=far_later) == 0
