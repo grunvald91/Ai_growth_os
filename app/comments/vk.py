@@ -55,10 +55,13 @@ class VKAdapter:
         group = await self.manager(account_id, token)
         read_token = (self.gateway.vk_read_token or token) if not self.video else token
         data = await self.objects(account_id, read_token, count=1)
-        for item in data.get("items", []):
-            if item.get("owner_id") == self.owner(account_id):
-                await self.call(f"{self.namespace}.getComments", read_token, owner_id=self.owner(account_id),
-                                **{self.object_key: item["id"]}, count=1)
+        owned = [item for item in data.get("items", [])
+                 if item.get("owner_id") == self.owner(account_id)]
+        if not owned and self.gateway.vk_read_token and not self.video:
+            raise PlatformError("Нельзя проверить чтение комментариев VK: в сообществе нет открытых записей")
+        for item in owned:
+            await self.call(f"{self.namespace}.getComments", read_token, owner_id=self.owner(account_id),
+                            **{self.object_key: item["id"]}, count=1)
         return group.get("name", account_id)
 
     async def fetch(self, channel, token):
