@@ -199,6 +199,24 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     if current.status != TaskStatus.RUNNING or approved.status != 'approved' or checked != payload:
                         raise ReadinessError('cancelled' if current.status == TaskStatus.CANCELLED else 'approval_invalid')
                     value = json.loads(saved.content)
+                    if isinstance(update.get('visual_review_result'), dict):
+                        # On a checkpoint resume the whole visual review is
+                        # reloaded, but cached region plans skip the provider
+                        # callback. Retain their previously recorded offline
+                        # fallback audit instead of hiding it from the owner.
+                        previous = value.get('visual_review_result') or {}
+                        current = dict(update['visual_review_result'])
+                        if isinstance(previous, dict):
+                            regions = {}
+                            for entry in previous.get('region_layout', []):
+                                if isinstance(entry, dict) and type(entry.get('scene_index')) is int:
+                                    regions[entry['scene_index']] = entry
+                            for entry in current.get('region_layout', []):
+                                if isinstance(entry, dict) and type(entry.get('scene_index')) is int:
+                                    regions[entry['scene_index']] = entry
+                            if regions:
+                                current['region_layout'] = [regions[i] for i in sorted(regions)]
+                        update = {**update, 'visual_review_result': current}
                     value.update(update)
                     saved.content = json.dumps(value)
                     db.commit()
