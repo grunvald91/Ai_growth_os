@@ -695,7 +695,7 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
             pub.external_reference = f"vk:-{group}_{post_id}"
             pub.published_at = datetime.now(timezone.utc)
             db.commit()
-    if sender is None and ch.auth_type == "community_oauth":
+    if sender is None and getattr(ch, "auth_type", None) == "community_oauth":
         # Only real VK wall.post success verifies this OAuth app's ability
         # to publish, never an authorization success or injected test sender.
         from app.vk_service import (_group_app_fingerprint, group_app_credentials,
