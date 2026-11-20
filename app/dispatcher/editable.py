@@ -61,9 +61,12 @@ class EditCreation(BaseModel):
 
 
 class CreateHints(BaseModel):
-    """Optional manual settings, never a command to run an action."""
+    """Create-page selection and optional settings; executor still requires approval."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     format: Literal["post", "story", "short_video", "static_image", "package"] | None = None
+    # The Create page explicitly asks for a topic. Sending that topic separately
+    # prevents the LLM classifier from rejecting an already selected capability.
+    topic: str | None = Field(default=None, min_length=3, max_length=300)
     platform: str | None = Field(default=None, max_length=40)
     frame_count: int | None = Field(default=None, ge=3, le=10)
     audience: str | None = Field(default=None, max_length=300)
@@ -74,8 +77,8 @@ class CreateHints(BaseModel):
     @model_validator(mode="after")
     def valid_combination(self):
         if self.format is None:
-            if self.platform or self.frame_count is not None or self.aspect_ratio is not None:
-                raise ValueError("Площадка, пропорции и количество требуют выбранного формата")
+            if self.topic or self.platform or self.frame_count is not None or self.aspect_ratio is not None:
+                raise ValueError("Тема, площадка, пропорции и количество требуют выбранного формата")
         elif self.format != "story" and self.frame_count is not None:
             raise ValueError("Количество экранов можно задавать только для Stories")
         if self.format == "package" and self.platform:
