@@ -28,7 +28,12 @@ def build_pipeline(settings, payload, store):
     if payload.image_provider != 'claudehub' or payload.models.image != 'gemini-3.1-flash-image':
         raise ReadinessError('image_provider_required')
     privacy = PrivacyGateway()
-    service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory))
+    # GuardedStage counts exactly one provider operation. Disable hidden model
+    # fallbacks and hidden ceiling retries, which otherwise perform additional
+    # HTTP POSTs without another paid-call ledger entry.
+    service = LLMService(privacy_gateway=privacy, provider=SingleCallStoryboardLLM(
+        settings, diagnostic_directory=store.directory,
+        allow_fallback=False, allow_ceiling_retry=False))
     science_service = (LLMService(privacy_gateway=privacy,
         provider=SingleCallStoryboardLLM(settings, diagnostic_directory=store.directory,
                                          allow_fallback=False, allow_ceiling_retry=False))
