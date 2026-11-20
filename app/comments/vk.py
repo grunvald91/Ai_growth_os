@@ -133,9 +133,20 @@ class VKAdapter:
                                         start_comment_id=comment_id, count=1, sort="asc")
             else:
                 check = await self.call("wall.getComment", read_token, owner_id=owner, comment_id=comment_id)
-        if not any(c.get("id") == comment_id and not c.get("deleted")
-                   and c.get(self.object_key, object_id if self.video else None) == object_id
-                   for c in check.get("items", [])):
+        # VK wall.getComments scopes its answer to the requested owner+post.
+        # The response schema makes comment.post_id optional. A missing field
+        # must not reject a valid comment, but a conflicting ID must fail closed.
+        scoped_wall_read = not self.video and bool(self.gateway.vk_read_token)
+        if not any(
+            c.get("id") == comment_id and not c.get("deleted")
+            and (
+                (c.get("post_id") in (None, object_id)
+                 and c.get("owner_id") in (None, owner))
+                if scoped_wall_read
+                else c.get(self.object_key, object_id if self.video else None) == object_id
+            )
+            for c in check.get("items", [])
+        ):
             raise PlatformError("Исходный комментарий VK удалён или недоступен")
         result = await self.call(f"{self.namespace}.createComment", token, owner_id=owner,
                                 **{self.object_key: object_id}, reply_to_comment=comment_id, message=text,
