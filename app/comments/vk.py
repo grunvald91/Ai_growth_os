@@ -112,18 +112,27 @@ class VKAdapter:
             raise PlatformError("Комментарий относится к другому сообществу VK")
         await self.manager(channel.account_id, token)
         read_token = (self.gateway.vk_read_token or token) if not self.video else token
-        if self.video:
-            data = await self.call("video.get", read_token, videos=f"{owner}_{object_id}", count=1)
+        if not self.video and self.gateway.vk_read_token:
+            # A service key may read wall.getComments but is not guaranteed
+            # to support wall.getById or wall.getComment. The owner+post pair
+            # is verified by VK when querying that exact discussion.
+            check = await self.call(
+                "wall.getComments", read_token, owner_id=owner,
+                post_id=object_id, start_comment_id=comment_id,
+                count=1, sort="asc")
         else:
-            data = await self.call("wall.getById", read_token, posts=f"{owner}_{object_id}")
-        items = data.get("items", []) if isinstance(data, dict) else data
-        if not any(i.get("owner_id") == owner and i.get("id") == object_id for i in items):
-            raise PlatformError("Исходная публикация VK удалена или принадлежит другому сообществу")
-        if self.video:
-            check = await self.call("video.getComments", read_token, owner_id=owner, video_id=object_id,
-                                    start_comment_id=comment_id, count=1, sort="asc")
-        else:
-            check = await self.call("wall.getComment", read_token, owner_id=owner, comment_id=comment_id)
+            if self.video:
+                data = await self.call("video.get", read_token, videos=f"{owner}_{object_id}", count=1)
+            else:
+                data = await self.call("wall.getById", read_token, posts=f"{owner}_{object_id}")
+            items = data.get("items", []) if isinstance(data, dict) else data
+            if not any(i.get("owner_id") == owner and i.get("id") == object_id for i in items):
+                raise PlatformError("Исходная публикация VK удалена или принадлежит другому сообществу")
+            if self.video:
+                check = await self.call("video.getComments", read_token, owner_id=owner, video_id=object_id,
+                                        start_comment_id=comment_id, count=1, sort="asc")
+            else:
+                check = await self.call("wall.getComment", read_token, owner_id=owner, comment_id=comment_id)
         if not any(c.get("id") == comment_id and not c.get("deleted")
                    and c.get(self.object_key, object_id if self.video else None) == object_id
                    for c in check.get("items", [])):
