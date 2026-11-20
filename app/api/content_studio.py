@@ -1710,7 +1710,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         if record.kind == "channel_text":
             if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
                 state = value.get("image_state")
-                if state == "ready" and record.task_id and value.get("image_artifact_id"):
+                if state in {"ready", "blocked", "review_unavailable", "awaiting_review"} and record.task_id and value.get("image_artifact_id"):
                     try:
                         image_id = UUID(str(value["image_artifact_id"]))
                         image = db.scalar(select(Artifact).where(
@@ -1723,12 +1723,34 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                         verified_gallery_image(
                             db, root or get_settings().products_root,
                             product.id, record.task_id, image)
+                        if state == "ready":
+                            from app.content.vk_image_critic import verified_vk_image_approval
+                            if not verified_vk_image_approval(db, record, image):
+                                raise LookupError("Image has no matching visual approval")
                     except (LookupError, ValueError, TypeError, OSError):
                         review_html += ('<p class="sg-warning" role="alert">'
                                         'Изображение недоступно или повреждено. '
                                         'Публикацию нужно проверить.</p>')
                     else:
                         review_html += gallery_html(product.id, record.task_id, [image])
+                        if state == "ready":
+                            review_html += ('<p class="sg-footnote">'
+                                            'Визуальный критик проверил изображение: критичных ошибок нет.</p>')
+                        elif state == "blocked":
+                            issue_lines = value.get("image_critical_issues") or []
+                            review_html += (
+                                '<section class="sg-surface" role="alert">'
+                                '<h3>Критик заблокировал изображение</h3>'
+                                '<p>Обнаружено серьёзное несоответствие. '
+                                'Текст сохранён, изображение нельзя публиковать.</p>'
+                                + '<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
+                                                   for x in issue_lines[:4]) + '</ul>'
+                                + '</section>')
+                        elif state in {"review_unavailable", "awaiting_review"}:
+                            review_html += (
+                                '<p class="sg-warning" role="alert">'
+                                'Визуальный критик ещё не подтвердил качество. '
+                                'Публикация изображения заблокирована.</p>')
                 elif state in {"stale", "failed", "pending"}:
                     reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
                               if state == "stale" else
@@ -2536,7 +2558,7 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
             media = parse_json(newest_post) if newest_post else {}
             state = media.get("image_state")
             image_id = media.get("image_artifact_id")
-            if state == "ready" and image_id:
+            if state in {"ready", "blocked", "review_unavailable", "awaiting_review"} and image_id:
                 try:
                     exact = db.scalar(select(Artifact).where(
                         Artifact.id == UUID(str(image_id)),
@@ -2547,11 +2569,32 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
                     if exact is None or parse_json(exact).get("sha256") != media.get("image_sha256"):
                         raise LookupError("Image is not bound to the current post")
                     verified_gallery_image(db, settings.products_root, product.id, task.id, exact)
+                    if state == "ready":
+                        from app.content.vk_image_critic import verified_vk_image_approval
+                        if not verified_vk_image_approval(db, newest_post, exact):
+                            raise LookupError("Image not reviewed")
                 except (LookupError, ValueError, TypeError, OSError):
                     body += ('<p class="sg-warning" role="alert">'
                              'Иллюстрация повреждена или недоступна.</p>')
                 else:
                     body += gallery_html(product.id, task.id, [exact])
+                    if state == "blocked":
+                        notes = media.get("image_critical_issues") or []
+                        body += (
+                            '<section class="sg-surface" role="alert">'
+                            '<h3>Визуальный критик: серьёзная ошибка</h3>'
+                            '<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
+                                             for x in notes[:4]) + '</ul>'
+                            '<p>Картинка сохранена, но не допущена к публикации.</p>'
+                            '</section>'
+                        )
+                    elif state in {"review_unavailable", "awaiting_review"}:
+                        body += ('<p class="sg-warning" role="alert">'
+                                 'Проверка изображения критиком не завершена. '
+                                 'Публикация заблокирована.</p>')
+                    elif state == "ready":
+                        body += ('<p class="sg-footnote">'
+                                 'Проверено визуальным критиком: критичных ошибок нет.</p>')
             elif state == "stale":
                 body += ('<p class="sg-warning" role="status">'
                          'Текст изменился — прежняя иллюстрация требует обновления.</p>')
