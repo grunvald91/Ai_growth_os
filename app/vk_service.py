@@ -5,6 +5,9 @@ service key. The service key is only used by VK read methods.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import re
 from uuid import UUID
 
 from app.comments.gateway import CommentGateway, PlatformError
@@ -13,6 +16,72 @@ from app.comments.vk import VKAdapter
 
 # Reserved solely for the operator-owned credential, never a CommentChannel ID.
 _SERVICE_KEY_ID = UUID("00000000-0000-4000-8000-000000000001")
+
+# Separate operator credentials for optional classic community OAuth.
+# A customer does not need an app or a secret: one platform app serves all.
+_GROUP_APP_ID = UUID("00000000-0000-4000-8000-000000000002")
+_GROUP_APP_VERIFIED_ID = UUID("00000000-0000-4000-8000-000000000003")
+
+
+def group_app_credentials(settings) -> tuple[str, str] | None:
+    """Never expose the secret in HTML or in the public API."""
+    env_id = str(settings.social_vk_community_app_id or "").strip()
+    env_secret = str(settings.social_vk_community_app_secret or "").strip()
+    if env_id or env_secret:
+        return (env_id, env_secret) if env_id and env_secret else None
+    try:
+        data = json.loads(CommentSecrets(settings.products_root).load_token(_GROUP_APP_ID))
+        return data["app_id"], data["app_secret"]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _group_app_fingerprint(app_id: str, secret: str) -> str:
+    return hashlib.sha256((app_id + "\\0" + secret).encode("utf-8")).hexdigest()
+
+
+def group_app_verified(settings) -> bool:
+    creds = group_app_credentials(settings)
+    if not creds:
+        return False
+    try:
+        stored = CommentSecrets(settings.products_root).load_token(_GROUP_APP_VERIFIED_ID)
+    except ValueError:
+        return False
+    return stored == _group_app_fingerprint(*creds)
+
+
+def mark_group_app_verified(settings) -> None:
+    creds = group_app_credentials(settings)
+    if creds:
+        CommentSecrets(settings.products_root).save_token(
+            _GROUP_APP_VERIFIED_ID, _group_app_fingerprint(*creds))
+
+
+def save_group_app_credentials(settings, app_id: str, secret: str) -> None:
+    if settings.social_vk_community_app_id or settings.social_vk_community_app_secret:
+        raise ValueError("Приложение VK задано сервером. Его нельзя заменить через Studio")
+    if not re.fullmatch(r"[1-9]\d{3,20}", app_id or ""):
+        raise ValueError("Неверный ID приложения сообщества VK")
+    if (not isinstance(secret, str) or len(secret) < 8 or len(secret) > 500
+            or any(ord(c) < 33 for c in secret)):
+        raise ValueError("Неверный защищённый ключ приложения сообщества VK")
+    store = CommentSecrets(settings.products_root)
+    store.save_token(_GROUP_APP_ID, json.dumps(
+        {"app_id": app_id, "app_secret": secret}, separators=(",", ":")))
+    # Rotated credentials invalidate a previous app's successful OAuth proof.
+    with store.locked():
+        store.path(_GROUP_APP_VERIFIED_ID).unlink(missing_ok=True)
+
+
+def remove_group_app_credentials(settings) -> None:
+    if settings.social_vk_community_app_id or settings.social_vk_community_app_secret:
+        raise ValueError("Приложение VK управляется настройками сервера")
+    store = CommentSecrets(settings.products_root)
+    with store.locked():
+        store.path(_GROUP_APP_ID).unlink(missing_ok=True)
+        store.path(_GROUP_APP_VERIFIED_ID).unlink(missing_ok=True)
+
 
 
 def platform_service_token(settings) -> str | None:
