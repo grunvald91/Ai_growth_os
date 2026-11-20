@@ -2080,11 +2080,15 @@ textarea {
   .ai-specialist-badge { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
 }
 
-/* More specialist roles: three columns on desktops, two on phones. */
-@media (min-width: 780px) {
+/* Keep role cards legible when the desktop history sidebar occupies 288px.
+   At intermediate viewports, three columns make role names unreadable. */
+@media (min-width: 1160px) {
   .ai-specialist-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 750px; }
   #specialist-starters { max-width: 750px; }
 }
-@media (max-width: 779px) {
+@media (max-width: 1159px) {
   .ai-empty-state { margin-top: 16px; padding-top: 16px; }
+}
+@media (max-width: 360px) {
+  .ai-specialist-grid { grid-template-columns: minmax(0, 1fr); }
 }

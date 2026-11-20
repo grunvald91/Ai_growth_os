@@ -989,3 +989,45 @@ def test_sales_copy_ads_are_different_specialists_with_clear_boundaries():
     assert "маркетинговая статья" in copy.lower() and "готовый текст" in copy
     assert "ROAS" in ads and "бюджет" in ads
     assert len({sales, copy, ads}) == 3
+
+
+def test_ai_chat_local_storage_scope_is_per_studio_account(chat_env):
+    import hashlib
+    import json
+    from app.api.ai_chat import _principal
+
+    _, _, company, _, _ = chat_env
+    from types import SimpleNamespace
+
+    def for_login(login):
+        fake_request = SimpleNamespace(
+            state=SimpleNamespace(studio_login=login, studio_product_ids=None)
+        )
+        return hashlib.sha256(_principal(fake_request).owner_account.encode("utf-8")).hexdigest()[:20]
+
+    assert for_login("one@example.test") != for_login("two@example.test")
+    with TestClient(app) as client:
+        page = client.get(f"/studio/chat?product_id={company.id}")
+        assert page.status_code == 200
+        # Browser storage gets an opaque account-specific namespace, never raw login.
+        scope = for_login("local-owner")
+        assert f'"storageScope": "{scope}"' in page.text
+        assert 'local-owner' not in page.text
+        js = client.get("/studio/assets/ai-chat.js")
+        assert js.status_code == 200
+        assert "STORAGE_SCOPE" in js.text
+        for marker in ("servgo_ai_chat_draft_", "servgo_ai_chat_pending_specialist_", "servgo_ai_chat_active_"):
+            line = next(line for line in js.text.splitlines() if "return" in line and marker in line)
+            assert "${STORAGE_SCOPE}" in line
+        assert "const newChatDraftKey = draftKey(null);" in js.text
+        assert "localStorage.setItem(draftKey(conv.id), pendingDraft);" in js.text
+        assert "localStorage.removeItem(newChatDraftKey);" in js.text
+
+
+def test_ai_chat_role_picker_midwidth_keeps_two_columns(chat_env):
+    with TestClient(app) as client:
+        css = client.get("/studio/assets/ai-chat.css")
+        assert css.status_code == 200
+        assert "@media (min-width: 1160px)" in css.text
+        assert "@media (max-width: 360px)" in css.text
+        assert "min-width: 780px" not in css.text
