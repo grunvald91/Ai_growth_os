@@ -56,7 +56,7 @@ def verify():
         seconds = float(detail["format"]["duration"])
         if len(video_tracks) < 1 or len(audio_tracks) < 1 or not 0 < seconds <= 180:
             raise RuntimeError("MP4 lacks audio/video streams or valid duration")
-        expected = ("video.mp4", "video.json", "video.png", "video.srt", "video.vtt")
+        expected = ("video.mp4", "video.json", "video.png", "video.srt")
         missing = [name for name in expected if not (folder / name).is_file()]
         if missing:
             raise RuntimeError("Missing output files: " + ", ".join(missing))
@@ -74,6 +74,7 @@ def verify():
             "video_dimensions": [video_tracks[0].get("width"),video_tracks[0].get("height")],
             "audio_codec": audio_tracks[0].get("codec_name"),
             "files": list(expected),
+            "subtitle_vtt": "served dynamically from video.srt by the studio route",
             "scenes": result.get("scene_count"),
             "additional_paid_attempts_begun": additional,
             "approved_additional_attempts": 19,
