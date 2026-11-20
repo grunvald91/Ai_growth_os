@@ -24,7 +24,7 @@ from app.vk_service import platform_service_token, group_app_verified
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
-    community_reference, resolve_community, verify_community_key, client_id, redirect_uri,
+    community_reference, resolve_community, resolve_publisher_community, verify_community_key, client_id, redirect_uri,
     GROUP_OAUTH_COOKIE, GROUP_OAUTH_PATH, community_oauth_config,
     begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
 )
@@ -168,7 +168,9 @@ def _vk_owner_settings_link(settings, request: Request, product_id: UUID) -> str
 def connection_error(key):
     return {
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
-        "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
+        "bad_key": "Ключ не указан либо содержит недопустимые символы. Вставьте ключ доступа из «Работа с API» вашего сообщества.",
+        "group_lookup_failed": "Адрес принят, но ВКонтакте не подтвердил сообщество по короткому имени. Попробуйте адрес вида vk.ru/club241947800; ключ и разрешения проверяются отдельно.",
+        "key_rights_failed": "Адрес сообщества принят, но ВКонтакте не подтвердил права ключа на его стену и управление. Проверьте ключ в настройках указанного сообщества.",
         "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
         "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
@@ -421,13 +423,15 @@ async def vk_community_key(product_id: UUID, request: Request,
     if not token or len(token) > 8000 or any(ord(ch) < 32 for ch in token):
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
     try:
-        account_id, name = await resolve_community(token, reference)
+        account_id, name = await resolve_publisher_community(token, reference)
     except ValueError:
-        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=group_lookup_failed",
+                                status_code=303)
     try:
         await verify_community_key(token, account_id)
     except ValueError:
-        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=key_rights_failed",
+                                status_code=303)
     existing = connected(db, product_id)
     if existing is not None and not existing.is_community_token:
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=already_connected",
