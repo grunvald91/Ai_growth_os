@@ -345,3 +345,64 @@ async def test_vk_group_key_text_post_once_and_no_duplicate(db, tmp_path):
     assert calls == [("123456", "Проверка интеграции ServGo", str(pub.id))]
     assert await deliver_once(lambda: sessions(db), settings, sender=sender, now=due) == 0
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_vk_split_read_and_write_tokens_for_comments(monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.comments.vk import VKAdapter
+    from app.comments.gateway import CommentGateway
+
+    group_id = "123456"
+    owner = -123456
+    calls = []
+
+    async def fake(self, method, token, **params):
+        calls.append((method, token, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Тест", "is_admin": 0}]}
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192 + 262144}
+        if method == "groups.getCallbackSettings":
+            return {"events": {}}
+        if method == "wall.get":
+            return {"items": [{"id": 15, "owner_id": owner, "text": "Пост"}], "count": 1}
+        if method == "wall.getComments":
+            return {"items": [{"id": 91, "post_id": 15, "text": "Цена?",
+                               "from_id": 77, "thread": {"count": 0}}], "count": 1}
+        if method == "wall.createComment":
+            return {"comment_id": 92}
+        raise AssertionError("Unexpected VK method: " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    adapter = VKAdapter(CommentGateway(vk_read_token="service-read-token"), "vk")
+    assert await adapter.check(group_id, "community-write-token") == "Тест"
+    comment = SimpleNamespace(id=uuid4(), external_id="-123456_15_91",
+                              target={"owner_id": owner, "post_id": 15, "comment_id": 91})
+    channel = SimpleNamespace(platform="vk", account_id=group_id)
+    assert await adapter.send(channel, "community-write-token", comment, "Ответ") == "92"
+    reading = {"wall.get", "wall.getComments"}
+    writing = {"wall.createComment"}
+    assert all(token == "service-read-token" for method, token, _ in calls if method in reading)
+    assert all(token == "community-write-token" for method, token, _ in calls if method in writing)
+    assert all(method not in {"wall.getById", "wall.getComment"} for method, _, _ in calls)
+    post_check = [params for method, _, params in calls if method == "wall.getComments"][-1]
+    assert post_check["owner_id"] == owner
+    assert post_check["post_id"] == 15
+    assert post_check["start_comment_id"] == 91
+
+
+@pytest.mark.asyncio
+async def test_vk_service_token_used_only_for_read(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app.comments.service import CommentService
+    service = object.__new__(CommentService)
+    service.settings = Settings(products_root=tmp_path, social_vk_service_token="read-only-key")
+    async def fake_active(settings, channel):
+        assert channel.platform == "vk"
+        return "community-write-key"
+    monkeypatch.setattr("app.social_vk.active_token", fake_active)
+    channel = SimpleNamespace(platform="vk", id="test-channel")
+    assert await service.channel_token(channel, for_read=True) == "read-only-key"
+    assert await service.channel_token(channel) == "community-write-key"
