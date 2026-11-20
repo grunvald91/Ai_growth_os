@@ -174,3 +174,53 @@ def test_operator_can_set_encrypted_vk_read_key_but_company_user_cannot(tmp_path
             assert platform_service_token(settings) is None
     finally:
         app.dependency_overrides.pop(get_settings, None)
+
+
+def test_vk_group_oauth_app_is_operator_only_and_secret_is_never_in_html(tmp_path):
+    from app.vk_service import (
+        group_app_credentials, group_app_verified, mark_group_app_verified)
+    path = tmp_path / "operators"
+    path.write_text("owner:" + apr_md5_crypt.hash("owner-pass") + "\n"
+                    "company:" + apr_md5_crypt.hash("company-pass") + "\n")
+    settings = Settings(
+        app_env="production", products_root=tmp_path / "products",
+        studio_htpasswd_file=path, studio_tune_usernames="owner",
+        studio_public_origin="https://growth.servgo.ru",
+        social_vk_community_app_id=None, social_vk_community_app_secret=None,
+        _env_file=None,
+    )
+    app.dependency_overrides[get_settings] = lambda: settings
+    try:
+        with TestClient(app) as client:
+            assert client.get("/studio/tune/vk").status_code == 401
+            assert client.get("/studio/tune/vk", auth=("company", "company-pass")).status_code == 403
+            assert client.post("/studio/tune/vk/app", auth=("company", "company-pass"),
+                 headers={"Origin": "https://growth.servgo.ru"},
+                 data={"app_id": "1234567", "app_secret": "secret-only-studio"}).status_code == 403
+            saved = client.post("/studio/tune/vk/app", auth=("owner", "owner-pass"),
+                headers={"Origin": "https://growth.servgo.ru"},
+                data={"app_id": "1234567", "app_secret": "secret-only-studio"},
+                follow_redirects=False)
+            assert saved.status_code == 303
+            assert "app_saved" in saved.headers["location"]
+            assert group_app_credentials(settings) == ("1234567", "secret-only-studio")
+            assert not group_app_verified(settings)
+            page = client.get("/studio/tune/vk", auth=("owner", "owner-pass"))
+            assert page.status_code == 200
+            assert "secret-only-studio" not in page.text
+            mark_group_app_verified(settings)
+            assert group_app_verified(settings)
+            rotated = client.post("/studio/tune/vk/app", auth=("owner", "owner-pass"),
+                headers={"Origin": "https://growth.servgo.ru"},
+                data={"app_id": "1234567", "app_secret": "rotated-studio-secret"},
+                follow_redirects=False)
+            assert rotated.status_code == 303
+            assert not group_app_verified(settings)
+            deleted = client.post("/studio/tune/vk/app/remove",
+                auth=("owner", "owner-pass"),
+                headers={"Origin": "https://growth.servgo.ru"},
+                data={"confirm": "yes"}, follow_redirects=False)
+            assert deleted.status_code == 303
+            assert group_app_credentials(settings) is None
+    finally:
+        app.dependency_overrides.pop(get_settings, None)
