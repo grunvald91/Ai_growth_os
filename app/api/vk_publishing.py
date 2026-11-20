@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.content_studio import _owner_product, _studio_form, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.comments.service import CommentService
+from app.comments.contracts import ConnectInput
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Publication
@@ -39,7 +40,8 @@ def feedback(key):
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
-            "connected_key": "Ключ сообщества сохранён и проверен на право работы со стеной. Теперь можно проверить один текстовый пост; отправка ещё не подтверждена.",
+            "connected_key": "Подключены текстовые публикации и чтение комментариев. Отправку тестового поста и ответа нужно проверить отдельно.",
+            "connected_post_only": "Ключ сообщества сохранён для текстовых публикаций. Чтение комментариев пока недоступно: сервисный ключ не настроен или проверка чтения не прошла.",
             }.get(key, "")
 
 
@@ -101,8 +103,7 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
         reply_channel = CommentService(db, settings).channel(product_id, "vk")
-        replies_ready = bool(not channel.is_community_token and reply_channel
-                             and reply_channel.status == "connected"
+        replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id)
         current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
                     if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
@@ -224,6 +225,18 @@ async def vk_community_key(product_id: UUID, request: Request,
     except (LookupError, ValueError):
         db.rollback()
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=save_failed", status_code=303)
+    # A community key can write text, but reading public posts needs a separate
+    # operator-owned VK service key. Never claim comments work without probing.
+    if not settings.social_vk_service_token:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_post_only",
+                                status_code=303)
+    try:
+        await CommentService(db, settings).connect(
+            product_id, ConnectInput(platform="vk", account_id=account_id, token=token))
+    except (LookupError, ValueError):
+        db.rollback()
+        return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_post_only",
+                                status_code=303)
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key",
                             status_code=303)
 
