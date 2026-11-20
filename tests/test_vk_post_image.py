@@ -192,3 +192,32 @@ def test_invalid_dispatcher_post_image_scope():
         EditCreation(confirmation_id="test", revision=0, format="post",
                      topic="Тема для поста", platform="vk",
                      image_model="auto", aspect_ratio="9:16")
+
+
+def test_owner_rewrite_invalidates_old_vk_picture(db):
+    from app.content.manual_edits import save_manual_edit
+    from app.content.revisions import source_fingerprint
+    from uuid import uuid4
+    product = Product(name="Редакция", slug="vk-rewrite-picture")
+    db.add(product)
+    db.flush()
+    post = Artifact(product_id=product.id, kind="channel_text",
+                    title="Старый пост", status="awaiting_approval",
+                    content=json.dumps({
+                        "channel": "vk", "title": "Старый пост", "body": "Старая мысль",
+                        "image_model": "gemini", "image_ratio": "4:5",
+                        "image_state": "ready", "image_artifact_id": str(uuid4()),
+                        "image_sha256": "f" * 64,
+                    }))
+    db.add(post)
+    db.commit()
+    revised = save_manual_edit(db, product.id, post.id, {
+        "source_version": str(post.version),
+        "source_digest": source_fingerprint(post),
+        "title": "Новый пост",
+        "edit_0": "Теперь совсем другая мысль",
+    })
+    data = json.loads(revised.content)
+    assert data["image_model"] == "gemini" and data["image_ratio"] == "4:5"
+    assert data["image_state"] == "stale"
+    assert "image_artifact_id" not in data and "image_sha256" not in data
