@@ -72,36 +72,73 @@ class VisualDecision(Contract):
 
     @classmethod
     def from_author_json(cls, content, review):
-        value = json.loads(content)
-        # Some compatible endpoints ignore json_schema and return explicit
-        # accepted/rejected lists. Translate only that bounded, unambiguous
-        # format; never discard arbitrary extra fields or infer acceptance.
-        if isinstance(value, dict) and set(value) == {'review'}:
-            grouped = value['review']
-            if not isinstance(grouped, dict) or set(grouped) != {'accepted', 'rejected'}:
-                raise ValueError('Invalid author decision envelope')
-            issues = {i.id: i for i in review.issues}
-            decisions = []
-            for group, accepted in [('accepted', True), ('rejected', False)]:
-                if not isinstance(grouped[group], list):
+        """Normalize known harmless schema variants without trusting model-written edits.
+
+        The critic's issue IDs and corrections remain authoritative. An author
+        can only accept/reject those exact issues; scene coordinates and metadata
+        must match the critic, and unknown action fields fail closed.
+        """
+        value = json.loads(json_object_text(content))
+        if not isinstance(value, dict):
+            raise ValueError('Visual author decision must be an object')
+        if set(value) == {'review'}:
+            value = value['review']
+        if not isinstance(value, dict):
+            raise ValueError('Invalid author decision envelope')
+        issues = {issue.id: issue for issue in review.issues}
+        allowed = {'issue_id', 'accept', 'decision', 'reason', 'scene_index',
+                   'beat_index', 'correction', 'evidence', 'severity',
+                   'confidence', 'category'}
+
+        def normalize(entry, *, accepted=None):
+            if (not isinstance(entry, dict) or set(entry) - allowed
+                    or not {'issue_id', 'reason'} <= set(entry)):
+                raise ValueError('Invalid author decision fields')
+            issue = issues.get(entry['issue_id'])
+            if issue is None:
+                raise ValueError('Author decision refers to unknown issue')
+            for key in ('scene_index', 'beat_index'):
+                if key in entry and (type(entry[key]) is not int
+                                     or entry[key] != getattr(issue, key)):
+                    raise ValueError('Author decision coordinates do not match critic')
+            for key in ('severity', 'confidence', 'category'):
+                if key in entry and entry[key] != getattr(issue, key):
+                    raise ValueError('Author decision changes critic classification')
+            for key in ('correction', 'evidence'):
+                if key in entry and (not isinstance(entry[key], str)
+                                     or not 12 <= len(entry[key]) <= 500):
+                    raise ValueError('Invalid optional author metadata')
+            if accepted is None:
+                flag = entry.get('accept')
+                explicit = entry.get('decision')
+                if explicit is not None:
+                    if not isinstance(explicit, str) or explicit not in ('accept', 'reject'):
+                        raise ValueError('Ambiguous author decision')
+                    converted = explicit == 'accept'
+                    if 'accept' in entry and (type(flag) is not bool or flag != converted):
+                        raise ValueError('Contradictory author decision')
+                    flag = converted
+                if type(flag) is not bool:
+                    raise ValueError('Author must explicitly accept or reject')
+            else:
+                if 'accept' in entry or 'decision' in entry:
+                    raise ValueError('Contradictory grouped author decision')
+                flag = accepted
+            return {'issue_id': issue.id, 'accept': flag, 'reason': entry['reason']}
+
+        if set(value) == {'decisions'}:
+            if not isinstance(value['decisions'], list):
+                raise ValueError('Author decisions must be a list')
+            entries = [normalize(entry) for entry in value['decisions']]
+        elif set(value) == {'accepted', 'rejected'}:
+            entries = []
+            for group, accepted in (('accepted', True), ('rejected', False)):
+                if not isinstance(value[group], list):
                     raise ValueError('Author decisions must be lists')
-                for entry in grouped[group]:
-                    allowed = {'issue_id', 'reason', 'scene_index', 'beat_index', 'correction'}
-                    if not isinstance(entry, dict) or set(entry) - allowed or not {'issue_id', 'reason'} <= set(entry):
-                        raise ValueError('Invalid grouped author decision')
-                    issue = issues.get(entry['issue_id'])
-                    if issue is None or any(key in entry and
-                            (type(entry[key]) is not int or entry[key] != getattr(issue, key))
-                            for key in ('scene_index', 'beat_index')):
-                        raise ValueError('Author decision refers to a different issue')
-                    if 'correction' in entry and (not isinstance(entry['correction'], str) or
-                            not 12 <= len(entry['correction']) <= 500):
-                        raise ValueError('Invalid optional author correction')
-                    # The author's optional restatement never replaces the
-                    # critic's accepted correction or the original story.
-                    decisions.append({'issue_id':entry['issue_id'], 'accept':accepted, 'reason':entry['reason']})
-            value = {'decisions':decisions}
-        result = cls.model_validate(value)
+                entries.extend(normalize(entry, accepted=accepted) for entry in value[group])
+        else:
+            raise ValueError('Invalid author decision envelope')
+        result = cls.model_validate({'decisions': entries})
         result.check_for(review)
         return result
 
