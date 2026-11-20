@@ -195,8 +195,8 @@ def test_vk_publisher_key_is_encrypted_and_isolated(db, tmp_path):
     with pytest.raises(ValueError):
         connect_community(db, settings, second.id, "-321", private_key)
     when = datetime.now(timezone.utc) + timedelta(minutes=25)
-    with pytest.raises(ValueError, match="wall.post"):
-        schedule(db, product.id, post.id, when)
+    pub = schedule(db, product.id, post.id, when)
+    assert pub.channel == "vk" and pub.status == "scheduled"
 
 
 def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_path):
@@ -207,8 +207,8 @@ def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_p
     assert new.id != old.id
     assert connected(db, product.id).account_id == "654321"
     assert not VKStore(tmp_path).path(old.id).exists()
-    with pytest.raises(ValueError, match="wall.post"):
-        schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
+    assert pub.status == "scheduled" and connected(db, product.id).id == new.id
 
 
 @pytest.mark.parametrize(("value", "expected"), [
@@ -270,7 +270,7 @@ async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
             raise ValueError("VK rejected")
         return {}
     monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
-    with pytest.raises(ValueError, match="Ключ не даёт доступ"):
+    with pytest.raises(ValueError, match="Нужен ключ"):
         await verify_community_key("test-group-key", "123456")
 
 
@@ -314,3 +314,34 @@ async def test_vk_comment_token_refreshes_before_sync_and_send(monkeypatch, tmp_
     monkeypatch.setattr("app.social_vk.active_token", fresh)
     channel = SimpleNamespace(platform="vk", id="stub-id")
     assert await service.channel_token(channel) == "refreshed-vk-user-token"
+
+
+@pytest.mark.asyncio
+async def test_vk_group_key_rejects_missing_wall_permission(monkeypatch):
+    async def call(self, method, token, **params):
+        if method == "groups.getTokenPermissions":
+            return {"mask": 262144}
+        raise AssertionError("No other calls allowed without wall bit")
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    with pytest.raises(ValueError, match="Нужен ключ"):
+        await verify_community_key("test-key", "123456")
+
+
+@pytest.mark.asyncio
+async def test_vk_group_key_text_post_once_and_no_duplicate(db, tmp_path):
+    product, post = business_and_post(db, slug="community-wall-post")
+    settings = Settings(products_root=tmp_path, content_vk_autopost_enabled=True)
+    conn = connect_community(db, settings, product.id, "123456", "group-token", name="Компания")
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=4))
+    calls = []
+    async def sender(group_id, body, guid):
+        calls.append((group_id, body, guid))
+        return 777
+    due = datetime.now(timezone.utc) + timedelta(seconds=8)
+    assert await deliver_once(lambda: sessions(db), settings, sender=sender, now=due) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert pub.external_reference == "vk:-123456_777"
+    assert calls == [("123456", "Проверка интеграции ServGo", str(pub.id))]
+    assert await deliver_once(lambda: sessions(db), settings, sender=sender, now=due) == 0
+    assert len(calls) == 1
