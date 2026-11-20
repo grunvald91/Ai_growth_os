@@ -235,7 +235,7 @@ def test_create_has_only_dispatcher_submit_and_reusable_details(live):
     assert "hints.topic = text;" in dispatcher
     assert "creation: creationHints()" not in dispatcher
     assert "frame_count:selected==='story'" in dispatcher
-    assert "editorial_brief:b || null" in dispatcher
+    assert "editorial_brief:selected==='whiteboard' ? null : b || null" in dispatcher
 
 
 def test_create_image_model_is_single_select_and_confirmable(live):
