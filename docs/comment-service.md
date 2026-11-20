@@ -106,12 +106,13 @@ the application server; a saved URL alone does not prove the server is reachable
   container, then publishes it after explicit owner approval. Third-party access
   may require Meta App Review. Reconnect when the token expires.
   [Meta's official collection](https://www.postman.com/meta/threads/documentation/dht3nzz/threads-api).
-- **VK:** community wall comments, using the positive numeric community ID and a
-  **user** OAuth token with `wall` and `groups` permissions. The user must be a
-  community editor or administrator. Community tokens cannot replace the user
-  token for the read methods used here. Imports own wall posts and all comment
-  threads in bounded batches; replies use `wall.createComment`, numeric community
-  `from_group` and the approved comment's stable `guid`.
+- **VK:** community wall comments use the positive numeric community ID. A
+  connected community key is stored per company for replies; the separate
+  operator-owned service token (configured in `/studio/tune/vk`) is used to read
+  public wall posts and comment threads. Token access must be verified against
+  a real VK community before claiming that reads work. Imports are bounded and
+  deduplicated; replies use `wall.createComment`, numeric community `from_group`
+  and the approved comment's stable `guid`.
 - **VK Видео:** a separate connection for community-owned videos with a user token
   with `video` and `groups` permissions. Saved videos owned by other accounts are
   excluded. Imports video comment threads; replies use `video.createComment`,
@@ -156,10 +157,12 @@ reconciliation; this version deliberately has no automatic retry or unverified
 platform errors are secret-safe and distinguish access and rate-limit failures.
 
 Refreshes can happen manually through **Загрузить комментарии / Обновить**.
-The opt-in **background import** is implemented for YouTube and Instagram only:
+The opt-in **background import** is implemented for YouTube, Instagram and VK community wall comments (VK Видео remains manual):
 
 1. Set `COMMENT_BACKGROUND_POLL_ENABLED=true` in the API and worker runtime environment;
-   keep `COMMENT_PLATFORM_PROXY_URL` configured for outbound access. The default is
+   keep `COMMENT_PLATFORM_PROXY_URL` configured for YouTube/Instagram. VK uses
+   direct requests to `api.vk.com` and requires the separately verified platform
+   service key for read access. The default is
    **false** and changing Studio settings alone cannot activate polling.
 2. Each business enables **Автоматически загружать комментарии** on its Studio agent tab.
    Pausing the agent or disconnecting the channel prevents further imports.
