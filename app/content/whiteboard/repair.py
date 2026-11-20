@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.models.domain import Task, TaskStatus, Product, Artifact, ArtifactStatus, Approval
 from .checkpoints import CheckpointStore
 from .contracts import WhiteboardStoryboard
-from .jobs import AGENT, ACTION, JobRequest, digest, records, owner_task, job_directory
+from .jobs import AGENT, ACTION, JobRequest, digest, records, owner_task, job_directory, started_attempts
 from .runtime import ReadinessError
 from .science import FactReview, ScienceSources, evidence_supported, requires_science_review
 
@@ -36,7 +36,7 @@ def queue_visual_repair(db, settings, product_id, source_id):
     existing = db.scalar(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT, Task.title == title))
     if existing:
         return existing
-    if original.max_api_calls - value['calls'] < 8:
+    if original.max_api_calls - started_attempts(value) < 8:
         raise ReadinessError('repair_budget')
     story = WhiteboardStoryboard.model_validate_json(store.load('storyboard', limit=64_000))
     audio_hashes = []
@@ -58,7 +58,8 @@ def queue_visual_repair(db, settings, product_id, source_id):
         title='Визуальная правка без повторной озвучки', content=content, status=ArtifactStatus.AWAITING_APPROVAL)
     db.add(artifact);db.flush()
     db.add(Artifact(product_id=product_id, task_id=task.id, kind='whiteboard_job_state', title='Ход визуальной правки',
-        content=json.dumps({'calls':value['calls'], 'stage':'waiting_approval', 'error':None,
+        content=json.dumps({'calls':value['calls'], 'attempts_started':started_attempts(value),
+            'stage':'waiting_approval', 'error':None,
             'cost_usd':None, 'cost_known':False, 'request_digest':digest(content),
             'audio_reused_from':str(source_id), 'audio_sha256':audio_hashes, 'additional_speech_calls':0})))
     db.add(Approval(product_id=product_id, artifact_id=artifact.id, action_type=ACTION,
