@@ -155,6 +155,9 @@ test("short and overlong topics return clear local validation instead of classif
     }
   }
   assert.match(setup("whiteboard").creationRequest("CRM?").validation_error, /8 символов/);
+  const longVideoError = setup("whiteboard").creationRequest("а".repeat(301)).validation_error;
+  assert.match(longVideoError, /разделе «Видео»/);
+  assert.doesNotMatch(longVideoError, /дополнительных требованиях/);
   assert.equal(setup("post").creationRequest("CRM?").creation.topic, "CRM?");
   assert.equal(setup("whiteboard").creationRequest("Как CRM?").creation.topic, "Как CRM?");
 });
