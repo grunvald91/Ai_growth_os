@@ -1099,7 +1099,7 @@
       image_model:selected==='story'||selected==='static_image'
         ? (imageModel && imageModel.value || 'auto')
         : selected==='post' && platform && platform.value==='vk'
-        ? (vkImageModel && vkImageModel.value || 'auto') : null,
+        ? (vkImageModel && vkImageModel.value || 'none') : null,
       aspect_ratio:selected==='story' ? '9:16'
         : selected==='static_image' && aspect && aspect.value ? aspect.value
         : selected==='post' && platform && platform.value==='vk'
