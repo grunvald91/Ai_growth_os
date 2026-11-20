@@ -127,7 +127,7 @@ def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_a
                       status=ArtifactStatus.AWAITING_APPROVAL)
     db.add(source); db.flush()
     db.add(Artifact(product_id=product.id, task_id=task.id, kind='whiteboard_job_state',
-                    title='Ход генерации', content=json.dumps({'calls': 0, 'stage': 'waiting_approval',
+                    title='Ход генерации', content=json.dumps({'calls': 0, 'attempts_started': 0, 'stage': 'waiting_approval',
                         'error': None, 'cost_usd': None, 'cost_known': False, 'request_digest': digest(content)})))
     db.add(Approval(product_id=product.id, artifact_id=source.id, action_type=ACTION, risk_level='YELLOW',
                     status='pending', requested_by='owner', reason='sha256:' + digest(content)))
@@ -201,18 +201,30 @@ def call_limit(value, payload) -> int:
     return payload.max_api_calls + int(value.get('extra_calls', 0))
 
 
+def started_attempts(value) -> int:
+    """Conservative count for new requests. Legacy jobs lack this field."""
+    counted = value.get('calls', 0)
+    raw = value.get('attempts_started')
+    if raw is None:
+        return counted
+    if type(raw) is not int or raw < 0:
+        # Corrupted counters must not silently authorize paid calls.
+        return MAX_API_CALLS + TOP_UP_TOTAL + 1
+    return max(counted, raw)
+
+
 def can_resume(task_status, value, payload) -> bool:
     return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS | {'call_limit'}
             and payload.visual_repair_from is None
             # Rendering is local: a job stopped there needs no further paid calls.
-            and (value.get('calls', 0) < call_limit(value, payload) or value.get('failed_stage') == 'rendering'))
+            and (started_attempts(value) < call_limit(value, payload) or value.get('failed_stage') == 'rendering'))
 
 
 def can_top_up(task_status, value, payload) -> bool:
     """The approved calls are spent: only the owner may add more to finish the video."""
     return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS | {'call_limit'}
             and payload.visual_repair_from is None and value.get('failed_stage') != 'rendering'
-            and value.get('calls', 0) >= call_limit(value, payload)
+            and started_attempts(value) >= call_limit(value, payload)
             and int(value.get('extra_calls', 0)) < TOP_UP_TOTAL)
 
 
@@ -224,8 +236,9 @@ def record_error(value, code, *, details=None, at=None) -> dict:
     return entry
 
 
-# The provider never answered these (it errored on its side or was unreachable): nothing was
-# produced or billed, so the call does not use up the owner's confirmed limit.
+# Some HTTP/network failures can still be billed by the provider; this historical
+# counter refund does NOT prove a monetary refund. New jobs also have a separate
+# non-refundable attempts_started ceiling so no response can replenish permission.
 UNANSWERED_STATUSES = frozenset({429, 500, 502, 503})
 UNANSWERED_EXCEPTIONS = frozenset({'ConnectError', 'ConnectTimeout'})
 
@@ -258,7 +271,7 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
                      and code in {'openrouter_unavailable', 'claudehub_unavailable'})
     if (code not in RESUMABLE_ERRORS or (used >= limit and not provider_wait)
             or payload.visual_repair_from is not None
-            or not (value.get('calls', 0) < call_limit(value, payload) or provider_wait
+            or not (started_attempts(value) < call_limit(value, payload) or provider_wait
                     or value.get('failed_stage') == 'rendering')):
         return False
     now = now or datetime.now(timezone.utc)
@@ -354,7 +367,7 @@ class CallLedger:
             if task.status != TaskStatus.RUNNING or approval.status != 'approved' or source.status != ArtifactStatus.APPROVED:
                 raise ReadinessError('approval_invalid')
             value = json.loads(state.content)
-            if value['calls'] >= call_limit(value, payload):
+            if started_attempts(value) >= call_limit(value, payload):
                 raise ReadinessError('call_limit')
             # Optional owner-authorized hard ceiling on the number of *begun*
             # provider calls, not the refundable billing ledger. HTTP 502,
@@ -392,6 +405,8 @@ class CallLedger:
                            model=getattr(payload.models, model_stage), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
             db.add(run); db.flush()
+            if 'attempts_started' in value:
+                value['attempts_started'] += 1  # Never decremented on HTTP 502.
             value.update(calls=value['calls'] + 1, stage=stage, error=None,
                          last_call_started_at=datetime.now(timezone.utc).isoformat())
             state.content = json.dumps(value)

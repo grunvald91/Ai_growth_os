@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol
 import hashlib
 import json
+import httpx
 
 from app.content.whiteboard.science import FactReview, evidence_supported, requires_science_review
 from .adapters import InvalidRegionResponse
@@ -245,9 +246,30 @@ class WhiteboardPipeline:
                 try:
                     return await self.regions.detect(scene, image)
                 except InvalidRegionResponse:
-                    # The vision call already counts towards the approved budget.
-                    # Do not make another paid call for malformed JSON.
+                    # The paid vision response was unusable. Use the diagram's
+                    # actual blank separators without paying for the same error.
                     plan, invalid_json_audit = complete_diagram_regions(scene, image, None)
+                    return plan
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code not in {429, 500, 502, 503, 504}:
+                        raise  # Never turn authentication/policy errors into success.
+                    plan, invalid_json_audit = complete_diagram_regions(scene, image, None)
+                    invalid_json_audit.update(
+                        reason='vision_provider_http_unavailable',
+                        provider_http_status=exc.response.status_code,
+                        attempted_provider_calls=1, billing_status='unknown',
+                    )
+                    return plan
+                except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as exc:
+                    # Transient transport failures can be charged upstream.
+                    # The in-flight attempt remains in the audit; don't send
+                    # another paid request merely to obtain beat rectangles.
+                    plan, invalid_json_audit = complete_diagram_regions(scene, image, None)
+                    invalid_json_audit.update(
+                        reason='vision_provider_transport_unavailable',
+                        provider_exception_type=type(exc).__name__,
+                        attempted_provider_calls=1, billing_status='unknown',
+                    )
                     return plan
 
             if self.checkpoints is not None:
