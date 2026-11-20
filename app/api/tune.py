@@ -500,5 +500,3 @@ async def vk_group_app_remove(request: Request, settings: Settings = Depends(get
     except ValueError:
         result = "app_blocked"
     return RedirectResponse("/studio/tune/vk?result=" + result, status_code=303)
-
-
