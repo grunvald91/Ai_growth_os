@@ -770,7 +770,7 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
 
     pilot_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert "Проверить вход ВКонтакте" in pilot_html
-    assert 'Совместимость с вашим VK-приложением ещё не подтверждена.' in pilot_html
+    assert 'совместимость с вашим VK-приложением ещё не подтверждена.' in pilot_html
     assert '<a href="/studio/tune/vk"' in pilot_html
     assert "/studio/tune/vk" not in vk_page(
         product.id, customer, db=db, settings=settings).body.decode()
