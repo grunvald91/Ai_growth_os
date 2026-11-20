@@ -164,8 +164,8 @@ class VKStore(CommentSecrets):
 
 def community_oauth_config(settings):
     """Only legacy *community* applications support this flow; VK ID is separate."""
-    app_id = str(settings.social_vk_community_app_id or "").strip()
-    app_secret = str(settings.social_vk_community_app_secret or "").strip()
+    from app.vk_service import group_app_credentials
+    app_id, app_secret = group_app_credentials(settings) or ("", "")
     if (not re.fullmatch(r"[1-9]\d{3,20}", app_id)
             or len(app_secret) < 8 or len(app_secret) > 500
             or any(ord(ch) < 33 for ch in app_secret)):
@@ -284,8 +284,14 @@ async def finish_community_oauth(db, settings, payload, code):
             expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lifetime)).isoformat()
         except (TypeError, OverflowError):
             raise ValueError("Неверный срок действия ключа VK") from None
-    return connect_community(db, settings, product_id, group, token,
-                             name=name, expires_at=expires_at)
+    connection = connect_community(db, settings, product_id, group, token,
+                                   name=name, expires_at=expires_at)
+    # A real VK authorization and accepted scope confirms this platform app.
+    # Only the credential fingerprint is stored; old app credentials cannot
+    # inherit the successful-provider mark after a rotation.
+    from app.vk_service import mark_group_app_verified
+    mark_group_app_verified(settings)
+    return connection
 
 
 def begin_oauth(settings, product_id, account_id, *, owner_login=None):
