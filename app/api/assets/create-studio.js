@@ -10,6 +10,8 @@
   const platformRow=document.getElementById('sg-create-platform-row');
   const countRow=document.getElementById('sg-create-count-row');
   const modelRow=document.getElementById('sg-create-model-row');
+  const vkImageRow=document.getElementById('sg-create-vk-image-row');
+  const vkRatioRow=document.getElementById('sg-create-vk-ratio-row');
   const aspectRow=document.getElementById('sg-create-aspect-row');
   const storyRatio=document.getElementById('sg-create-story-ratio');
   const aspect=document.getElementById('sg-create-aspect');
@@ -45,6 +47,13 @@
       'затем стратег формирует подход, специалисты готовят материал, а проверка ищет проблемы качества. '+
       'Готовый результат появляется в заданиях для вашего просмотра. Публикация — отдельное действие.');
   });
+  function syncVkImage(){
+    const show=root.getAttribute('data-create-format')==='post' && platform.value==='vk';
+    if(vkImageRow) vkImageRow.hidden=!show;
+    if(vkRatioRow) vkRatioRow.hidden=!show;
+  }
+  platform.addEventListener('change',syncVkImage);
+
   function chooseFormat(key){
     const selected=screen.querySelector('[data-sg-format="'+key+'"]');
     if(!selected)return;
@@ -66,6 +75,7 @@
     });
     if(channels[key] && channels[key].some(([value])=>value===previous)) platform.value=previous;
     else platform.value=defaults[key]||'';
+    syncVkImage();
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
     const context=document.getElementById('sg-create-context');
