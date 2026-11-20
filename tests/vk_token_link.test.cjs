@@ -22,6 +22,8 @@ function setup(withMain = true) {
   const nodes = {
     "sg-vk-community-link": element(),
     "sg-vk-token-link": element(),
+    "sg-vk-group-link": element(),
+    "sg-vk-oauth-group-link": element(),
     "sg-vk-token-copy": element(),
     "sg-vk-token-help": element(),
   };
@@ -41,6 +43,8 @@ test("without community input there is NO misleading link to all VK communities"
   assert.equal(link.hidden, true);
   assert.equal(link.href, "");
   assert.equal(nodes["sg-vk-token-copy"].hidden, true);
+  assert.equal(nodes["sg-vk-group-link"].href, "");
+  assert.equal(nodes["sg-vk-group-link"].hidden, true);
   assert.match(nodes["sg-vk-token-help"].textContent, /Вставьте ссылку/);
 });
 
@@ -58,6 +62,7 @@ test("specific community names and numeric IDs lead straight to token settings",
     input.fire("input");
     assert.equal(link.hidden, false);
     assert.equal(link.href, destination);
+    assert.equal(nodes["sg-vk-group-link"].href, destination.replace("?act=tokens", ""));
     assert.equal(nodes["sg-vk-token-copy"].hidden, false);
   }
 });
@@ -83,6 +88,7 @@ test("group from first authorization field is reused in key form", () => {
   main.fire("input");
   assert.equal(keyInput.value, "vk.com/club89");
   assert.equal(nodes["sg-vk-token-link"].href, "https://vk.ru/club89?act=tokens");
+  assert.equal(nodes["sg-vk-oauth-group-link"].href, "https://vk.ru/club89");
   keyInput.value = "vk.com/club90";
   keyInput.fire("input");
   main.value = "vk.com/club91";
