@@ -38,6 +38,8 @@ VK_TOKEN_DEEPLINK_SCRIPT = r"""<script>
   const input = document.getElementById("sg-vk-community-link");
   const mainInput = document.getElementById("sg-vk-oauth-community-link");
   const link = document.getElementById("sg-vk-token-link");
+  const groupLink = document.getElementById("sg-vk-group-link");
+  const mainGroupLink = document.getElementById("sg-vk-oauth-group-link");
   const copy = document.getElementById("sg-vk-token-copy");
   const hint = document.getElementById("sg-vk-token-help");
   if (!input || !link || !hint || !copy) return;
@@ -66,7 +68,16 @@ VK_TOKEN_DEEPLINK_SCRIPT = r"""<script>
            /^[A-Za-z][A-Za-z0-9_.]{2,99}$/.test(name) ? name : null;
   }
 
+  function updateGroupLink(anchor, value) {
+    if (!anchor) return;
+    const name = communityName(value);
+    if (!name) { anchor.removeAttribute("href"); anchor.hidden = true; }
+    else { anchor.href = "https://vk.ru/" + encodeURIComponent(name); anchor.hidden = false; }
+  }
+
   function update() {
+    updateGroupLink(groupLink, input.value);
+    updateGroupLink(mainGroupLink, mainInput ? mainInput.value : "");
     const name = communityName(input.value);
     // No href at all until we know which community the user is managing.
     // The old /groups fallback silently took the user to the wrong page.
@@ -239,7 +250,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
     settings_link = _vk_owner_settings_link(settings, request, product_id)
     oauth_first = (f"""
  <form method="post" action="/studio/products/{product_id}/vk/group-connect" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
+  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте <a id="sg-vk-oauth-group-link" target="_blank" rel="noopener noreferrer" hidden>Открыть указанное сообщество</a></span>
    <input id="sg-vk-oauth-community-link" type="text" name="community_link" maxlength="255" autocomplete="url"
      placeholder="https://vk.com/my_community" required></label>
   <button class="btn primary" type="submit">{"Проверить вход ВКонтакте" if pilot_mode else "Подключить ВКонтакте"}</button>
@@ -263,7 +274,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  {oauth_first}
  <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Ссылка на сообщество <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
+  <label class="sg-field"><span>Ссылка на сообщество <a id="sg-vk-group-link" target="_blank" rel="noopener noreferrer" hidden>Открыть указанное сообщество</a></span>
    <input id="sg-vk-community-link" name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
   <p class="sg-footnote" id="sg-vk-token-help" role="status" aria-live="polite">Вставьте ссылку на своё сообщество выше — появится переход прямо к ключам API.</p>
