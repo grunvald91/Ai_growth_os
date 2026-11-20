@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04  # pinned: ubuntu-latest moved to 26.04 and broke media/browser CI
+    runs-on: ubuntu-22.04  # temporary compatibility pin while Ubuntu 24.04 apt mirrors are degraded; never use ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
