@@ -114,7 +114,7 @@ def create_content_html(product_id, *, created=False, fields=None, error=None,
             {brand_controls}
             <fieldset class="sg-field sg-wide" data-vk-post-image-control style="display:none">
               <legend>Иллюстрация для поста ВКонтакте</legend>
-              <label><input name="vk_generate_image" type="checkbox" value="yes" ${"checked" if fields.get('vk_generate_image') == 'yes' else ''}> Сгенерировать подходящую картинку (1 платный вызов)</label>
+              <label><input name="vk_generate_image" type="checkbox" value="yes" {"checked" if fields.get('vk_generate_image') == 'yes' else ''}> Сгенерировать подходящую картинку (1 платный вызов)</label>
               <label class="sg-field"><span>Модель изображения</span>
                 <select name="vk_image_model">
                   <option value="auto" selected>Автоматически · доступная модель</option>
