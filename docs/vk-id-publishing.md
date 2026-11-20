@@ -19,12 +19,15 @@
 В контейнере API и worker:
 
 ```env
-SOCIAL_VK_CLIENT_ID=<numeric_web_application_id>
+SOCIAL_VK_CLIENT_ID=<optional_numeric_vk_id_application_id>
+SOCIAL_VK_SERVICE_TOKEN=<optional_read_only_app_service_token>
 SOCIAL_VK_REDIRECT_BASE=https://servgo.ru
 CONTENT_VK_AUTOPOST_ENABLED=false
 ```
 
-У VK ID приложения необходимо зарегистрировать точный redirect URI:
+Ключ `SOCIAL_VK_SERVICE_TOKEN` выдаётся приложению VK и хранится только в защищённом окружении сервера. Один платформенный ключ используется для чтения публичной стены при проверке/импорте комментариев, а **запись** выполняется исключительно ключом конкретного сообщества; проверка не должна сохранять сервисный ключ в данных арендатора. При отсутствии сервисного ключа текстовые публикации доступны, а чтение комментариев остаётся неподключённым.
+
+Для необязательного способа авторизации через VK ID необходимо зарегистрировать точный redirect URI:
 
 `https://servgo.ru/studio/social/vk/callback`
 
