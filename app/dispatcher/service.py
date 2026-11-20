@@ -364,6 +364,12 @@ def _apply_create_hints(decision: DispatcherDecision, hints, text: str, *,
     explicit_channel = None if subject_only else re.search(
         r"(?iu)(?:телеграм|telegram|вконтакте|\bvk\b|инстаграм|instagram|youtube|ютуб|дзен|dzen|tenchat|vc\.ru)",
         text)
+    if target == "post" and hints.format == "post":
+        effective_channel = (params.get("channel") if explicit_channel
+                             else hints.platform or params.get("channel"))
+        if effective_channel == "vk":
+            params["image_model"] = hints.image_model or "none"
+            params["image_ratio"] = hints.aspect_ratio or "4:5"
     if explicit_channel:
         return
     if capability == "create_post":
