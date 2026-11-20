@@ -143,3 +143,52 @@ async def test_vk_square_preset_is_persisted(db, tmp_path, monkeypatch):
     assert json.loads(asset.content)["ratio"] == "1:1"
     assert json.loads(post.content)["image_ratio"] == "1:1"
     assert requests == [("1:1", True)]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_create_vk_post_with_image_preserves_confirmation_and_ratio(db, tmp_path):
+    from app.dispatcher import service
+    from app.dispatcher.editable import CreateHints
+    from app.dispatcher.outcome import Context
+    from app.models.domain import TaskStatus
+
+    product = Product(name="Компания VK", slug="vk-dispatcher-image")
+    db.add(product)
+    db.commit()
+    ctx = Context(db=db, product=product,
+                  settings=Settings(_env_file=None, products_root=tmp_path,
+                                    xai_api_key="test-not-used"),
+                  account="owner")
+    topic = "Зачем бизнесу онлайн-запись?"
+    creation = CreateHints(format="post", topic=topic, platform="vk",
+                           image_model="gemini", aspect_ratio="1:1")
+    answer = await service.handle_message(
+        db, ctx, None, text=topic, client_key="vk-image-confirm-1",
+        creation=creation)
+    card = next(x for x in answer["messages"][-1]["blocks"] if x["type"] == "confirm")
+    assert card["paid"] is True
+    assert card["editable"]["aspect_ratio"] == "1:1"
+    assert card["editable"]["image_model"] == "gemini"
+    assert db.scalars(select(Task).where(
+        Task.product_id == product.id, Task.assigned_agent == "content_factory")).first() is None
+    await service.confirm(db, ctx, card["confirmation_id"], accept=True)
+    task = db.scalars(select(Task).where(
+        Task.product_id == product.id, Task.assigned_agent == "content_factory")).first()
+    assert task is not None and task.status == TaskStatus.QUEUED
+    request = db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "content_request")).first()
+    data = json.loads(request.content)
+    assert data["channel"] == "vk"
+    assert data["image_model"] == "gemini"
+    assert data["image_ratio"] == "1:1"
+
+
+def test_invalid_dispatcher_post_image_scope():
+    from app.dispatcher.editable import CreateHints, EditCreation
+    with pytest.raises(ValueError):
+        CreateHints(format="post", topic="Тема для поста", platform="telegram",
+                    image_model="auto", aspect_ratio="4:5")
+    with pytest.raises(ValueError):
+        EditCreation(confirmation_id="test", revision=0, format="post",
+                     topic="Тема для поста", platform="vk",
+                     image_model="auto", aspect_ratio="9:16")
