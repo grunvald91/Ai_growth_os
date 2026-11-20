@@ -55,11 +55,18 @@ jobs:
           if [ -f /etc/apt/apt-mirrors.txt ]; then
             sudo sed -i '/azure\\.archive\\.ubuntu\\.com/d' /etc/apt/apt-mirrors.txt
           fi
-          # The Ubuntu mirror intermittently stalls for minutes before tests.
-          # Try to install missing language packs, but evaluate the full pytest
-          # suite when the runner already has all required media executables.
-          if sudo timeout 35 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 update -qq \
-              && sudo timeout 70 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 install -y -qq "${missing[@]}"; then
+          # Ubuntu 22.04 hosted runners may use sources.list rather than
+          # apt-mirrors.txt; replace the stalled Azure host there as well.
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            [ -f "$source" ] || continue
+            if grep -q 'azure\\.archive\\.ubuntu\\.com' "$source"; then
+              sudo sed -i 's#azure\\.archive\\.ubuntu\\.com#archive.ubuntu.com#g' "$source"
+            fi
+          done
+          # Run the full suite only with the required media executables. Give
+          # package downloads time to finish instead of failing after 70 seconds.
+          if sudo timeout 65 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq \
+              && sudo timeout 160 apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq "${missing[@]}"; then
             exit 0
           fi
           for binary in ffmpeg pdftoppm tesseract; do
