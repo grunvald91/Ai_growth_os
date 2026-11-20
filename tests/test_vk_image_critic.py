@@ -37,7 +37,7 @@ def _setup(db, tmp_path):
         product_id=product.id, task_id=task.id, kind="generated_image",
         title="Обложка VK", content=json.dumps({
             "filename": "frame-01.png", "frame_number": 1,
-            "ratio": "4:5", "sha256": digest,
+            "ratio": "4:5", "model": "gemini-3.1-flash-image", "sha256": digest,
         }), status="draft",
     )
     post = ArtifactService(db).create(
@@ -108,7 +108,7 @@ async def test_minor_and_uncertain_issues_pass_without_redraw(db, tmp_path):
     assert json.loads(audit[0].content)["policy"] == REVIEW_POLICY
     from app.api.content_studio import material_detail_page
     page = material_detail_page(db, product, post, root=tmp_path)
-    assert "frame-01" in page or str(asset.id) in page
+    assert f"/tasks/{task.id}/images/{asset.id}" in page
 
 
 @pytest.mark.asyncio
