@@ -66,7 +66,7 @@ def community_reference(value):
     if not isinstance(value, str) or not value.strip() or len(value) > 255:
         raise ValueError("Вставьте ссылку на сообщество VK")
     raw = value.strip()
-    if raw.startswith(("vk.com/", "www.vk.com/", "m.vk.com/", "vk.ru/", "www.vk.ru/", "m.vk.ru/")):
+    if raw.casefold().startswith(("vk.com/", "www.vk.com/", "m.vk.com/", "vk.ru/", "www.vk.ru/", "m.vk.ru/")):
         raw = "https://" + raw
     if "://" in raw:
         parts = urlsplit(raw)
