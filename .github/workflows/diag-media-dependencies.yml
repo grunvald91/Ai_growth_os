@@ -1,0 +1,26 @@
+name: Diagnostic media packages on Ubuntu 24.04 (read-only)
+on:
+  push:
+    branches: [diag/ci-media-dependencies-20261120]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Read-only package and available binary inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in ffmpeg fonts-dejavu-core poppler-utils tesseract-ocr tesseract-ocr-rus tesseract-ocr-eng; do
+            printf '%s: ' "$package"
+            dpkg-query -W -f='${Status}' "$package" 2>/dev/null || echo missing
+            echo
+          done
+          for tool in ffmpeg ffprobe pdftoppm tesseract; do
+            printf '%s: ' "$tool"
+            command -v "$tool" || true
+          done
+          find /usr/share/tesseract-ocr -name '*traineddata' -printf '%f\n' 2>/dev/null || true
+          tesseract --list-langs 2>&1 || true
