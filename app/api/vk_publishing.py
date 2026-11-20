@@ -268,9 +268,9 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
       placeholder="https://vk.com/my_community" required></label>
   <p class="sg-footnote" id="sg-vk-token-help" role="status" aria-live="polite">Вставьте ссылку на своё сообщество выше — появится переход прямо к ключам API.</p>
   <label class="sg-field"><span>Ключ сообщества <a id="sg-vk-token-link" target="_blank" rel="noopener noreferrer" hidden>Открыть ключи API моего сообщества</a></span>
-  <button id="sg-vk-token-copy" type="button" class="btn secondary small" hidden>Скопировать ссылку на настройки в браузере</button>
    <input name="access_token" type="password" maxlength="8000" autocomplete="off"
       placeholder="Ключ из настроек сообщества" required></label>
+  <button id="sg-vk-token-copy" type="button" class="btn secondary small" hidden>Скопировать ссылку на настройки в браузере</button>
   <button class="btn primary" type="submit">Проверить и подключить публикации</button>
  </form>
  <details><summary>Как получить ключ сообщества?</summary>
