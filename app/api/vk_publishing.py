@@ -64,6 +64,25 @@ def _can_begin_community_oauth(settings, request: Request) -> bool:
             and getattr(request.state, "studio_product_ids", None) is None)
 
 
+def _is_tune_owner(settings, request: Request) -> bool:
+    """Mirror /studio/tune's operator allowlist and company-scope rule."""
+    login = getattr(request.state, "studio_login", None)
+    allowed = {name.strip() for name in
+               (settings.studio_tune_usernames or "").split(",") if name.strip()}
+    return (bool(login) and login in allowed
+            and getattr(request.state, "studio_product_ids", None) is None)
+
+
+def _vk_owner_settings_link(settings, request: Request, product_id: UUID) -> str:
+    """Only link to the operator-only screen if this account can access it."""
+    if not _is_tune_owner(settings, request):
+        return ""
+    # Internal relative route; no external redirect, token or company data.
+    return (' <a href="/studio/tune/vk" class="sg-footnote"'
+            ' aria-label="Настройки подключения ВКонтакте в ServGo">'
+            'Настроить подключение VK</a>')
+
+
 def connection_error(key):
     return {
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
@@ -131,8 +150,13 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                              and (not channel.is_community_token or platform_service_token(settings)))
         if channel.is_community_token and channel.expires_at:
             current += '<p class="sg-footnote">Доступ VK ограничен по сроку. Для продления подключите сообщество заново до окончания действия ключа.</p>'
-        current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
-                    if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
+        if replies_ready:
+            current += '<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
+        else:
+            owner_help = (_vk_owner_settings_link(settings, request, product_id)
+                          if channel.is_community_token and not platform_service_token(settings) else "")
+            current += ('<p class="sg-footnote">Комментарии: не подключены.'
+                        + owner_help + '</p>')
         if channel.is_community_token and platform_service_token(settings) and not replies_ready:
             current += (f'<form method="post" action="/studio/products/{product_id}/vk/connect-comments">'
                         '<button class="btn secondary" type="submit">Подключить чтение комментариев</button>'
@@ -141,6 +165,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     group_oauth_ready = _can_begin_community_oauth(settings, request)
     pilot_mode = group_oauth_ready and not group_app_verified(settings)
+    settings_link = _vk_owner_settings_link(settings, request, product_id)
     oauth_first = (f"""
  <form method="post" action="/studio/products/{product_id}/vk/group-connect" class="sg-fields sg-compact-form">
   <label class="sg-field"><span>Ссылка на сообщество ВКонтакте</span>
@@ -149,9 +174,12 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
   <button class="btn primary" type="submit">{"Проверить вход ВКонтакте" if pilot_mode else "Подключить ВКонтакте"}</button>
   <p class="sg-footnote">Вы перейдёте во ВКонтакте, чтобы подтвердить доступ ServGo.
   Ключи копировать не требуется. Подключение станет активным только после проверки прав.
-  {"Пробный режим: совместимость с вашим VK-приложением ещё не подтверждена." if pilot_mode else ""}</p>
+  {"Пробный режим: совместимость с вашим VK-приложением ещё не подтверждена." if pilot_mode else ""}{settings_link if pilot_mode else ""}</p>
  </form>""" if group_oauth_ready else
- '<p class="sg-footnote">Авторизация одним нажатием станет доступна после подключения приложения VK администратором ServGo.</p>')
+ ('<p class="sg-footnote">Авторизация одним нажатием пока не настроена.'
+  + settings_link
+  + '</p>' if settings_link else
+  '<p class="sg-footnote">Подключение одним нажатием пока недоступно. Используйте ключ сообщества ниже.</p>'))
     enabled = bool(settings.content_vk_autopost_enabled)
     can_schedule = bool(channel and posts)
     status = ("Отправка по расписанию включена на сервере."
