@@ -126,12 +126,17 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         <label class="sg-create-setting" id="sg-create-vk-image-row" hidden>
           <span>Картинка для поста ВКонтакте</span>
           <select id="sg-create-vk-image-model" aria-label="Генерация изображения к посту VK">
-            <option value="auto">С картинкой · одна платная генерация</option>
+            <option value="auto">С картинкой · генерация + критик</option>
             <option value="none">Только текст · без изображения</option>
             <option value="gemini">С картинкой · Gemini</option>
             <option value="openai">С картинкой · ChatGPT Image</option>
           </select>
         </label>
+        <p class="sg-create-tip" id="sg-create-vk-review-tip" hidden>
+          После генерации визуальный критик проверит картинку и текст поста.
+          Мелкие недочёты допускаются; серьёзные несоответствия блокируют изображение.
+          Предусмотрено два платных API-вызова: генерация и проверка, без автоматической перерисовки.
+        </p>
         <label class="sg-create-setting" id="sg-create-vk-ratio-row" hidden>
           <span>Формат картинки для ВКонтакте</span>
           <select id="sg-create-vk-image-ratio" aria-label="Формат иллюстрации VK">
