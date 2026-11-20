@@ -369,7 +369,9 @@ async def test_vk_split_read_and_write_tokens_for_comments(monkeypatch):
         if method == "wall.get":
             return {"items": [{"id": 15, "owner_id": owner, "text": "Пост"}], "count": 1}
         if method == "wall.getComments":
-            return {"items": [{"id": 91, "post_id": 15, "text": "Цена?",
+            # The VK API schema makes comment.post_id optional. Read is scoped
+            # to owner=-123456, post_id=15 in the request, not in each item.
+            return {"items": [{"id": 91, "text": "Цена?",
                                "from_id": 77, "thread": {"count": 0}}], "count": 1}
         if method == "wall.createComment":
             return {"comment_id": 92}
@@ -406,3 +408,37 @@ async def test_vk_service_token_used_only_for_read(monkeypatch, tmp_path):
     channel = SimpleNamespace(platform="vk", id="test-channel")
     assert await service.channel_token(channel, for_read=True) == "read-only-key"
     assert await service.channel_token(channel) == "community-write-key"
+
+
+@pytest.mark.asyncio
+async def test_vk_reply_rejects_conflicting_post_id_with_service_read_token(monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.comments.vk import VKAdapter
+    from app.comments.gateway import CommentGateway, PlatformError
+
+    methods = []
+
+    async def call(self, method, token, **params):
+        methods.append(method)
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Команда"}]}
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192}
+        if method == "groups.getCallbackSettings":
+            return {"events": {}}
+        if method == "wall.getComments":
+            return {"items": [{"id": 91, "post_id": 999, "text": "Чужой комментарий",
+                               "from_id": 77}], "count": 1}
+        if method == "wall.createComment":
+            raise AssertionError("Writing after a conflicting post ID is forbidden")
+        raise AssertionError("Unexpected VK call " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", call)
+    adapter = VKAdapter(CommentGateway(vk_read_token="read-only-service-key"), "vk")
+    channel = SimpleNamespace(account_id="123456", platform="vk")
+    comment = SimpleNamespace(id=uuid4(), external_id="-123456_15_91",
+                              target={"owner_id": -123456, "post_id": 15, "comment_id": 91})
+    with pytest.raises(PlatformError, match="удалён или недоступен"):
+        await adapter.send(channel, "community-key", comment, "Ответ")
+    assert "wall.createComment" not in methods
