@@ -33,6 +33,8 @@ from app.services.campaign_lifecycle import closing_campaign_for_material
 
 OAUTH_COOKIE = "sg_vk_publish_oauth"
 OAUTH_PATH = "/studio/social/vk/callback"
+GROUP_OAUTH_PATH = "/studio/social/vk/group-callback"
+GROUP_OAUTH_COOKIE = "sg_vk_group_oauth"
 OAUTH_TTL = 600
 API_TIMEOUT = 25
 
@@ -157,6 +159,128 @@ class VKStore(CommentSecrets):
         with self.locked():
             for path in (self.path(channel_id), self.oauth_path(channel_id)):
                 path.unlink(missing_ok=True)
+
+
+
+def community_oauth_config(settings):
+    """Only legacy *community* applications support this flow; VK ID is separate."""
+    app_id = str(settings.social_vk_community_app_id or "").strip()
+    app_secret = str(settings.social_vk_community_app_secret or "").strip()
+    if (not re.fullmatch(r"[1-9]\\d{3,20}", app_id)
+            or len(app_secret) < 8 or len(app_secret) > 500
+            or any(ord(ch) < 33 for ch in app_secret)):
+        raise ValueError("Авторизация сообщества VK не настроена администратором ServGo")
+    return app_id, app_secret
+
+
+def community_oauth_redirect(settings):
+    return redirect_uri(settings).removesuffix(OAUTH_PATH) + GROUP_OAUTH_PATH
+
+
+async def _legacy_oauth_token(settings, *, code=None, service=False):
+    """Fixed official endpoint; never log or return the app secret to browsers."""
+    app_id, secret = community_oauth_config(settings)
+    params = {"client_id": app_id, "client_secret": secret}
+    if service:
+        params["grant_type"] = "client_credentials"
+    else:
+        params.update({"code": code, "redirect_uri": community_oauth_redirect(settings)})
+    try:
+        async with httpx.AsyncClient(timeout=API_TIMEOUT, trust_env=False,
+                                     follow_redirects=False) as client:
+            # VK's official group SDK uses GET at this endpoint.
+            response = await client.get("https://oauth.vk.com/access_token", params=params)
+        result = response.json()
+        if response.status_code != 200 or not isinstance(result, dict) or result.get("error"):
+            raise ValueError("VK не предоставил требуемый доступ к сообществу")
+        return result
+    except (httpx.HTTPError, ValueError) as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("VK не предоставил"):
+            raise
+        raise ValueError("VK не завершил авторизацию. Можно подключить ключ сообщества вручную") from None
+
+
+async def begin_community_oauth(settings, product_id, reference, *, owner_login=None):
+    """For the owner: link -> official VK community consent -> return to Studio."""
+    app_id, _ = community_oauth_config(settings)
+    name_or_id = community_reference(reference)
+    if name_or_id.isdigit():
+        account_id = group_id(name_or_id)
+    else:
+        # No user ID lookup, password or scraping. Use the platform's own
+        # service credential if present, or its independently issued app key.
+        from app.vk_service import platform_service_token
+        token = platform_service_token(settings)
+        if not token:
+            result = await _legacy_oauth_token(settings, service=True)
+            token = result.get("access_token")
+        if not token:
+            raise ValueError("Не удалось определить ID сообщества. Используйте ручное подключение")
+        account_id, _ = await resolve_community(token, reference)
+    state = secrets.token_urlsafe(32)
+    payload = {"kind": "group", "state": state, "group_id": account_id,
+               "product_id": str(UUID(str(product_id))),
+               "owner_login": owner_login, "redirect_uri": community_oauth_redirect(settings)}
+    store = VKStore(settings.products_root)
+    with store.locked():
+        cookie = store.cipher().encrypt(json.dumps(payload).encode("utf-8")).decode("ascii")
+    # The official SDK accepts group_ids and the requested scope bitmask.
+    # VK can deny the legacy flow for newly registered applications.
+    query = urlencode({
+        "client_id": app_id, "group_ids": account_id,
+        "redirect_uri": payload["redirect_uri"], "response_type": "code",
+        "scope": 262144 | 8192, "display": "page", "v": "5.199",
+        "state": state,
+    })
+    return "https://oauth.vk.com/authorize?" + query, cookie
+
+
+def read_community_oauth_cookie(settings, cookie, state):
+    if not cookie or not isinstance(cookie, str):
+        raise ValueError("Подключение VK истекло. Попробуйте заново")
+    try:
+        store = VKStore(settings.products_root)
+        with store.locked():
+            data = json.loads(store.cipher().decrypt(cookie.encode("ascii"), ttl=OAUTH_TTL))
+        if (not isinstance(data, dict) or data.get("kind") != "group"
+                or not isinstance(state, str)
+                or not secrets.compare_digest(data.get("state", ""), state)
+                or data.get("redirect_uri") != community_oauth_redirect(settings)):
+            raise ValueError("Недействительная авторизация VK")
+        group_id(data["group_id"])
+        UUID(data["product_id"])
+        return data
+    except (InvalidToken, OSError, TypeError, ValueError, KeyError, UnicodeError):
+        raise ValueError("Подключение VK истекло или не подтверждено") from None
+
+
+async def finish_community_oauth(db, settings, payload, code):
+    if not isinstance(code, str) or not re.fullmatch(r"[A-Za-z0-9_-]{5,4000}", code):
+        raise ValueError("ВКонтакте не предоставил код авторизации")
+    group = group_id(payload["group_id"])
+    product_id = UUID(payload["product_id"])
+    if db.get(Product, product_id) is None:
+        raise LookupError("Компания недоступна")
+    response = await _legacy_oauth_token(settings, code=code)
+    token = response.get("access_token_" + group)
+    if not isinstance(token, str) or not token:
+        raise ValueError("VK не выдал ключ выбранного сообщества")
+    resolved_id, name = await resolve_community(token, group)
+    if resolved_id != group:
+        raise ValueError("Ключ относится к другому сообществу")
+    await verify_community_key(token, group)
+    raw_lifetime = response.get("expires_in")
+    expires_at = None
+    if raw_lifetime not in (None, 0, "0"):
+        try:
+            lifetime = int(raw_lifetime)
+            if lifetime < 300:
+                raise ValueError("Слишком короткий срок действия ключа VK")
+            expires_at = (datetime.now(timezone.utc) + timedelta(seconds=lifetime)).isoformat()
+        except (TypeError, OverflowError):
+            raise ValueError("Неверный срок действия ключа VK") from None
+    return connect_community(db, settings, product_id, group, token,
+                             name=name, expires_at=expires_at)
 
 
 def begin_oauth(settings, product_id, account_id, *, owner_login=None):
@@ -300,7 +424,8 @@ def connected(db, product_id):
         except (TypeError, ValueError, KeyError):
             return None
         return SimpleNamespace(id=row.id, product_id=product_id, account_id=account_id,
-            account_name=str(details.get("name") or "Сообщество VK #" + account_id)[:255], is_community_token=True)
+            account_name=str(details.get("name") or "Сообщество VK #" + account_id)[:255],
+            is_community_token=True, expires_at=details.get("expires_at"))
     account = db.scalar(select(CommentChannel).where(
         CommentChannel.product_id == product_id,
         CommentChannel.platform == "vk", CommentChannel.status == "connected"))
@@ -311,7 +436,7 @@ def connected(db, product_id):
     return None
 
 
-def connect_community(db, settings, product_id, account_id, token, *, name=None):
+def connect_community(db, settings, product_id, account_id, token, *, name=None, expires_at=None):
     """Owner supplies the official community key; never claim permission before a real post."""
     group_id(account_id)
     if not isinstance(token, str) or not token or len(token) > 8000 or any(
@@ -331,7 +456,8 @@ def connect_community(db, settings, product_id, account_id, token, *, name=None)
     row = Artifact(product_id=product_id, kind="vk_publish_connection",
         title="Публикации VK: сообщество #" + account_id,
         status=ArtifactStatus.APPROVED,
-        content=json.dumps({"group_id": account_id, "auth_type": "community_token", "name": name}))
+        content=json.dumps({"group_id": account_id, "auth_type": "community_token",
+                            "name": name, "expires_at": expires_at}))
     db.add(row)
     db.flush()
     VKStore(settings.products_root).save_token(row.id, token)
@@ -371,6 +497,17 @@ def schedule(db, product_id, post_id, when):
     channel = connected(db, product_id)
     if channel is None:
         raise ValueError("Подключите сообщество VK")
+    if channel.is_community_token and channel.expires_at:
+        try:
+            end = datetime.fromisoformat(channel.expires_at)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            if end <= when:
+                raise ValueError("Ключ VK истечёт до публикации. Подключите сообщество заново")
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, ValueError) and "истечёт" in str(exc):
+                raise
+            raise ValueError("Срок действия ключа VK неизвестен. Подключите сообщество заново") from None
     # Community keys can publish text to their own wall in live VK API v5.199,
     # even though the published method schema lists 'user' tokens only.
     # Preserve explicit owner approval and mark actual capability only after wall.post.
@@ -482,6 +619,19 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
             pub.status = "failed_before_send"
             db.commit()
             return 1
+        if channel.is_community_token and channel.expires_at:
+            try:
+                deadline = datetime.fromisoformat(channel.expires_at)
+                if deadline.tzinfo is None:
+                    deadline = deadline.replace(tzinfo=timezone.utc)
+                if deadline <= now:
+                    pub.status = "failed_before_send"
+                    db.commit()
+                    return 1
+            except (ValueError, TypeError):
+                pub.status = "failed_before_send"
+                db.commit()
+                return 1
         pub.status = "sending"
         pub.sending_started_at = now
         publication_id = pub.id
