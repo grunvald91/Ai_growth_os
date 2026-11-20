@@ -32,7 +32,9 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models.domain import AgentRun, Artifact, CostRecord, Product, Task
 from app.vk_service import (platform_service_token, save_platform_service_token,
-                            delete_platform_service_token, verify_platform_service_token)
+                            delete_platform_service_token, verify_platform_service_token,
+                            group_app_credentials, group_app_verified,
+                            save_group_app_credentials, remove_group_app_credentials)
 
 router = APIRouter()
 
@@ -358,6 +360,10 @@ def vk_service_settings(result: str = "", owner: str = Depends(require_tune_owne
         "invalid": "ВКонтакте не подтвердил ключ, ссылку или доступ к стене/комментариям. Ключ не сохранялся.",
         "removed": "Ключ из зашифрованного хранилища удалён.",
         "blocked": "Настройка ключа управляется окружением сервера.",
+        "app_saved": "Приложение сообщества VK сохранено. Проверьте реальный вход на собственной группе; клиентам кнопка пока скрыта.",
+        "app_removed": "Параметры приложения VK и подтверждение его работы удалены.",
+        "app_invalid": "Неверный ID или защищённый ключ приложения VK.",
+        "app_blocked": "Приложение VK задаётся сервером, его нельзя заменить на этой странице.",
     }.get(result, "")
     header = (
         "<p class='notice'>Сервисный ключ настроен (источник: " + esc(source) + ").</p>"
@@ -383,8 +389,46 @@ def vk_service_settings(result: str = "", owner: str = Depends(require_tune_owne
 </form>
 """
     )
+    app_creds = group_app_credentials(settings)
+    app_source_locked = bool(settings.social_vk_community_app_id or settings.social_vk_community_app_secret)
+    is_verified = group_app_verified(settings)
+    app_status = (
+        "<p class='notice'>Авторизация сообщества проверена настоящим подключением. Клиенты могут подключаться через окно VK.</p>"
+        if is_verified else
+        ("<p class='notice'>Приложение сохранено, но реальный вход VK ещё не проверен. "
+         "Кнопка доступна только владельцу ServGo.</p>" if app_creds else
+         "<p class='notice error'>Приложение для авторизации сообществ пока не задано.</p>")
+    )
+    app_form = (
+        "<p>Параметры заданы в окружении сервера и не меняются из Studio.</p>"
+        if app_source_locked else """
+<form method="post" action="/studio/tune/vk/app">
+ <label>ID приложения VK для авторизации сообщества
+ <input type="text" name="app_id" inputmode="numeric" maxlength="20" autocomplete="off" required></label>
+ <label>Защищённый ключ приложения (client_secret)
+ <input type="password" name="app_secret" maxlength="500" autocomplete="off" required></label>
+ <div class="row"><button type="submit">Сохранить приложение</button></div>
+</form>
+<form method="post" action="/studio/tune/vk/app/remove">
+ <label><input type="checkbox" name="confirm" value="yes" required>
+ Отключить вход через это приложение VK.</label>
+ <button class="plain" type="submit">Удалить приложение</button>
+</form>
+"""
+    )
     body = (
-        "<h1>Доступ к комментариям ВКонтакте</h1>"
+        "<h1>Подключение ВКонтакте</h1>"
+        "<h2>Авторизация сообщества без ручного ключа</h2>"
+        "<p class='lead'>Настраивается один раз для всей платформы ServGo. "
+        "Клиенту останется вставить ссылку сообщества и подтвердить доступ в VK.</p>"
+        + app_status + "<div class='card'>"
+        "<p>Нужны ID и защищённый ключ <strong>классического OAuth-приложения для сообществ VK</strong>, "
+        "не обычного VK ID. Проверьте разрешённый callback: "
+        "<code>https://servgo.ru/studio/social/vk/group-callback</code>. "
+        "VK может отказать новым приложениям в старом OAuth; тест до выпуска для клиентов обязателен.</p>"
+        + app_form + "</div>"
+        "<h2>Чтение комментариев ВКонтакте</h2>"
+
         "<p class='lead'>Только владелец ServGo может задать платформенный сервисный ключ. "
         "Он используется исключительно для чтения публичных записей и комментариев; "
         "публикации и ответы выполняются ключом конкретного сообщества.</p>"
@@ -427,4 +471,32 @@ async def vk_service_remove(request: Request, settings: Settings = Depends(get_s
         result = "removed"
     except ValueError:
         result = "blocked"
+    return RedirectResponse("/studio/tune/vk?result=" + result, status_code=303)
+
+@router.post("/studio/tune/vk/app", dependencies=[Depends(require_studio_csrf)])
+async def vk_group_app_save(request: Request, settings: Settings = Depends(get_settings),
+                            owner: str = Depends(require_tune_owner)):
+    fields = await _studio_form(request)
+    try:
+        save_group_app_credentials(settings,
+                                   fields.get("app_id", ""), fields.get("app_secret", ""))
+        result = "app_saved"
+    except ValueError:
+        result = "app_blocked" if (
+            settings.social_vk_community_app_id or settings.social_vk_community_app_secret
+        ) else "app_invalid"
+    return RedirectResponse("/studio/tune/vk?result=" + result, status_code=303)
+
+
+@router.post("/studio/tune/vk/app/remove", dependencies=[Depends(require_studio_csrf)])
+async def vk_group_app_remove(request: Request, settings: Settings = Depends(get_settings),
+                              owner: str = Depends(require_tune_owner)):
+    fields = await _studio_form(request)
+    if fields.get("confirm") != "yes":
+        raise HTTPException(422, "Подтвердите отключение приложения VK")
+    try:
+        remove_group_app_credentials(settings)
+        result = "app_removed"
+    except ValueError:
+        result = "app_blocked"
     return RedirectResponse("/studio/tune/vk?result=" + result, status_code=303)

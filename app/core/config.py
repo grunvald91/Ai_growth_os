@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 
@@ -119,6 +119,10 @@ class Settings(BaseSettings):
     content_telegram_autopost_enabled: bool = False
     # VK ID web app ID, canonical OAuth callback and explicit publish kill switch.
     social_vk_client_id: str | None = None
+    # Separate legacy VK community OAuth application, NOT a VK ID app.
+    # This flow needs live provider verification: new VK ID apps may reject it.
+    social_vk_community_app_id: str | None = None
+    social_vk_community_app_secret: SecretStr | None = None
     # Platform-owned read-only service key. Never expose it to the browser or tenants.
     social_vk_service_token: str | None = None
     social_vk_redirect_base: str = "https://servgo.ru"

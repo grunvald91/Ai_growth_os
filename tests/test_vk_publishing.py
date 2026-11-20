@@ -13,6 +13,8 @@ from app.social_vk import (
     VKStore, begin_oauth, read_oauth_cookie, approved_posts,
     cancel, schedule, deliver_once, redirect_uri, connect_community, connected,
     community_reference, resolve_community, verify_community_key,
+    begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
+    community_oauth_config, community_oauth_redirect,
 )
 
 
@@ -540,3 +542,185 @@ async def test_vk_platform_service_key_empty_wall_not_marked_comments_verified(m
     monkeypatch.setattr(VKAdapter, "manager", manager)
     with pytest.raises(PlatformError, match="нет открытых записей"):
         await adapter.check("123456", "group-token")
+
+
+def test_vk_one_click_group_oauth_requires_legacy_app_and_never_exposes_secret(tmp_path):
+    from urllib.parse import parse_qs, urlsplit
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="very-secret-app-key", _env_file=None)
+    assert community_oauth_config(settings)[0] == "1234567"
+    assert "very-secret-app-key" not in repr(settings)
+    assert community_oauth_redirect(settings) == "https://servgo.ru/studio/social/vk/group-callback"
+    with pytest.raises(ValueError, match="не настроена"):
+        community_oauth_config(Settings(products_root=tmp_path,
+                                        social_vk_client_id="1234567",
+                                        social_vk_community_app_id=None,
+                                        _env_file=None))
+    assert "very-secret-app-key" not in community_oauth_redirect(settings)
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_numeric_community_oauth_is_state_and_tenant_bound(tmp_path):
+    from urllib.parse import parse_qs, urlsplit
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="very-secret-app-key", _env_file=None)
+    product_id = "3ecb2135-1077-428e-9a65-ea1d895a8432"
+    url, cookie = await begin_community_oauth(
+        settings, product_id, "https://vk.com/club123456", owner_login="studio-owner")
+    assert url.startswith("https://oauth.vk.com/authorize?")
+    query = parse_qs(urlsplit(url).query)
+    assert query["client_id"] == ["1234567"]
+    assert query["group_ids"] == ["123456"]
+    assert query["response_type"] == ["code"]
+    assert query["scope"] == [str(262144 | 8192)]
+    assert query["redirect_uri"] == [community_oauth_redirect(settings)]
+    assert "very-secret-app-key" not in url
+    assert product_id not in cookie
+    state = query["state"][0]
+    decoded = read_community_oauth_cookie(settings, cookie, state)
+    assert decoded["owner_login"] == "studio-owner"
+    assert decoded["product_id"] == product_id
+    assert decoded["group_id"] == "123456"
+    with pytest.raises(ValueError):
+        read_community_oauth_cookie(settings, cookie, "wrong-state")
+    with pytest.raises(ValueError):
+        read_community_oauth_cookie(settings, cookie + "broken", state)
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_short_group_resolves_with_platform_service_key(monkeypatch, tmp_path):
+    from urllib.parse import parse_qs, urlsplit
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="very-secret-app-key", _env_file=None)
+    calls = []
+    async def legacy(settings, *, code=None, service=False):
+        assert service is True
+        return {"access_token": "safe-app-read-key"}
+    async def resolve(token, reference):
+        calls.append((token, reference))
+        return "123456", "My Studio"
+    monkeypatch.setattr("app.social_vk._legacy_oauth_token", legacy)
+    monkeypatch.setattr("app.social_vk.resolve_community", resolve)
+    url, _ = await begin_community_oauth(settings,
+        "3ecb2135-1077-428e-9a65-ea1d895a8432", "https://vk.com/my_studio")
+    assert parse_qs(urlsplit(url).query)["group_ids"] == ["123456"]
+    assert calls == [("safe-app-read-key", "https://vk.com/my_studio")]
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_exchange_verifies_exact_group_and_encrypts_key(monkeypatch, db, tmp_path):
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="very-secret-app-key", _env_file=None)
+    company = Product(name="My Studio", slug="one-click-vk-123")
+    db.add(company)
+    db.commit()
+    captured = []
+    async def exchange(settings, *, code=None, service=False):
+        assert code == "confirmed-code-12345" and not service
+        return {"access_token_123456": "new-group-secret-key", "expires_in": 3600}
+    async def resolve(token, reference):
+        captured.append(("resolve", token, reference))
+        return "123456", "Our VK"
+    async def verify(token, group):
+        captured.append(("verify", token, group))
+    monkeypatch.setattr("app.social_vk._legacy_oauth_token", exchange)
+    monkeypatch.setattr("app.social_vk.resolve_community", resolve)
+    monkeypatch.setattr("app.social_vk.verify_community_key", verify)
+    payload = {"group_id": "123456", "product_id": str(company.id)}
+    row = await finish_community_oauth(db, settings, payload, "confirmed-code-12345")
+    ch = connected(db, company.id)
+    from app.vk_service import group_app_verified
+    assert not group_app_verified(settings)  # Consent alone does not prove wall.post.
+    assert ch.id == row.id and ch.is_community_token
+    assert ch.auth_type == "community_oauth"
+    assert ch.expires_at is not None
+    assert VKStore(tmp_path).load_token(row.id) == "new-group-secret-key"
+    assert b"new-group-secret-key" not in VKStore(tmp_path).path(row.id).read_bytes()
+    assert captured == [
+        ("resolve", "new-group-secret-key", "123456"),
+        ("verify", "new-group-secret-key", "123456"),
+    ]
+    post = Artifact(product_id=company.id, kind="channel_text",
+                    title="Approved VK post", status="approved",
+                    content=json.dumps({"channel": "vk", "body": "safe"}))
+    db.add(post)
+    db.commit()
+    with pytest.raises(ValueError, match="истечёт"):
+        schedule(db, company.id, post.id, datetime.now(timezone.utc) + timedelta(days=2))
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_rejects_wrong_group_token_without_mutating_company(monkeypatch, db, tmp_path):
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="very-secret-app-key", _env_file=None)
+    company = Product(name="My Studio", slug="one-click-rejected-vk")
+    db.add(company); db.commit()
+    async def exchange(settings, *, code=None, service=False):
+        return {"access_token_777777": "unrelated-community-token"}
+    monkeypatch.setattr("app.social_vk._legacy_oauth_token", exchange)
+    with pytest.raises(ValueError, match="не выдал ключ"):
+        await finish_community_oauth(db, settings,
+            {"group_id": "123456", "product_id": str(company.id)}, "confirmed-code-12345")
+    assert connected(db, company.id) is None
+
+
+def test_vk_group_pilot_gate_before_first_real_success(tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import _can_begin_community_oauth
+    from app.vk_service import mark_group_app_verified
+    settings = Settings(products_root=tmp_path, app_env="production",
+                        studio_tune_usernames="owner",
+                        social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    pilot = SimpleNamespace(state=SimpleNamespace(studio_login="owner", studio_product_ids=None))
+    customer = SimpleNamespace(state=SimpleNamespace(studio_login="company",
+                                                    studio_product_ids=["12345678-1234-1234-1234-123456789012"]))
+    assert _can_begin_community_oauth(settings, pilot)
+    assert not _can_begin_community_oauth(settings, customer)
+    mark_group_app_verified(settings)
+    assert _can_begin_community_oauth(settings, customer)
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_only_becomes_public_after_real_confirmed_post(monkeypatch, db, tmp_path):
+    from app.comments.vk import VKAdapter
+    from app.vk_service import group_app_verified, group_app_credentials
+    product, post = business_and_post(db, slug="verified-vk-publishing")
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    connect_community(db, settings, product.id, "123456", "community-oauth-test-token",
+                      auth_type="community_oauth")
+    assert not group_app_verified(settings)
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=5))
+    async def api_call(self, method, token, **params):
+        assert method == "wall.post" and token == "community-oauth-test-token"
+        assert params["owner_id"] == -123456 and params["message"] == "Проверка интеграции ServGo"
+        return {"post_id": 888}
+    monkeypatch.setattr(VKAdapter, "call", api_call)
+    assert await deliver_once(lambda: sessions(db), settings, sender=None,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=6)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert group_app_verified(settings)
+    # Rotating the app credentials removes the confirmed global-access state.
+    other = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                     social_vk_community_app_secret="different-studio-secret", _env_file=None)
+    assert not group_app_verified(other)
+
+
+@pytest.mark.asyncio
+async def test_vk_one_click_fake_sender_does_not_verify_app(monkeypatch, db, tmp_path):
+    from app.vk_service import group_app_verified
+    product, post = business_and_post(db, slug="not-verified-injected-vk")
+    settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    connect_community(db, settings, product.id, "123456", "community-oauth-test-token",
+                      auth_type="community_oauth")
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=5))
+    async def sender(group, text, guid):
+        return 888
+    assert await deliver_once(lambda: sessions(db), settings, sender=sender,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=6)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert not group_app_verified(settings)
