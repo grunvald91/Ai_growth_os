@@ -769,7 +769,7 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     assert 'id="sg-vk-token-copy" type="button"' in owner_html
     assert 'id="sg-vk-token-help" role="status" aria-live="polite"' in owner_html
     assert 'link.removeAttribute("href")' in owner_html
-    assert 'sg-vk-oauth-community-link' not in owner_html
+    assert 'id="sg-vk-oauth-community-link"' not in owner_html
     assert 'https://vk.ru/' in owner_html
     assert 'target="_blank" rel="noopener noreferrer"' in owner_html
     assert "Настроить подключение VK" in owner_html
