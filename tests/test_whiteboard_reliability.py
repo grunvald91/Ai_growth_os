@@ -187,3 +187,27 @@ def test_raw_attempt_ceiling_survives_502_refund_and_requires_owner_topup(enviro
         ledger.finish(ledger.begin('speech'))
     with pytest.raises(ReadinessError, match='call_limit'):
         ledger.begin('speech')
+
+
+def test_whiteboard_worker_disables_hidden_text_provider_retries(environment, tmp_path):
+    """Each storyboard/author ledger call must contain at most one HTTP POST."""
+    from app.content.whiteboard.checkpoints import CheckpointStore
+    from app.content.whiteboard.jobs import JobRequest
+    from app.content.whiteboard.runtime import configured_models
+    from app.content.whiteboard.worker import build_pipeline
+    from test_whiteboard import request
+
+    _, settings, product_id, _ = environment
+    req = request(product_id=product_id)
+    chosen = configured_models(settings).model_copy(
+        update={'image': 'gemini-3.1-flash-image'})
+    payload = JobRequest(request=req, models=chosen, max_api_calls=25,
+                         image_provider='claudehub', visual_review=True)
+    store = CheckpointStore(tmp_path / 'protected', req,
+                            models=chosen.model_dump(), visual_review=True,
+                            image_provider='claudehub')
+    pipeline = build_pipeline(settings, payload, store)
+    provider = pipeline.storyboard.service._provider
+    assert provider.allow_fallback is False
+    assert provider.allow_ceiling_retry is False
+    assert pipeline.visual_author.service._provider is provider
