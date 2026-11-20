@@ -751,3 +751,29 @@ STUDIO_CSS += """
  .seo-board-dates{flex-direction:column;gap:2px}
 }
 """
+
+
+# Keep the VK image opt-in separate from Stories (which have a different model
+# and paid-consent flow). Hidden controls cannot be submitted accidentally.
+STUDIO_JS += r"""
+(function(){
+  'use strict';
+  function syncVkPostImage(){
+    const form=document.getElementById('sg-create-form');
+    if(!form) return;
+    const panel=form.querySelector('[data-vk-post-image-control]');
+    if(!panel) return;
+    const format=form.querySelector('input[name="format"]:checked')?.value;
+    const platform=form.querySelector('select[name="channel"]')?.value;
+    const show=format==='post' && platform==='vk';
+    panel.style.display=show?'':'none';
+    panel.querySelectorAll('input,select').forEach(input=>{input.disabled=!show;});
+  }
+  document.addEventListener('change',event=>{
+    if(event.target.closest('#sg-create-form')) syncVkPostImage();
+  });
+  if(document.readyState==='loading')
+    document.addEventListener('DOMContentLoaded',syncVkPostImage);
+  else syncVkPostImage();
+})();
+"""
