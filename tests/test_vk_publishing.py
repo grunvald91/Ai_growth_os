@@ -724,3 +724,61 @@ async def test_vk_one_click_fake_sender_does_not_verify_app(monkeypatch, db, tmp
     db.refresh(pub)
     assert pub.status == "published"
     assert not group_app_verified(settings)
+
+
+def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import vk_page
+
+    product, _ = business_and_post(db, slug="vk-settings-link")
+    settings = Settings(
+        products_root=tmp_path, app_env="production",
+        studio_tune_usernames="owner", social_vk_community_app_id=None,
+        social_vk_community_app_secret=None, social_vk_service_token=None,
+        _env_file=None,
+    )
+    owner = SimpleNamespace(state=SimpleNamespace(
+        studio_login="owner", studio_product_ids=None))
+    customer = SimpleNamespace(state=SimpleNamespace(
+        studio_login="customer", studio_product_ids=[str(product.id)]))
+
+    owner_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
+    assert 'Авторизация одним нажатием пока не настроена.' in owner_html
+    assert '<a href="/studio/tune/vk"' in owner_html
+    assert "Настроить подключение VK" in owner_html
+
+    customer_html = vk_page(product.id, customer, db=db, settings=settings).body.decode()
+    assert "/studio/tune/vk" not in customer_html
+    assert "Используйте ключ сообщества ниже" in customer_html
+
+
+def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import vk_page
+
+    product, _ = business_and_post(db, slug="vk-pilot-settings-link")
+    settings = Settings(
+        products_root=tmp_path, app_env="production",
+        studio_tune_usernames="owner", social_vk_community_app_id="1234567",
+        social_vk_community_app_secret="platform-owner-secret",
+        social_vk_service_token=None, _env_file=None,
+    )
+    owner = SimpleNamespace(state=SimpleNamespace(
+        studio_login="owner", studio_product_ids=None))
+    customer = SimpleNamespace(state=SimpleNamespace(
+        studio_login="customer", studio_product_ids=[str(product.id)]))
+
+    pilot_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
+    assert "Проверить вход ВКонтакте" in pilot_html
+    assert 'Совместимость с вашим VK-приложением ещё не подтверждена.' in pilot_html
+    assert '<a href="/studio/tune/vk"' in pilot_html
+    assert "/studio/tune/vk" not in vk_page(
+        product.id, customer, db=db, settings=settings).body.decode()
+
+    connect_community(db, settings, product.id, "123456", "group-key",
+                      name="Our test VK community")
+    owner_connected = vk_page(product.id, owner, db=db, settings=settings).body.decode()
+    assert "Комментарии: не подключены." in owner_connected
+    assert owner_connected.count('<a href="/studio/tune/vk"') >= 2
+    customer_connected = vk_page(product.id, customer, db=db, settings=settings).body.decode()
+    assert "/studio/tune/vk" not in customer_connected
