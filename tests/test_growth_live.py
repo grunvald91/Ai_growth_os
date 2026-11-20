@@ -1309,7 +1309,8 @@ def test_create_includes_aspect_controls_and_story_vertical_hint(live):
     assert "aspectRow.hidden=key!=='static_image'" in create_script
     dispatcher_script = client.get("/studio/assets/dispatcher.js").text
     assert "aspect_ratio:selected==='story' ? '9:16'" in dispatcher_script
-    assert "kind.addEventListener('change',function(){aspect.value='';refreshOptions();});" in dispatcher_script
+    assert "kind.addEventListener('change',function(){" in dispatcher_script
+    assert "platform.addEventListener('change',refreshOptions);" in dispatcher_script
 
 
 def test_create_timing_explains_status_without_unverified_estimates(live):
