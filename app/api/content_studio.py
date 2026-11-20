@@ -2380,7 +2380,8 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
                 resolve_model(settings, image_model)  # Before queueing paid work.
             task = queue_content(db, product.id, topic, format="post",
                           channel=fields.get("channel"), audience=audience, editorial_brief=brief,
-                          image_model=image_model)
+                          image_model=image_model,
+                          image_ratio=fields.get("vk_image_ratio", "4:5") if vk_image else "4:5")
         elif chosen in {"short_video", "story", "static_image"}:
             count_text = fields.get("frame_count") if chosen == "story" else None
             count = int(count_text) if count_text else None
