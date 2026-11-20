@@ -13,7 +13,7 @@ DEFAULT_TOPIC = 'Как организовать онлайн-запись в н
 
 def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None,
                   audience=None, editorial_brief=None, format="package", channel=None,
-                  image_model="none"):
+                  image_model="none", image_ratio="4:5"):
     """Submit full package (legacy) or a single platform post (two-agent fast path)."""
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     if product is None:
@@ -21,7 +21,7 @@ def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=Tr
     if format == "post":
         request = QuickPostRequest(mode="post", product_id=product.id, topic=topic, channel=channel,
                                    audience=audience, editorial_brief=editorial_brief,
-                                   image_model=image_model)
+                                   image_model=image_model, image_ratio=image_ratio)
         title = f"CONTENT: post:{request.channel}:{request.topic}"
         description = ("Один пост и иллюстрация для проверки владельцем. Без автоматической публикации."
                        if request.image_model != "none" else
