@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 from uuid import UUID
+from pydantic import SecretStr
 
 from app.comments.gateway import CommentGateway, PlatformError
 from app.comments.secrets import CommentSecrets
@@ -26,7 +27,8 @@ _GROUP_APP_VERIFIED_ID = UUID("00000000-0000-4000-8000-000000000003")
 def group_app_credentials(settings) -> tuple[str, str] | None:
     """Never expose the secret in HTML or in the public API."""
     env_id = str(settings.social_vk_community_app_id or "").strip()
-    env_secret = str(settings.social_vk_community_app_secret or "").strip()
+    raw = settings.social_vk_community_app_secret
+    env_secret = (raw.get_secret_value() if isinstance(raw, SecretStr) else str(raw or "")).strip()
     if env_id or env_secret:
         return (env_id, env_secret) if env_id and env_secret else None
     try:
