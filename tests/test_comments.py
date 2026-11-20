@@ -629,6 +629,31 @@ async def test_background_poll_requires_global_and_business_opt_ins(ctx):
 
 
 @pytest.mark.asyncio
+async def test_vk_wall_background_import_requires_opt_in_and_never_replies(ctx):
+    from app.comments.polling import run_comment_poll_once, SUPPORTED
+
+    db, product, svc, _, gateway = ctx
+    assert "vk" in SUPPORTED and "vk_video" not in SUPPORTED
+    await svc.connect(product.id, ConnectInput(
+        platform="vk", account_id="42", token="secret-community-key"))
+    factory = lambda: Session(db.get_bind(), expire_on_commit=False)
+    # Neither connecting VK nor enabling global polling grants business consent.
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+    svc.settings.comment_background_poll_enabled = True
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+    svc.configure(product.id, AgentSettings(auto_import=True))
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 1
+    rows = list(db.scalars(select(BusinessComment).where(
+        BusinessComment.product_id == product.id, BusinessComment.platform == "vk")))
+    assert len(rows) == 1 and rows[0].status == "new"
+    assert not gateway.sent
+    assert not list(db.scalars(select(Approval)))
+    assert not list(db.scalars(select(AgentRun)))
+    assert not list(db.scalars(select(Publication)))
+    assert await run_comment_poll_once(factory, svc.settings, gateway=gateway) == 0
+
+
+@pytest.mark.asyncio
 async def test_background_failure_is_sanitized_and_exponentially_backed_off(ctx):
     from app.comments.polling import run_comment_poll_once
 
