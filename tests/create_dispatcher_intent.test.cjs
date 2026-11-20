@@ -145,7 +145,48 @@ test("no selected format is not a create operation", () => {
   assert.equal(request.creation, null);
 });
 
-test("too-long topics cannot bypass server model validation", () => {
-  const request = setup("post").creationRequest("а".repeat(301));
-  assert.equal(request.creation.topic, undefined);
+test("short and overlong topics return clear local validation instead of classifier fallback", () => {
+  for (const format of ["post", "story", "short_video", "static_image", "whiteboard", "package"]) {
+    for (const invalid of ["CRM".slice(0, 2), "а".repeat(301)]) {
+      const request = setup(format).creationRequest(invalid);
+      assert.equal(typeof request.validation_error, "string", format);
+      assert.equal(request.creation, undefined, format);
+      assert.equal(request.text, undefined, format);
+    }
+  }
+  assert.match(setup("whiteboard").creationRequest("CRM?").validation_error, /8 символов/);
+  assert.equal(setup("post").creationRequest("CRM?").creation.topic, "CRM?");
+  assert.equal(setup("whiteboard").creationRequest("Как CRM?").creation.topic, "Как CRM?");
+});
+
+test("Unicode emoji count follows Python server topic length", () => {
+  assert.equal(setup("post").creationRequest("😀😀😀").creation.topic, "😀😀😀");
+  assert.match(setup("post").creationRequest("😀".repeat(301)).validation_error, /300 символов/);
+});
+
+test("typed validation retains the composer draft and never sends a request", () => {
+  const ui = setup("whiteboard");
+  const events = [];
+  ui.input = {value: "CRM?"};
+  ui.busy = false;
+  ui.grow = () => events.push("grow");
+  ui.showNote = (text, bad) => events.push({text, bad});
+  ui.send = (...args) => events.push({sent: args});
+  vm.runInContext(extract("sendText"), ui);
+  ui.sendText();
+  assert.equal(ui.input.value, "CRM?");
+  assert.equal(events.length, 1);
+  assert.match(events[0].text, /8 символов/);
+  assert.equal(events[0].bad, true);
+
+  ui.input.value = "Зачем компании CRM?";
+  ui.sendText();
+  assert.equal(ui.input.value, "");
+  assert.equal(events.filter(event => event.sent).length, 1);
+  assert.equal(events.filter(event => event.sent)[0].sent[0].creation.topic, "Зачем компании CRM?");
+});
+
+test("voice validation preserves recognized text instead of sending invalid selected subject", () => {
+  assert.match(source, /var request = creationRequest\(transcript\)/);
+  assert.match(source, /if \(request.validation_error\) \{[\s\S]*?insertText\(transcript\);[\s\S]*?return;/);
 });
