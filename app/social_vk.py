@@ -166,7 +166,7 @@ def community_oauth_config(settings):
     """Only legacy *community* applications support this flow; VK ID is separate."""
     app_id = str(settings.social_vk_community_app_id or "").strip()
     app_secret = str(settings.social_vk_community_app_secret or "").strip()
-    if (not re.fullmatch(r"[1-9]\\d{3,20}", app_id)
+    if (not re.fullmatch(r"[1-9]\d{3,20}", app_id)
             or len(app_secret) < 8 or len(app_secret) > 500
             or any(ord(ch) < 33 for ch in app_secret)):
         raise ValueError("Авторизация сообщества VK не настроена администратором ServGo")
