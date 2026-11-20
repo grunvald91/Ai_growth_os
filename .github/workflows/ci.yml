@@ -86,6 +86,11 @@ jobs:
       - name: Check AI Chat JavaScript syntax
         if: steps.scope.outputs.growth_changed == 'true'
         run: node --check app/api/ai_chat_assets/ai-chat.js
+      - name: Check Create dispatcher JavaScript syntax and routing
+        if: steps.scope.outputs.growth_changed == 'true'
+        run: |
+          node --check app/api/dispatcher_assets/dispatcher.js
+          node --test tests/create_dispatcher_intent.test.cjs
       - name: Whitespace check
         run: |
           if git rev-parse HEAD^ >/dev/null 2>&1; then

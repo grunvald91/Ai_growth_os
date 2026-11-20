@@ -1027,8 +1027,15 @@
       false, onSettled);
   }
 
+  function isExplicitInstruction(text) {
+    // A user command must override an old selected Create card. Bare questions
+    // such as "Зачем мне CRM?" are valid post topics, not dispatcher questions.
+    return /^(?:пожалуйста\s+)?(?:сделай|создай|напиши|подготовь|сгенерируй|нарисуй|оформи|составь|покажи|найди|открой|расскажи|объясни|проверь|посмотри|опубликуй|размести|удали|отмени|запусти|перейди|не\s+(?:создавай|делай|публикуй))(?=$|[^\p{L}\p{N}])/iu.test(text);
+  }
+
   function createCommand(text) {
     if (!root.classList.contains('sg-create-dispatch')) return text;
+    if (isExplicitInstruction(text)) return text;
     // Explicitly spoken/written format always wins over an older format chip.
     // A selected chip is only a fallback for a bare subject like "про волосы".
     if (/(?:^|[^\p{L}\p{N}])(?:сторис|истори(?:и|й|ю|я|ями|ях)|пост(?:ы|а|у|е|ом|ов|ам|ами|ах)?|видеосценари\p{L}*|сценари\p{L}*|видео|видеоролик\p{L}*|ролик\p{L}*|анимаци\p{L}*|изображени\p{L}*|картин\p{L}*|стать(?:я|ю|и|е|ей|ёй|ями|ях)|пакет)(?=$|[^\p{L}\p{N}])/iu.test(text)) return text;
@@ -1077,12 +1084,24 @@
     };
   }
 
+  function creationRequest(text) {
+    var hints = creationHints();
+    if (hints && hints.format && text.length >= 3 && text.length <= 300 &&
+        !isExplicitInstruction(text)) {
+      // The selected format + entered subject form a complete request.
+      // Keep the original words for the server-side deterministic router.
+      hints.topic = text;
+      return {text:text, creation:hints};
+    }
+    return {text:createCommand(text), creation:hints};
+  }
+
   function sendText() {
     var text = input.value.trim();
     if (!text || busy) return;
     input.value = '';
     grow();
-    send({ mode: 'text', text: createCommand(text), creation: creationHints() }, text);
+    send(Object.assign({mode:'text'}, creationRequest(text)), text);
   }
 
   function grow() {
@@ -1383,7 +1402,7 @@
           voiceDispatchPending = true;
           setVoiceState('sending');
           showLive('Обрабатываю запрос…', '', true);
-          send({ mode: 'text', text: createCommand(transcript), creation: creationHints() }, transcript, true);
+          send(Object.assign({mode:'text'}, creationRequest(transcript)), transcript, true);
         } else {
           applyDictation(data);
         }

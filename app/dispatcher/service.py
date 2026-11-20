@@ -427,6 +427,26 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             decision = DispatcherDecision(intent="execute", capability=known.id,
                                           params={k: str(v) for k, v in (chip.get("params") or {}).items()},
                                           confidence=1.0)
+    elif (creation is not None and creation.topic is not None
+          and creation.format is not None and text.strip() == creation.topic):
+        # An explicit Create-format selection plus a topic is already a
+        # complete user request. Do not ask the LLM to rediscover the chosen
+        # capability: it can incorrectly say that post creation is unsupported.
+        # act() still runs Pydantic validation and mandatory confirmation.
+        topic_params = {"topic": creation.topic}
+        if creation.format == "post":
+            selected_capability = "create_post"
+            topic_params["channel"] = creation.platform or "telegram"
+        elif creation.format == "package":
+            selected_capability = "create_package"
+        else:
+            selected_capability = "create_creative"
+            topic_params["format"] = creation.format
+            if creation.platform:
+                topic_params["platform"] = creation.platform
+        decision = DispatcherDecision(
+            intent="execute", capability=selected_capability,
+            params=topic_params, confidence=1.0)
     else:
         quick = quick_capability(text)
         if quick is not None:
