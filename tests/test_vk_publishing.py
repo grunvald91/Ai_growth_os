@@ -252,9 +252,9 @@ async def test_vkr_u_numeric_group_link_does_not_require_public_api_lookup(monke
             raise AssertionError("Numeric group must not require groups.getById")
         if method == "groups.getTokenPermissions":
             return {"mask": 8192}
-        if method == "groups.getCallbackSettings":
+        if method == "groups.getCallbackServers":
             assert params["group_id"] == "241947800"
-            return {}
+            return {"count": 0, "items": []}
         raise AssertionError("Unexpected request to " + method)
 
     monkeypatch.setattr(VKAdapter, "call", fake)
@@ -265,7 +265,7 @@ async def test_vkr_u_numeric_group_link_does_not_require_public_api_lookup(monke
     assert calls == []
     await verify_community_key("test-group-key", account_id)
     assert [method for method, _ in calls] == [
-        "groups.getTokenPermissions", "groups.getCallbackSettings"]
+        "groups.getTokenPermissions", "groups.getCallbackServers"]
 
 
 @pytest.mark.asyncio
@@ -288,14 +288,18 @@ async def test_vk_resolve_link_and_verify_key(monkeypatch):
         calls.append((method, params))
         if method == "groups.getById":
             return {"groups": [{"id": 123456, "name": "Моя компания"}]}
-        return {"mask": 8192}
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192}
+        if method == "groups.getCallbackServers":
+            return {"count": 0, "items": []}
+        raise AssertionError("Unexpected method " + method)
 
     monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
     account_id, name = await resolve_community("test-group-key", "https://vk.com/my_company")
     assert (account_id, name) == ("123456", "Моя компания")
     await verify_community_key("test-group-key", account_id)
     assert [name for name, _ in calls] == [
-        "groups.getById", "groups.getTokenPermissions", "groups.getCallbackSettings"]
+        "groups.getById", "groups.getTokenPermissions", "groups.getCallbackServers"]
     assert calls[-1][1] == {"group_id": "123456"}
 
 
@@ -310,13 +314,81 @@ async def test_vk_resolve_rejects_different_numeric_id(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
+    from app.social_vk import VKKeyVerificationError
+
     async def call(self, method, token, **params):
-        if method == "groups.getCallbackSettings":
-            raise ValueError("VK rejected")
-        return {}
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192}
+        if method in ("groups.getCallbackServers", "groups.getCallbackConfirmationCode"):
+            raise ValueError("VK denied group binding")
+        raise AssertionError("Unexpected API method " + method)
+
     monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
-    with pytest.raises(ValueError, match="Управление → Дополнительно → Работа с API → Ключи доступа"):
+    with pytest.raises(VKKeyVerificationError, match="указанному сообществу") as exc:
         await verify_community_key("test-group-key", "123456")
+    assert exc.value.reason == "group_unverified"
+
+
+@pytest.mark.asyncio
+async def test_vk_key_group_proof_falls_back_without_callback_server(monkeypatch):
+    """No pre-existing callback server is needed for approved text posting."""
+    from app.comments.gateway import PlatformError
+    from app.comments.vk import VKAdapter
+
+    calls = []
+
+    async def fake(self, method, token, **params):
+        calls.append((method, params))
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192 | 262144}
+        if method == "groups.getCallbackServers":
+            raise PlatformError("callback listing unsupported")
+        if method == "groups.getCallbackConfirmationCode":
+            assert params == {"group_id": "241947800"}
+            return {"code": "discard-this-secret"}
+        raise AssertionError("Unsupported method " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    assert await verify_community_key("group-key", "241947800") is None
+    assert [method for method, _ in calls] == [
+        "groups.getTokenPermissions", "groups.getCallbackServers",
+        "groups.getCallbackConfirmationCode"]
+
+
+@pytest.mark.asyncio
+async def test_vk_key_rejects_unrecognized_group_proof_response(monkeypatch):
+    from app.social_vk import VKKeyVerificationError
+    from app.comments.vk import VKAdapter
+
+    async def fake(self, method, token, **params):
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192}
+        if method == "groups.getCallbackServers":
+            return {"count": 0}  # Not a valid proof: missing items.
+        if method == "groups.getCallbackConfirmationCode":
+            return {"code": ""}  # Missing private group-scoped confirmation.
+        raise AssertionError("Unexpected method")
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    with pytest.raises(VKKeyVerificationError, match="указанному сообществу") as exc:
+        await verify_community_key("wrong-group-key", "241947800")
+    assert exc.value.reason == "group_unverified"
+
+
+@pytest.mark.asyncio
+async def test_vk_key_permissions_api_failure_is_not_misreported_as_missing_scope(monkeypatch):
+    from app.social_vk import VKKeyVerificationError
+    from app.comments.gateway import PlatformError
+    from app.comments.vk import VKAdapter
+
+    async def fake(self, method, token, **params):
+        assert method == "groups.getTokenPermissions"
+        raise PlatformError("VK endpoint temporarily unavailable")
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    with pytest.raises(VKKeyVerificationError) as exc:
+        await verify_community_key("group-key", "241947800")
+    assert exc.value.reason == "permissions_unverified"
 
 
 @pytest.mark.asyncio
@@ -330,6 +402,8 @@ async def test_vk_comment_group_key_cannot_pass_read_check(monkeypatch):
         calls.append((method, params))
         if method == "groups.getById":
             return {"groups": [{"id": 123456, "name": "VK Business"}]}
+        if method == "groups.getCallbackServers":
+            return {"count": 0, "items": []}
         if method == "wall.get":
             raise PlatformError("wall.get requires a user or service token")
         return {"mask": 8192}
@@ -342,7 +416,7 @@ async def test_vk_comment_group_key_cannot_pass_read_check(monkeypatch):
     assert wall["owner_id"] == -123456
     assert "domain" not in wall
     assert "groups.getTokenPermissions" in [m for m, _ in calls]
-    assert "groups.getCallbackSettings" in [m for m, _ in calls]
+    assert "groups.getCallbackServers" in [m for m, _ in calls]
 
 
 @pytest.mark.asyncio
@@ -368,8 +442,10 @@ async def test_vk_group_key_rejects_missing_wall_permission(monkeypatch):
             return {"mask": 262144}
         raise AssertionError("No other calls allowed without wall bit")
     monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
-    with pytest.raises(ValueError, match="Нужен ключ"):
+    from app.social_vk import VKKeyVerificationError
+    with pytest.raises(VKKeyVerificationError, match="разрешение") as exc:
         await verify_community_key("test-key", "123456")
+    assert exc.value.reason == "wall_missing"
 
 
 @pytest.mark.asyncio
@@ -409,8 +485,8 @@ async def test_vk_split_read_and_write_tokens_for_comments(monkeypatch):
             return {"groups": [{"id": 123456, "name": "Тест", "is_admin": 0}]}
         if method == "groups.getTokenPermissions":
             return {"mask": 8192 + 262144}
-        if method == "groups.getCallbackSettings":
-            return {"events": {}}
+        if method == "groups.getCallbackServers":
+            return {"count": 0, "items": []}
         if method == "wall.get":
             return {"items": [{"id": 15, "owner_id": owner, "text": "Пост"}], "count": 1}
         if method == "wall.getComments":
@@ -470,8 +546,8 @@ async def test_vk_reply_rejects_conflicting_post_id_with_service_read_token(monk
             return {"groups": [{"id": 123456, "name": "Команда"}]}
         if method == "groups.getTokenPermissions":
             return {"mask": 8192}
-        if method == "groups.getCallbackSettings":
-            return {"events": {}}
+        if method == "groups.getCallbackServers":
+            return {"count": 0, "items": []}
         if method == "wall.getComments":
             return {"items": [{"id": 91, "post_id": 999, "text": "Чужой комментарий",
                                "from_id": 77}], "count": 1}
