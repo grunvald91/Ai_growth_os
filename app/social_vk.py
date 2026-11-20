@@ -571,6 +571,8 @@ def schedule(db, product_id, post_id, when):
         raise ValueError("Некорректный материал") from None
     if value.get("channel") != "vk" or not isinstance(value.get("body"), str):
         raise ValueError("Это не подготовленный пост VK")
+    if value.get("image_model", "none") != "none" or value.get("image_artifact_id"):
+        raise ValueError("Этот пост содержит иллюстрацию. Загрузка изображений в VK ещё не подключена; текст отдельно не отправляем.")
     text = value["body"].strip()
     if not text or len(text) > 15000:
         raise ValueError("Для VK требуется текст длиной до 15000 символов")
