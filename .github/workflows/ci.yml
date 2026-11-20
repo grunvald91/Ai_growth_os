@@ -50,15 +50,21 @@ jobs:
             echo "Required media packages already installed"
             exit 0
           fi
-          for attempt in 1 2; do
-            if sudo timeout 120 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y -qq "${missing[@]}"; then
-              exit 0
-            fi
-            echo "Media package install attempt $attempt failed; refresh package indexes"
-            sudo timeout 90 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update -qq || true
+          # The Ubuntu mirror intermittently stalls for minutes before tests.
+          # Try to install missing language packs, but evaluate the full pytest
+          # suite when the runner already has all required media executables.
+          if sudo timeout 35 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 update -qq \
+              && sudo timeout 70 apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 install -y -qq "${missing[@]}"; then
+            exit 0
+          fi
+          for binary in ffmpeg pdftoppm tesseract; do
+            command -v "$binary" >/dev/null 2>&1 || {
+              echo "::error::Required media executable unavailable: $binary"
+              exit 1
+            }
           done
-          echo "::error::Media dependencies are unavailable after bounded attempts"
-          exit 1
+          echo "::warning::apt mirror unavailable; runner has required executables. Full test suite will verify behavior."
+          tesseract --list-langs 2>/dev/null | grep -qx rus || echo "::warning::Russian OCR language pack missing on runner."
       - name: Install
         if: steps.scope.outputs.growth_changed == 'true'
         run: python -m pip install -e '.[test]'
