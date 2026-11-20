@@ -12,6 +12,7 @@
   const modelRow=document.getElementById('sg-create-model-row');
   const vkImageRow=document.getElementById('sg-create-vk-image-row');
   const vkRatioRow=document.getElementById('sg-create-vk-ratio-row');
+  const vkReviewTip=document.getElementById('sg-create-vk-review-tip');
   const aspectRow=document.getElementById('sg-create-aspect-row');
   const storyRatio=document.getElementById('sg-create-story-ratio');
   const aspect=document.getElementById('sg-create-aspect');
@@ -51,6 +52,7 @@
     const show=root.getAttribute('data-create-format')==='post' && platform.value==='vk';
     if(vkImageRow) vkImageRow.hidden=!show;
     if(vkRatioRow) vkRatioRow.hidden=!show;
+    if(vkReviewTip) vkReviewTip.hidden=!show;
   }
   platform.addEventListener('change',syncVkImage);
 
