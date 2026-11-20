@@ -34,9 +34,9 @@ jobs:
           cache: pip
       - name: Install media tools
         if: steps.scope.outputs.growth_changed == 'true'
-        # Runner images may already have these. Avoid the unreliable apt
-        # mirror unless a required package is genuinely absent; bounded retries
-        # fail closed if dependencies cannot be installed.
+        # Prefer installed packages. Attempt apt for missing optional language
+        # packs, but still run the full test suite if required tools exist;
+        # missing actual media executables fail closed.
         shell: bash
         run: |
           set -euo pipefail
