@@ -15,11 +15,12 @@ from sqlalchemy import select
 from app.api.content_studio import material_detail_page, studio_task_page
 from app.content.quick_post import QuickPostRequest, run_quick_post
 from app.content.service import queue_content
+from app.content.review import ReviewError, approve_material
 from app.content.vk_image_critic import verified_vk_image_approval
 from app.content.whiteboard.adapters import ClaudeHubChat, ClaudeHubGeminiImageProvider
 from app.core.config import Settings
 from app.llm.schemas import LLMResponse, LLMUsage
-from app.models.domain import Artifact, Product, Publication, TaskStatus
+from app.models.domain import Artifact, ArtifactStatus, Product, Publication, TaskStatus
 
 
 class DraftModel:
@@ -140,6 +141,14 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     page = studio_task_page(company.id, task.id, db=db, settings=settings)
     assert page.status_code == 200
     assert f"/tasks/{task.id}/images/{media.id}" in page.body.decode("utf-8")
+    # Owner approval must enforce the visual decision, not just the display badge.
+    if expect_state == "ready":
+        approved = approve_material(db, tmp_path, company.id, post.id)
+        assert approved.status == ArtifactStatus.APPROVED
+    else:
+        with pytest.raises(ReviewError, match="Визуальный критик"):
+            approve_material(db, tmp_path, company.id, post.id)
+        assert post.status == ArtifactStatus.AWAITING_APPROVAL
     assert not list(db.scalars(select(Publication).where(
         Publication.product_id == company.id)))
     # The production path never attempts to publish a post in this task.
