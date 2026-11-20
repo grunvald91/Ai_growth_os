@@ -170,8 +170,30 @@ def run_check(probe=curl_probe, sleep=time.sleep, path=STATUS_PATH, now=utc_now,
     return result
 
 
+ 
+def stateless_check(probe=curl_probe, sleep=time.sleep, diagnose_failure=diagnose):
+    """Read-only check for GitHub Actions when installing on-host timer is unavailable."""
+    attempts = [probe()]
+    if not attempts[0]["ok"]:
+        sleep(1)
+        attempts.append(probe())
+    last = attempts[-1]
+    ok = any(item["ok"] for item in attempts)
+    reason = "ok" if ok else diagnose_failure(last)["reason"]
+    print("SOCKS5_TELEGRAM_STATELESS " +
+          " ".join(str(value) for value in
+                   ("up" if ok else "down", reason, last["http_code"],
+                    last["curl_exit"], last["duration_ms"], len(attempts))),
+          flush=True)
+    return 0 if ok else 1
+
+
 if __name__ == "__main__":
     try:
+        if sys.argv[1:] == ["--stateless"]:
+            sys.exit(stateless_check())
+        if sys.argv[1:]:
+            raise ValueError("Unknown monitor argument")
         run_check()
     except Exception as exc:
         # Internal instrumentation failures must fail the systemd unit; never show
