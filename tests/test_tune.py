@@ -131,8 +131,8 @@ async def test_work_pages_show_stages_outputs_and_critic(tmp_path, prompt_root):
 def test_operator_can_set_encrypted_vk_read_key_but_company_user_cannot(tmp_path, monkeypatch):
     from app.vk_service import platform_service_token
     path = tmp_path / "operators"
-    path.write_text("owner:" + apr_md5_crypt.hash("owner-pass") + "\\n"
-                    "company:" + apr_md5_crypt.hash("company-pass") + "\\n")
+    path.write_text("owner:" + apr_md5_crypt.hash("owner-pass") + "\n"
+                    "company:" + apr_md5_crypt.hash("company-pass") + "\n")
     settings = Settings(
         app_env="production", products_root=tmp_path / "products",
         studio_htpasswd_file=path, studio_tune_usernames="owner",
