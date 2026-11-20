@@ -266,6 +266,12 @@ def job_html(state, product_id, *, error=None):
                  '<details class="wb-result-technical"><summary>Подробности создания</summary>')
     body += (f'<p class="wb-stage-line">{esc(stages.get(state.get("stage"), "Подготовка задания"))} · '
              f'API-вызовы: {state["calls"]} из {state.get("call_limit_total", state["max_api_calls"])}</p>')
+    attempts_started = state.get('attempts_started')
+    if type(attempts_started) is int and attempts_started > state['calls']:
+        body += (f'<p class="wb-attempt-line">Фактически начатых API-попыток: {attempts_started} '
+                 f'из {state.get("call_limit_total", state["max_api_calls"])}. '
+                 'Ответы HTTP 502 могут не учитываться в старом счётчике; '
+                 'фактическое списание определяет провайдер.</p>')
     scene = state.get('scene_index')
     beat = state.get('beat_index')
     scene_total = state['request'].get('scenes', 3)
@@ -368,6 +374,12 @@ def job_html(state, product_id, *, error=None):
                      f'{esc(issue["evidence"])}<br>Предложение: {esc(issue["correction"])}<br>'
                      f'Решение автора: {esc(choice.get("reason", ""))}</p>')
         body += '<p>Второго прохода критика после перерисовки нет. Перед публикацией проверьте итоговые рисунки.</p></details>'
+    region_audit = (review.get('region_layout') or []) if isinstance(review, dict) else (state.get('region_layout') or [])
+    if any(isinstance(item, dict) and item.get('operation') == 'offline_fallback_region_split'
+           for item in region_audit):
+        body += ('<p class="sg-warning" role="status">Часть рисунков была размечена локально '
+                 'после ошибки или некорректного ответа провайдера. '
+                 'Проверьте порядок появления элементов перед публикацией.</p>')
     if state['status'] == 'waiting_approval':
         model_names = ' · '.join(esc(value) for value in state['models'].values())
         body += (f'<details><summary>Модели и голос</summary><p>{model_names}</p>'
