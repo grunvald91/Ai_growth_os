@@ -58,7 +58,13 @@ jobs:
                   "print('vk_id_client_configured=' + str(bool(getattr(s, 'social_vk_client_id', None))).lower()); "
                   "print('vk_service_read_key_present=' + str(bool(os.environ.get('SOCIAL_VK_SERVICE_TOKEN'))).lower()); "
                   "print('vk_autopost_enabled=' + str(bool(s.content_vk_autopost_enabled)).lower()); "
-                  "print('vk_redirect_origin_valid=' + str(s.social_vk_redirect_base == 'https://servgo.ru').lower())"
+                  "print('vk_redirect_origin_valid=' + str(s.social_vk_redirect_base == 'https://servgo.ru').lower()); "
+                  "from app.db.session import SessionLocal; from app.models.domain import Publication; "
+                  "from sqlalchemy import select,func; "
+                  "d=SessionLocal(); "
+                  "print('vk_scheduled_count=' + str(d.scalar(select(func.count()).select_from(Publication).where(Publication.channel=='vk', Publication.status=='scheduled')))); "
+                  "print('vk_sending_count=' + str(d.scalar(select(func.count()).select_from(Publication).where(Publication.channel=='vk', Publication.status=='sending')))); "
+                  "d.close()"
               )
               cmd = "docker exec ai-growth-os-api-1 python -c " + shlex.quote(code)
               channel = transport.open_session(timeout=20)
