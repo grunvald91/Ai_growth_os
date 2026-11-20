@@ -95,6 +95,13 @@ def save_manual_edit(db, product_id: UUID, source_id: UUID, fields):
     if not changed:
         raise ValueError("Внесите правку перед сохранением новой версии")
     if source.kind == "channel_text":
+        if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
+            # Text or title was changed; a previously generated illustration
+            # is no longer evidence-matched to this version of the post.
+            value.pop("image_artifact_id", None)
+            value.pop("image_sha256", None)
+            value.pop("image_error_code", None)
+            value["image_state"] = "stale"
         if value.get("channel") == "telegram":
             from app.content.telegram_publishing import validate_telegram_text
             validate_telegram_text(value["body"])
