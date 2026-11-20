@@ -45,7 +45,7 @@ jobs:
       - name: Run pre-existing deterministic BookingBot tests
         env:
           PYTHONPATH: ${{ github.workspace }}/services/booking_bot
-        run: python -m pytest -q tests/test_rental_logic.py tests/test_create_deploy_archive.py test_booking_utils.py test_schedule_business_guard.py
+        run: python -m pytest -q tests/test_rental_logic.py tests/test_create_deploy_archive.py test_booking_utils.py test_schedule_business_guard.py tests/test_socks5_telegram_health.py
       - name: Check frontend SEO source regressions
         run: python -m pytest -q tests/test_frontend_seo.py
   frontend:
