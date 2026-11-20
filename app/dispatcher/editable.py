@@ -76,6 +76,8 @@ class CreateHints(BaseModel):
 
     @model_validator(mode="after")
     def valid_combination(self):
+        if self.format == "whiteboard" and self.topic and len(self.topic) < 8:
+            raise ValueError("Для простого видео уточните тему: минимум 8 символов")
         if self.format is None:
             if self.topic or self.platform or self.frame_count is not None or self.aspect_ratio is not None:
                 raise ValueError("Тема, площадка, пропорции и количество требуют выбранного формата")
