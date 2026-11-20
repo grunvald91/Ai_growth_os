@@ -204,7 +204,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=history-20261104' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=reviewfix-v3-20261118' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-topic-v1-20261120' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -231,7 +231,9 @@ def test_create_has_only_dispatcher_submit_and_reusable_details(live):
     assert "document.getElementById('sg-create-count')" in js.text
     assert "Only the lower dispatcher composer can submit" in js.text
     dispatcher = client.get('/studio/assets/dispatcher.js').text
-    assert "creation: creationHints()" in dispatcher
+    assert "function creationRequest(text)" in dispatcher
+    assert "hints.topic = text;" in dispatcher
+    assert "creation: creationHints()" not in dispatcher
     assert "frame_count:selected==='story'" in dispatcher
     assert "editorial_brief:b || null" in dispatcher
 
@@ -275,7 +277,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=21' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=reviewfix-v3-20261118' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-topic-v1-20261120' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text
