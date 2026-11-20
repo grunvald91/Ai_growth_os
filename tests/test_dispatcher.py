@@ -240,6 +240,88 @@ async def test_edit_preserves_unmodified_audience_context(db, product):
 
 
 
+# ---- selected Create format is an actual routing instruction, not an LLM guess ---------
+
+
+@pytest.mark.asyncio
+async def test_selected_vk_post_topic_routes_without_classifier_and_waits_for_confirmation(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    # This is the exact topic from the owner screenshot. A missing/broken LLM
+    # cannot turn an explicitly selected format into an unsupported request.
+    topic = "Зачем мне CRM?"
+    response = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="selected-crm-post", creation=CreateHints(
+            format="post", platform="vk", topic=topic))
+    assistant = response["messages"][-1]
+    assert assistant["intent"] == "execute"
+    assert "Этого я пока не умею" not in assistant["text"]
+    confirmation = next(b for b in assistant["blocks"] if b["type"] == "confirm")
+    assert confirmation["editable"]["format"] == "post"
+    assert confirmation["editable"]["topic"] == topic
+    assert confirmation["editable"]["platform"] == "vk"
+    assert tasks(db, "content_factory") == []
+
+    # The normal confirmation workflow remains mandatory.
+    await service.confirm(db, context(db, product),
+                          confirmation["confirmation_id"], accept=True, revision=0)
+    jobs = tasks(db, "content_factory")
+    assert len(jobs) == 1
+    request = db.scalar(select(Artifact).where(
+        Artifact.task_id == jobs[0].id, Artifact.kind == "content_request"))
+    assert json.loads(request.content)["topic"] == topic
+    assert json.loads(request.content)["channel"] == "vk"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fmt,capability,platform", [
+    ("post", "create_post", "telegram"),
+    ("story", "create_creative", "vk"),
+    ("short_video", "create_creative", "vk_clips"),
+    ("static_image", "create_creative", "telegram"),
+    ("package", "create_package", None),
+])
+async def test_selected_create_subject_never_needs_llm(db, product, fmt, capability, platform):
+    from app.dispatcher.editable import CreateHints
+
+    selected = CreateHints(format=fmt, topic="Как привлечь больше клиентов",
+                           platform=platform, editorial_brief="Без выдуманных обещаний")
+    result = await service.handle_message(
+        db, context(db, product), None, text=selected.topic,
+        client_key="format-" + fmt, creation=selected)
+    answer = result["messages"][-1]
+    assert answer["intent"] == "execute"
+    card = next(b for b in answer["blocks"] if b["type"] == "confirm")
+    assert card["editable"]["format"] == fmt
+    assert card["editable"]["topic"] == selected.topic
+    assert tasks(db, "content_factory") == []
+    assert tasks(db, "content_creative") == []
+
+
+@pytest.mark.asyncio
+async def test_topic_hint_cannot_override_different_text_or_launch_work(db, product):
+    from app.dispatcher.editable import CreateHints
+
+    result = await service.handle_message(
+        db, context(db, product), None, text="Покажи мои материалы",
+        client_key="not-a-create-command", creation=CreateHints(
+            format="post", platform="vk", topic="Зачем мне CRM?"))
+    assert "Этого я пока не умею" not in result["messages"][-1]["text"]
+    assert not any(b["type"] == "confirm" for b in result["messages"][-1]["blocks"])
+    assert tasks(db, "content_factory") == []
+
+
+def test_selected_create_topic_requires_format_and_is_bounded():
+    from pydantic import ValidationError
+    from app.dispatcher.editable import CreateHints
+
+    with pytest.raises(ValidationError):
+        CreateHints(topic="Зачем мне CRM?")
+    with pytest.raises(ValidationError):
+        CreateHints(format="post", topic="x" * 301)
+
+
 # ---- unified Create: dispatcher intent + optional manual details -------------------------
 
 @pytest.mark.asyncio
