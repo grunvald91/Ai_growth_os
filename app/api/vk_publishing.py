@@ -25,6 +25,8 @@ from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
     community_reference, resolve_community, verify_community_key, client_id, redirect_uri,
+    GROUP_OAUTH_COOKIE, GROUP_OAUTH_PATH, community_oauth_config,
+    begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
 )
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -42,6 +44,7 @@ def feedback(key):
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
             "connected_key": "Подключены текстовые публикации и чтение комментариев. Отправку тестового поста и ответа нужно проверить отдельно.",
+            "connected_via_vk": "ВКонтакте предоставил доступ к публикациям. Для проверки отправьте один утверждённый текстовый пост.",
             "connected_post_only": "Ключ сообщества сохранён для текстовых публикаций. Чтение комментариев пока недоступно: сервисный ключ не настроен или проверка чтения не прошла.",
             }.get(key, "")
 
@@ -55,6 +58,8 @@ def connection_error(key):
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
+        "group_oauth_input": "Не удалось начать авторизацию сообщества VK. Проверьте ссылку или воспользуйтесь подключением по ключу.",
+        "group_oauth_not_configured": "Авторизация через VK сейчас недоступна. Пока можно подключить ключ сообщества вручную.",
     }.get(key, "")
 
 
@@ -108,6 +113,8 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id
                              and (not channel.is_community_token or platform_service_token(settings)))
+        if channel.is_community_token and channel.expires_at:
+            current += '<p class="sg-footnote">Доступ VK ограничен по сроку. Для продления подключите сообщество заново до окончания действия ключа.</p>'
         current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
                     if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
         if channel.is_community_token and platform_service_token(settings) and not replies_ready:
@@ -116,6 +123,21 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
                         '</form>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
+    try:
+        community_oauth_config(settings)
+        group_oauth_ready = True
+    except ValueError:
+        group_oauth_ready = False
+    oauth_first = (f"""
+ <form method="post" action="/studio/products/{product_id}/vk/group-connect" class="sg-fields sg-compact-form">
+  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте</span>
+   <input type="text" name="community_link" maxlength="255" autocomplete="url"
+     placeholder="https://vk.com/my_community" required></label>
+  <button class="btn primary" type="submit">Подключить ВКонтакте</button>
+  <p class="sg-footnote">Вы перейдёте во ВКонтакте, чтобы самостоятельно подтвердить доступ ServGo.
+  Ключи копировать не требуется. Подключение станет активным только после проверки прав.</p>
+ </form>""" if group_oauth_ready else
+ '<p class="sg-footnote">Авторизация одним нажатием станет доступна после подключения приложения VK администратором ServGo.</p>')
     enabled = bool(settings.content_vk_autopost_enabled)
     can_schedule = bool(channel and posts)
     try:
@@ -131,6 +153,8 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
  <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
  <p>Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно.</p></div></div>
  {alert}{current}
+ {oauth_first}
+ <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
   <label class="sg-field"><span>Ссылка на сообщество</span>
    <input name="community_link" type="text" maxlength="255" autocomplete="off"
@@ -144,6 +168,7 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
   <p class="sg-footnote">ВКонтакте → ваше сообщество → Управление → Работа с API → Ключи доступа → Создать ключ.
   Предоставьте права на стену и управление. Скопируйте ключ в форму выше.
   ServGo проверит ключ и самостоятельно найдёт ID сообщества по ссылке. Ключ не отправляйте в чат.</p>
+ </details>
  </details>
  <p class="sg-footnote">Это подключение для текстовых публикаций. Отправка в стену требует проверки одним постом. Для чтения комментариев может потребоваться отдельный доступ к API; подключение публикаций не означает, что комментарии уже работают.</p>
  <details><summary>Дополнительный способ: авторизация VK ID</summary>
@@ -181,6 +206,71 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
     return HTMLResponse(studio_page_shell(product, active="channels", title="Публикации ВКонтакте",
         subtitle="Авторизация, очередь и история отправок", body=body),
         headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"})
+
+
+@router.post("/studio/products/{product_id}/vk/group-connect")
+async def vk_group_connect(product_id: UUID, request: Request,
+                           db: Session = Depends(get_db), settings=Depends(get_settings)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        url, cookie = await begin_community_oauth(
+            settings, product_id, fields.get("community_link", ""),
+            owner_login=getattr(request.state, "studio_login", None))
+    except ValueError:
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=group_oauth_input", status_code=303)
+    response = RedirectResponse(url, status_code=303,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    response.set_cookie(GROUP_OAUTH_COOKIE, cookie, max_age=600,
+                        path=GROUP_OAUTH_PATH,
+                        secure=settings.app_env.casefold() in {"prod", "production"},
+                        httponly=True, samesite="lax")
+    return response
+
+
+@router.get(GROUP_OAUTH_PATH)
+async def vk_group_callback(request: Request, state: str = "", code: str = "",
+                            error: str = "", db: Session = Depends(get_db),
+                            settings=Depends(get_settings)):
+    try:
+        payload = read_community_oauth_cookie(
+            settings, request.cookies.get(GROUP_OAUTH_COOKIE), state)
+        if (payload.get("owner_login") is not None
+                and payload["owner_login"] != getattr(request.state, "studio_login", None)):
+            raise ValueError("Войдите в ServGo под тем же аккаунтом, с которого начали подключение")
+        scope = getattr(request.state, "studio_product_ids", None)
+        if scope is not None and payload["product_id"] not in scope:
+            raise ValueError("Нет доступа к организации")
+        _owner_product(db, UUID(payload["product_id"]))
+        if error:
+            raise ValueError("Подключение отменено во ВКонтакте")
+        row = await finish_community_oauth(db, settings, payload, code)
+        result = "connected_via_vk"
+        if platform_service_token(settings):
+            try:
+                token = VKStore(settings.products_root).load_token(row.id)
+                await CommentService(db, settings).connect(
+                    row.product_id, ConnectInput(platform="vk",
+                        account_id=payload["group_id"], token=token))
+                result = "connected_key"
+            except (ValueError, LookupError):
+                db.rollback()  # publication key is already committed
+        response = RedirectResponse(
+            f"/studio/products/{payload['product_id']}/vk?done={result}", status_code=303)
+    except (ValueError, LookupError) as exc:
+        db.rollback()
+        response = HTMLResponse(
+            '<!doctype html><html lang="ru"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Подключение ВКонтакте</title><p>Не удалось подтвердить доступ: '
+            + esc(str(exc))
+            + '</p><p>Вернитесь в Studio. Можно использовать подключение по ключу.</p></html>',
+            status_code=422)
+    response.delete_cookie(GROUP_OAUTH_COOKIE, path=GROUP_OAUTH_PATH)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 @router.post("/studio/products/{product_id}/vk/connect")
