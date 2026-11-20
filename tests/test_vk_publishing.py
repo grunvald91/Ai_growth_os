@@ -766,6 +766,18 @@ async def test_vk_one_click_fake_sender_does_not_verify_app(monkeypatch, db, tmp
     assert not group_app_verified(settings)
 
 
+def test_vk_connection_guides_match_2fa_and_current_menu():
+    from app.comments.platforms import PLATFORMS, CONNECTION_GUIDES
+
+    # Users reach VK from both publications and the comments workspace.
+    for guide in (PLATFORMS["vk"], CONNECTION_GUIDES["vk"]):
+        rendered = " ".join(guide["steps"]) + " " + guide.get("help", "")
+        assert "Дополнительно" in rendered
+        assert "Работа с API" in rendered
+        assert "Ключи доступа" in rendered
+        assert "2FA" in rendered
+
+
 def test_vk_pilot_gate_uses_exact_operator_access_rules(tmp_path):
     from types import SimpleNamespace
     from app.api.vk_publishing import _can_begin_community_oauth, _is_tune_owner
