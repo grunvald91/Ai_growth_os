@@ -24,3 +24,18 @@ jobs:
           done
           find /usr/share/tesseract-ocr -name '*traineddata' -printf '%f\n' 2>/dev/null || true
           tesseract --list-langs 2>&1 || true
+      - name: Check configured APT sources and official HTTPS mirror access
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat /etc/apt/sources.list 2>/dev/null || true
+          cat /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          for url in \
+            https://archive.ubuntu.com/ubuntu/dists/noble/InRelease \
+            https://security.ubuntu.com/ubuntu/dists/noble-security/InRelease \
+            https://azure.archive.ubuntu.com/ubuntu/dists/noble/InRelease \
+            https://mirrors.edge.kernel.org/ubuntu/dists/noble/InRelease; do
+            echo "== $url"
+            curl -L -sS -o /dev/null -w 'http_code=%{http_code} time=%{time_total}\n' \
+              --connect-timeout 7 --max-time 12 "$url" || true
+          done
