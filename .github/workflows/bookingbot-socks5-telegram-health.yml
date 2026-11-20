@@ -1,0 +1,46 @@
+name: ServGo BookingBot SOCKS5 Telegram egress check
+on:
+  schedule:
+    # Independent fallback check: GitHub Actions may delay scheduled runs.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'services/booking_bot/scripts/socks5_telegram_health.py'
+      - 'services/booking_bot/scripts/run_remote_socks5_health.py'
+      - 'services/booking_bot/tests/test_socks5_telegram_health.py'
+      - '.github/workflows/bookingbot-socks5-telegram-health.yml'
+  pull_request:
+    paths:
+      - 'services/booking_bot/scripts/socks5_telegram_health.py'
+      - 'services/booking_bot/scripts/run_remote_socks5_health.py'
+      - 'services/booking_bot/tests/test_socks5_telegram_health.py'
+      - '.github/workflows/bookingbot-socks5-telegram-health.yml'
+
+permissions:
+  contents: read
+concurrency:
+  group: booking-socks5-health-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  read_only_probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deterministic monitor and failure/recovery tests
+        run: python -m unittest discover -s services/booking_bot/tests -p 'test_socks5_telegram_health.py' -v
+      - name: Install SSH client on runner only
+        if: github.event_name != 'pull_request'
+        run: python -m pip install --disable-pip-version-check 'paramiko==3.5.1'
+      - name: Real Telegram HTTPS over ServGo SOCKS5 155-to-89 (no server writes)
+        if: github.event_name != 'pull_request'
+        env:
+          SERVER_PASSWORD: ${{ secrets.SERVER_SSH_PASSWORD }}
+        run: python services/booking_bot/scripts/run_remote_socks5_health.py
