@@ -549,6 +549,7 @@ def test_vk_one_click_group_oauth_requires_legacy_app_and_never_exposes_secret(t
     settings = Settings(products_root=tmp_path, social_vk_community_app_id="1234567",
                         social_vk_community_app_secret="very-secret-app-key", _env_file=None)
     assert community_oauth_config(settings)[0] == "1234567"
+    assert "very-secret-app-key" not in repr(settings)
     assert community_oauth_redirect(settings) == "https://servgo.ru/studio/social/vk/group-callback"
     with pytest.raises(ValueError, match="не настроена"):
         community_oauth_config(Settings(products_root=tmp_path,
