@@ -211,3 +211,96 @@ def test_whiteboard_worker_disables_hidden_text_provider_retries(environment, tm
     assert provider.allow_fallback is False
     assert provider.allow_ceiling_retry is False
     assert pipeline.visual_author.service._provider is provider
+
+
+@pytest.mark.asyncio
+async def test_resumed_offline_region_audit_reaches_final_video_artifact(environment):
+    """A cached region plan must retain its fallback warning in the final result."""
+    from app.content.whiteboard.jobs import resume_job
+    from app.models.domain import Artifact
+    from test_whiteboard_visual_review import pipeline_factory, review, reviewed_job
+
+    factory, original_settings, product_id, _ = environment
+    settings = original_settings.model_copy(update={'whiteboard_auto_resume_attempts': 0})
+    task_id = reviewed_job(environment, maximum=19)
+    approve(environment, task_id)
+    failed_speech_once = True
+    region_attempts = 0
+
+    def build(settings, payload, store):
+        nonlocal failed_speech_once, region_attempts
+        pipeline = pipeline_factory([], review())(settings, payload, store)
+        original_regions = pipeline.regions
+        original_speech = pipeline.speech
+
+        class Regions:
+            async def detect(self, scene, image):
+                nonlocal region_attempts
+                region_attempts += 1
+                if region_attempts == 1:
+                    request = httpx.Request('POST', 'https://provider.example/v1/chat/completions')
+                    raise httpx.HTTPStatusError('temporary HTTP 502', request=request,
+                                                response=httpx.Response(502, request=request))
+                return await original_regions.detect(scene, image)
+
+        class Speech:
+            async def synthesize(self, *args, **kwargs):
+                nonlocal failed_speech_once
+                if failed_speech_once:
+                    failed_speech_once = False
+                    raise RuntimeError('synthetic interrupted speech')
+                return await original_speech.synthesize(*args, **kwargs)
+
+        pipeline.regions = Regions()
+        pipeline.speech = Speech()
+        return pipeline
+
+    assert await run_whiteboard_once(factory, settings, factory=build, readiness=ready) == 1
+    with factory() as db:
+        task = owner_task(db, product_id, task_id)
+        assert task.status == TaskStatus.FAILED
+        value = json.loads(records(db, task)[1].content)
+        assert value['visual_review_result']['region_layout'][0]['provider_http_status'] == 502
+        resume_job(db, product_id, task_id, confirmed=True, decided_by='owner')
+
+    assert await run_whiteboard_once(factory, settings, factory=build, readiness=ready) == 1
+    with factory() as db:
+        task = owner_task(db, product_id, task_id)
+        assert task.status == TaskStatus.COMPLETED
+        state = json.loads(records(db, task)[1].content)
+        video = db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == 'whiteboard_video'))
+        assert video is not None
+        artifact_audit = json.loads(video.content)['visual_review']['region_layout']
+        assert artifact_audit == state['visual_review_result']['region_layout']
+        assert len(artifact_audit) == 1
+        assert artifact_audit[0]['scene_index'] == 0
+        assert artifact_audit[0]['provider_http_status'] == 502
+        assert artifact_audit[0]['operation'] == 'offline_fallback_region_split'
+        assert region_attempts == 3  # Cached scene 0 region is not billed twice.
+
+
+def test_region_ledger_records_claudehub_instead_of_openrouter(environment):
+    from app.content.whiteboard.contracts import WhiteboardRequest
+    from app.content.whiteboard.jobs import queue_job
+    from app.content.whiteboard.runtime import configured_models
+
+    factory, settings, product_id, _ = environment
+    models = configured_models(settings).model_copy(update={
+        'image': 'gemini-3.1-flash-image', 'regions': 'gemini-flash-3.8'})
+    with factory() as db:
+        task_id = queue_job(db, WhiteboardRequest(
+            product_id=product_id, topic='Проверяем журнал разметки', voice='Kore'),
+            models, max_api_calls=14, image_provider='claudehub').id
+    approve(environment, task_id)
+    with factory() as db:
+        owner_task(db, product_id, task_id).status = TaskStatus.RUNNING
+        db.commit()
+
+    ledger = CallLedger(factory, product_id, task_id)
+    run_id = ledger.begin('regions')
+    with factory() as db:
+        run = db.get(AgentRun, run_id)
+        assert run.provider == 'claudehub'
+        assert run.model == 'gemini-flash-3.8'
+    ledger.finish(run_id)

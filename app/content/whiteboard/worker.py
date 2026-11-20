@@ -210,18 +210,21 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                         # callback. Retain their previously recorded offline
                         # fallback audit instead of hiding it from the owner.
                         previous = value.get('visual_review_result') or {}
-                        current = dict(update['visual_review_result'])
+                        # Keep the exact mutable audit object supplied by the
+                        # pipeline: it is later written into the MP4 sidecar and
+                        # result artifact. Copying it only to the DB state would
+                        # silently drop prior fallback warnings on resume.
+                        fresh = update['visual_review_result']
                         if isinstance(previous, dict):
                             regions = {}
                             for entry in previous.get('region_layout', []):
                                 if isinstance(entry, dict) and type(entry.get('scene_index')) is int:
                                     regions[entry['scene_index']] = entry
-                            for entry in current.get('region_layout', []):
+                            for entry in fresh.get('region_layout', []):
                                 if isinstance(entry, dict) and type(entry.get('scene_index')) is int:
                                     regions[entry['scene_index']] = entry
                             if regions:
-                                current['region_layout'] = [regions[i] for i in sorted(regions)]
-                        update = {**update, 'visual_review_result': current}
+                                fresh['region_layout'] = [regions[i] for i in sorted(regions)]
                     value.update(update)
                     saved.content = json.dumps(value)
                     db.commit()

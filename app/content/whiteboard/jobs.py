@@ -15,7 +15,7 @@ from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Prod
 from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
 from .science import requires_science_review
-from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels
+from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels, regions_on_claudehub
 from pydantic import Field, model_validator
 
 AGENT = 'whiteboard_renderer'
@@ -399,9 +399,11 @@ class CallLedger:
                 if total_begun - attempt_cap['baseline_runs'] >= attempt_cap['max_additional']:
                     raise ReadinessError('call_limit')
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
+            provider_name = ('configured_text' if model_stage == 'storyboard' or stage == 'science_review'
+                             else payload.image_provider if model_stage == 'image'
+                             else 'claudehub' if regions_on_claudehub(payload.models) else 'openrouter')
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
-                           provider='configured_text' if model_stage == 'storyboard' or stage == 'science_review' else
-                               payload.image_provider if model_stage == 'image' else 'openrouter',
+                           provider=provider_name,
                            model=getattr(payload.models, model_stage), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
             db.add(run); db.flush()
