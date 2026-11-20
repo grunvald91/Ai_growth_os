@@ -63,7 +63,7 @@ class FakeReviewer:
 
     async def review(self, image, *, company_name, title, body):
         self.calls += 1
-        assert image[:8] == b"\\x89PNG\\r\\n\\x1a\\n"
+        assert image[:8] == b"\x89PNG\r\n\x1a\n"
         assert company_name == "Тестовая мастерская"
         assert "клиентов" in title
         assert "обращения" in body
@@ -160,7 +160,7 @@ async def test_critic_uses_real_image_payload_on_existing_claudehub_endpoint():
         agent = VKImageVisionReviewer(
             Settings(_env_file=None, xai_api_key="fake"), client=client)
         result = await agent.review(
-            b"\\x89PNG\\r\\n\\x1a\\n" + b"fake-content",
+            b"\x89PNG\r\n\x1a\n" + b"fake-content",
             company_name="Бизнес", title="Почему теряют клиентов",
             body="Пропущенные заявки и возможности записи")
     assert not result.blocked
