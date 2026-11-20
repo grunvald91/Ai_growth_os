@@ -1,3 +1,37 @@
+## Один клик вместо ручного ввода ключа сообщества
+
+Новый *условный* сценарий ServGo: ссылка `vk.com/название` → **Подключить ВКонтакте**
+→ окно авторизации сообщества на `oauth.vk.com` → проверка прав →
+зашифрованное сохранение ключа в нужной компании. Числовой ID, ключ и приложение
+VK клиенту вручную искать не нужно. ID короткой ссылки получается через
+`groups.getById` с платформенным сервисным ключом или временным app service
+key, полученным у VK по `client_credentials`; в адрес VK не передаётся
+пользовательский пароль или секрет приложения.
+
+**Важно:** этот поток использует отдельное **классическое VK community OAuth**
+приложение, не `VK ID`. На сервере должны быть оба параметра
+`SOCIAL_VK_COMMUNITY_APP_ID` и `SOCIAL_VK_COMMUNITY_APP_SECRET`;
+зарегистрируйте разрешённый HTTPS callback
+`https://servgo.ru/studio/social/vk/group-callback` в настройках
+данного приложения. VK ID `vk2.a` не является заменой токена сообщества
+для `wall.post`. Новые приложения VK могут не поддерживать старый OAuth
+вообще. **Совместимость с реальным VK пока не подтверждена; без данных
+приложения кнопка не появляется.** Не открывать способ всем компаниям до
+успешного живого теста на собственном сообществе. После отказа провайдера
+остаётся уже проверяемый ручной способ с ключом сообщества.
+
+Только сервер обменивает code на ключ; callback проверяет подписанное короткоживущее
+состояние, исходную организацию, текущего владельца и точный group ID. Ключи
+хранятся зашифрованными, а временные ключи с указанным `expires_in` нельзя
+использовать после срока действия. Автопубликация без отдельного утверждённого
+материала и подтверждения владельца недоступна.
+
+Источники протокола:
+- https://github.com/VKCOM/vk-php-sdk/blob/master/README.md
+- https://github.com/VKCOM/vk-php-sdk/blob/master/src/VK/OAuth/Group/Group.php
+- https://github.com/VKCOM/vk-java-sdk/blob/master/README.md
+- Ограничения VK ID и группового токена (полевые тесты, не документация VK): https://bulatko.github.io/vk-mcp-server/tokeny-vk-api/
+
 # ServGo Growth Studio — VK ID и публикация на стене
 
 Рабочий PR: [#364](https://github.com/grunvald91/Ai_growth_os/pull/364). Реальная авторизация и внешний вызов `wall.post` ещё **не выполнялись**; до живого теста нельзя считать интеграцию подтверждённой.
@@ -20,6 +54,8 @@
 
 ```env
 SOCIAL_VK_CLIENT_ID=<optional_numeric_vk_id_application_id>
+SOCIAL_VK_COMMUNITY_APP_ID=<optional_classic_community_oauth_application_id>
+SOCIAL_VK_COMMUNITY_APP_SECRET=<optional_classic_community_oauth_secret>
 SOCIAL_VK_SERVICE_TOKEN=<optional_read_only_app_service_token>
 SOCIAL_VK_REDIRECT_BASE=https://servgo.ru
 CONTENT_VK_AUTOPOST_ENABLED=true
