@@ -2371,8 +2371,16 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
         if chosen == "package":
             task = queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
         elif chosen == "post":
+            vk_image = fields.get("vk_generate_image") == "yes"
+            image_model = fields.get("vk_image_model", "auto") if vk_image else "none"
+            if vk_image:
+                if fields.get("channel") != "vk":
+                    raise ValueError("На этом этапе изображение доступно только для постов ВКонтакте")
+                from app.content.creative_images import resolve_model
+                resolve_model(settings, image_model)  # Before queueing paid work.
             task = queue_content(db, product.id, topic, format="post",
-                          channel=fields.get("channel"), audience=audience, editorial_brief=brief)
+                          channel=fields.get("channel"), audience=audience, editorial_brief=brief,
+                          image_model=image_model)
         elif chosen in {"short_video", "story", "static_image"}:
             count_text = fields.get("frame_count") if chosen == "story" else None
             count = int(count_text) if count_text else None
@@ -2488,6 +2496,16 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
     ).order_by(Artifact.created_at.desc()).limit(1))
     body = task_detail_html(product.id, task, runs, results, request=request)
+    if task.assigned_agent == "content_factory" and request is not None:
+        req_data = parse_json(request)
+        if (req_data.get("mode") == "post" and req_data.get("channel") == "vk"
+                and req_data.get("image_model", "none") != "none"):
+            images, invalid_frames = verified_visible_images(
+                db, settings.products_root, product.id, task.id)
+            body += gallery_html(product.id, task.id, images, invalid_frames=invalid_frames)
+            body += ('<p class="sg-footnote">Иллюстрация подготовлена для ВКонтакте. '
+                     'Загрузка фотографии на стену через VK API требует отдельного '
+                     'подключения; текстовый пост не будет отправлен вместо картинки.</p>')
     if task.assigned_agent == "content_creative":
         if task.status == TaskStatus.FAILED:
             diagnostic = db.scalar(select(Artifact).where(
@@ -2535,9 +2553,17 @@ def _creative_owner_task(db: Session, product_id: UUID, task_id: UUID) -> Task:
     _owner_product(db, product_id)
     task = db.scalar(select(Task).where(
         Task.id == task_id, Task.product_id == product_id,
-        Task.assigned_agent == "content_creative"))
+        Task.assigned_agent.in_(["content_creative", "content_factory"])))
     if task is None:
         raise HTTPException(404, "Задание не найдено")
+    if task.assigned_agent == "content_factory":
+        request = db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.product_id == product_id,
+            Artifact.kind == "content_request"))
+        raw = parse_json(request) if request is not None else {}
+        if (raw.get("mode") != "post" or raw.get("channel") != "vk"
+                or raw.get("image_model", "none") == "none"):
+            raise HTTPException(404, "Задание с изображениями не найдено")
     return task
 
 
