@@ -39,7 +39,7 @@ def feedback(key):
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
-            "connected_key": "Ключ сообщества проверен и сохранён. Для чтения комментариев и публикации постов необходим подходящий пользовательский доступ через VK ID.",
+            "connected_key": "Ключ сообщества сохранён и проверен на право работы со стеной. Теперь можно проверить один текстовый пост; отправка ещё не подтверждена.",
             }.get(key, "")
 
 
@@ -95,7 +95,7 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
     if channel:
         current = (f'<div class="sg-channel-line"><span class="sg-link-dot">✓</span><div>'
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
-                   ('<span class="sg-channel-status">Ключ сообщества · публикация недоступна</span></div>'
+                   ('<span class="sg-channel-status">Ключ сообщества · можно проверить текстовую публикацию</span></div>'
                     if channel.is_community_token else
                     '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
@@ -109,7 +109,7 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     enabled = bool(settings.content_vk_autopost_enabled)
-    can_schedule = bool(channel and not channel.is_community_token and posts)
+    can_schedule = bool(channel and posts)
     try:
         client_id(settings)
         redirect_uri(settings)
@@ -123,25 +123,29 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
  <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
  <p>Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно.</p></div></div>
  {alert}{current}
- <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
+ <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
   <label class="sg-field"><span>Ссылка на сообщество</span>
    <input name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
-  <button class="btn primary" type="submit" {"disabled" if not vk_oauth_ready else ""}>Подключить через ВКонтакте</button>
+  <label class="sg-field"><span>Ключ сообщества</span>
+   <input name="access_token" type="password" maxlength="8000" autocomplete="off"
+      placeholder="Ключ из настроек сообщества" required></label>
+  <button class="btn primary" type="submit">Проверить и подключить публикации</button>
  </form>
- {'' if vk_oauth_ready else '<p role="alert" class="sg-notice">Для входа через VK ID нужно настроить приложение ВКонтакте на сервере ServGo.</p>'}
- <p class="sg-footnote">Войдите в свой VK-аккаунт с правами на сообщество. ServGo определит его числовой ID и проверит возможность читать публикации и комментарии. Право отправлять новые посты проверяется только реальной публикацией.</p>
- <details><summary>Дополнительно: ключ доступа сообщества (ограниченные возможности)</summary>
-  <p class="sg-footnote">ВКонтакте → Управление сообществом → Работа с API → Ключи доступа.
-  Ключ сообщества можно сохранить зашифрованным, но он не заменяет пользовательский доступ для wall.post, wall.get и wall.getComments.
-  Для полноценного подключения используйте вход через ВКонтакте выше. Ключ не отправляйте в чат.</p>
-  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
+ <details><summary>Как получить ключ сообщества?</summary>
+  <p class="sg-footnote">ВКонтакте → ваше сообщество → Управление → Работа с API → Ключи доступа → Создать ключ.
+  Предоставьте права на стену и управление. Скопируйте ключ в форму выше.
+  ServGo проверит ключ и самостоятельно найдёт ID сообщества по ссылке. Ключ не отправляйте в чат.</p>
+ </details>
+ <p class="sg-footnote">Это подключение для текстовых публикаций. Отправка в стену требует проверки одним постом. Для чтения комментариев может потребоваться отдельный доступ к API; подключение публикаций не означает, что комментарии уже работают.</p>
+ <details><summary>Дополнительный способ: авторизация VK ID</summary>
+  <p class="sg-footnote">Этот способ может разрешать чтение данных сообщества, но VK ID-токены некоторых приложений не поддерживают отправку на стену. Используйте его для проверки чтения комментариев, если VK ID настроен в ServGo.</p>
+  <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
    <label class="sg-field">Ссылка на сообщество
     <input name="community_link" type="text" maxlength="255" placeholder="https://vk.com/my_community" required></label>
-   <label class="sg-field">Ключ сообщества
-    <input name="access_token" type="password" maxlength="8000" autocomplete="off" required></label>
-   <button class="btn secondary" type="submit">Проверить и сохранить ключ</button>
+   <button class="btn secondary" type="submit" {"disabled" if not vk_oauth_ready else ""}>Подключить через VK ID</button>
   </form>
+  {'' if vk_oauth_ready else '<p role="status" class="sg-footnote">VK ID пока не настроен администратором ServGo.</p>'}
  </details>
 </section>
 <section class="sg-surface">
@@ -159,7 +163,7 @@ def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Dep
   <button name="mode" value="now" class="btn primary" type="submit"
    {"disabled" if not can_schedule else ""}>Опубликовать сейчас</button>
  </form>
- <p class="sg-footnote">Пока поддерживается публикация текста. Для ключа сообщества публикация недоступна: VK API требует пользовательский токен. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
+ <p class="sg-footnote">Пока доступна только публикация текста. Для проверки выберите один утверждённый тестовый пост. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
 </section>
 <section class="sg-surface">
  <h2>История VK</h2><ul class="sg-publication-list">
