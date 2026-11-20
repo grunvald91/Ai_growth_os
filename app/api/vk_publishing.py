@@ -154,12 +154,6 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  '<p class="sg-footnote">Авторизация одним нажатием станет доступна после подключения приложения VK администратором ServGo.</p>')
     enabled = bool(settings.content_vk_autopost_enabled)
     can_schedule = bool(channel and posts)
-    try:
-        client_id(settings)
-        redirect_uri(settings)
-        vk_oauth_ready = True
-    except ValueError:
-        vk_oauth_ready = False
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
     body = f"""
@@ -185,15 +179,6 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  </details>
  </details>
  <p class="sg-footnote">Это подключение для текстовых публикаций. Отправка в стену требует проверки одним постом. Для чтения комментариев может потребоваться отдельный доступ к API; подключение публикаций не означает, что комментарии уже работают.</p>
- <details><summary>Дополнительный способ: авторизация VK ID</summary>
-  <p class="sg-footnote">Этот способ может разрешать чтение данных сообщества, но VK ID-токены некоторых приложений не поддерживают отправку на стену. Используйте его для проверки чтения комментариев, если VK ID настроен в ServGo.</p>
-  <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
-   <label class="sg-field">Ссылка на сообщество
-    <input name="community_link" type="text" maxlength="255" placeholder="https://vk.com/my_community" required></label>
-   <button class="btn secondary" type="submit" {"disabled" if not vk_oauth_ready else ""}>Подключить через VK ID</button>
-  </form>
-  {'' if vk_oauth_ready else '<p role="status" class="sg-footnote">VK ID пока не настроен администратором ServGo.</p>'}
- </details>
 </section>
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">АВТОПУБЛИКАЦИЯ</span>
