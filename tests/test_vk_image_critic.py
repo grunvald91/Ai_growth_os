@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.content.creative_images import image_folder
 from app.content.vk_image_critic import (
     REVIEW_POLICY, VKImageIssue, VKImageReview, VKImageVisionReviewer,
-    critic_profile, review_vk_post_image,
+    critic_profile, review_vk_post_image, verified_vk_image_approval,
 )
 from app.core.config import Settings
 from app.models.domain import Artifact, Product, Task
@@ -101,6 +101,7 @@ async def test_minor_and_uncertain_issues_pass_without_redraw(db, tmp_path):
     data = json.loads(post.content)
     assert data["image_state"] == "ready" and data["image_review_state"] == "approved"
     assert data["image_critical_issues"] == []
+    assert verified_vk_image_approval(db, post, asset) is True
     audit = db.scalars(select(Artifact).where(
         Artifact.product_id == product.id, Artifact.kind == "vk_image_critique")).all()
     assert len(audit) == 1
@@ -122,6 +123,10 @@ async def test_clear_critical_issue_blocks_but_retains_image_and_text(db, tmp_pa
     assert data["image_review_state"] == "blocked"
     assert data["image_state"] == "blocked"
     assert len(data["image_critical_issues"]) == 1
+    assert verified_vk_image_approval(db, post, asset) is False
+    from app.api.content_studio import material_detail_page
+    assert "Критик заблокировал изображение" in material_detail_page(
+        db, product, post, root=tmp_path)
     assert (image_folder(tmp_path, product.id, task.id) / "frame-01.png").is_file()
 
 
@@ -137,6 +142,10 @@ async def test_critic_failure_marks_unknown_and_does_not_double_bill(db, tmp_pat
                                       post=post, reviewer=new_reviewer) == "unavailable"
     assert reviewer.calls == 1 and new_reviewer.calls == 0
     assert json.loads(post.content)["image_state"] == "review_unavailable"
+    assert verified_vk_image_approval(db, post, asset) is False
+    from app.api.content_studio import material_detail_page
+    assert "не подтвердил качество" in material_detail_page(
+        db, product, post, root=tmp_path)
     intents = db.scalars(select(Artifact).where(
         Artifact.product_id == product.id,
         Artifact.kind == "vk_image_critique_intent")).all()
@@ -175,3 +184,15 @@ def test_no_critic_endpoint_fails_before_paid_image_generation():
     with pytest.raises(ValueError, match="ключ"):
         critic_profile(Settings(_env_file=None, xai_api_key=None,
                                 openai_api_key=None))
+
+def test_ready_flag_without_persisted_review_is_rejected(db, tmp_path):
+    product, task, post, image = _setup(db, tmp_path)
+    data = json.loads(post.content)
+    data.update(image_state="ready", image_review_state="approved",
+                image_review_artifact_id="c826c074-0acb-4fd4-ae65-054e5fc61366")
+    post.content = json.dumps(data)
+    db.commit()
+    assert not verified_vk_image_approval(db, post, image)
+    from app.api.content_studio import material_detail_page
+    page = material_detail_page(db, product, post, root=tmp_path)
+    assert "Публикацию нужно проверить" in page
