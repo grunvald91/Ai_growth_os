@@ -6,6 +6,7 @@ existing Studio authentication and CSRF origin checks.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 from pathlib import Path
@@ -55,7 +56,7 @@ from app.models.domain import Product
 from app.voice.dictionary import SLUG as VOICE_PROJECT_SLUG
 
 ASSETS = Path(__file__).parent / "ai_chat_assets"
-ASSET_VERSION = "6"
+ASSET_VERSION = "7"
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 
@@ -191,8 +192,12 @@ def ai_chat_page(
         if prod is not None and VOICE_PROJECT_SLUG.match(prod.slug or ""):
             voice_project = prod.slug
     company_context = _company_context_payload(db, settings, resolved_pid)
+    # Distinguish browser-side drafts/history even if a shared browser signs in
+    # as another Studio account. This is a namespace, not an auth credential.
+    storage_scope = hashlib.sha256(principal.owner_account.encode("utf-8")).hexdigest()[:20]
     boot_config = {
         "apiBase": "/studio/api/ai-chat",
+        "storageScope": storage_scope,
         "productId": str(resolved_pid) if resolved_pid else None,
         "companyContext": company_context,
         "companies": _authorized_products(db, principal),

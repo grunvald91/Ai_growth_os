@@ -5,6 +5,9 @@
   const boot = bootEl ? JSON.parse(bootEl.textContent || "{}") : {};
   const API_BASE = boot.apiBase || "/studio/api/ai-chat";
   const PRODUCT_ID = boot.productId || null;
+  // The server scopes local browser drafts and active chats to the login.
+  // Never reuse previous unscoped storage keys across Studio accounts.
+  const STORAGE_SCOPE = boot.storageScope || "unscoped-disabled";
   const COMPANY_CTX = boot.companyContext || null;
   const COMPANIES = Array.isArray(boot.companies) ? boot.companies : [];
   const VOICE_URL = boot.voiceUrl || "/studio/voice/dictate";
@@ -129,15 +132,15 @@
   function draftKey(convId, specialistId = state.specialistId) {
     // Isolate unsent drafts by role rather than sharing a global new-chat draft.
     const draftId = convId || (specialistId ? `new_${specialistId}` : "new");
-    return `servgo_ai_chat_draft_${PRODUCT_ID || "global"}_${draftId}`;
+    return `servgo_ai_chat_draft_${STORAGE_SCOPE}_${PRODUCT_ID || "global"}_${draftId}`;
   }
 
   function pendingSpecialistKey() {
-    return `servgo_ai_chat_pending_specialist_${PRODUCT_ID || "global"}`;
+    return `servgo_ai_chat_pending_specialist_${STORAGE_SCOPE}_${PRODUCT_ID || "global"}`;
   }
 
   function activeConvStorageKey() {
-    return `servgo_ai_chat_active_${PRODUCT_ID || "global"}`;
+    return `servgo_ai_chat_active_${STORAGE_SCOPE}_${PRODUCT_ID || "global"}`;
   }
 
   function showToast(text) {
@@ -1533,6 +1536,8 @@
   // ---------- Send / Retry / Stop ----------
   async function ensureConversation() {
     if (state.activeConversationId) return state.activeConversationId;
+    const newChatDraftKey = draftKey(null);
+    const pendingDraft = localStorage.getItem(newChatDraftKey);
     const conv = await apiFetch("/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1544,6 +1549,12 @@
     });
     state.activeConversationId = conv.id;
     state.specialistId = conv.specialist_id || null;
+    // A message POST may fail after conversation creation. Keep the typed
+    // draft bound to the new conversation so reloading cannot lose it.
+    if (pendingDraft !== null) {
+      localStorage.setItem(draftKey(conv.id), pendingDraft);
+      localStorage.removeItem(newChatDraftKey);
+    }
     localStorage.removeItem(pendingSpecialistKey());
     localStorage.setItem(activeConvStorageKey(), conv.id);
     renderSpecialistPicker();
