@@ -777,3 +777,6 @@ STUDIO_JS += r"""
   else syncVkPostImage();
 })();
 """
+
+# VK posts use a different portrait aspect than Stories.
+STUDIO_CSS += ".sg-image-tile>a.is-vk-portrait{aspect-ratio:4/5}"
