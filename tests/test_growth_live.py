@@ -198,6 +198,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="dp-voice-status"' in page.text
     assert 'id="sg-create-suggestions"' in page.text
     assert 'id="sg-create-count"' in page.text
+    assert 'id="sg-create-vk-image-model"' in page.text
+    assert 'id="sg-create-vk-image-ratio"' in page.text
+    assert 'value="4:5"' in page.text and 'value="1:1"' in page.text
     assert 'id="sg-create-platform"' in page.text
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
