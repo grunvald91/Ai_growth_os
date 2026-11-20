@@ -9,10 +9,9 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 from uuid import uuid4
 
-from PIL import Image
+from PIL import Image, ImageOps
 from sqlalchemy import select
 
 from app.content.creative_images import (
@@ -21,14 +20,17 @@ from app.content.creative_images import (
 from app.models.domain import Artifact
 from app.services.artifacts import ArtifactService
 
-VK_EXPORT_SIZE = (1080, 1350)
+VK_EXPORT_SIZES = {"4:5": (1080, 1350), "1:1": (1080, 1080)}
 
 
-def vk_visual_prompt(company_name: str, title: str, body: str) -> str:
+def vk_visual_prompt(company_name: str, title: str, body: str, *, ratio: str = "4:5") -> str:
     """Produce visual direction from the finished post, not just its short topic."""
+    if ratio not in VK_EXPORT_SIZES:
+        raise ValueError("Unsupported VK image format")
+    frame = "portrait 4:5" if ratio == "4:5" else "square 1:1"
     return (
         "Create one original, modern editorial illustration for a VKontakte feed "
-        "post, portrait 4:5. It must VISUALLY communicate the central real-world "
+        f"post, {frame}. It must VISUALLY communicate the central real-world "
         "problem or practical solution in the supplied post. Choose concrete "
         "objects, people or a recognizable scene relevant to the subject; "
         "avoid generic AI robots, glowing brains, marketing graphs and stock art. "
@@ -45,15 +47,22 @@ def vk_visual_prompt(company_name: str, title: str, body: str) -> str:
     )[:5500]
 
 
-def export_vk_png(data: bytes) -> bytes:
-    """Existing 4:5 model exports are normalized to the VK 1080x1350 preset."""
+def export_vk_png(data: bytes, *, ratio: str = "4:5") -> bytes:
+    """Use a centered crop, never distortion or white bars, for the VK export."""
+    if ratio not in VK_EXPORT_SIZES:
+        raise ValueError("Unsupported VK image format")
     if not isinstance(data, bytes) or not data or len(data) > LIMIT:
         raise ValueError("Invalid generated image")
     with Image.open(io.BytesIO(data)) as source:
         source.load()
-        if source.width < 256 or source.height < 256:
-            raise ValueError("Generated image too small")
-        image = source.convert("RGB").resize(VK_EXPORT_SIZE, Image.Resampling.LANCZOS)
+        if (source.width < 256 or source.height < 256
+                or source.width * source.height > 12_000_000):
+            raise ValueError("Generated image dimensions are outside limits")
+        image = ImageOps.fit(
+            ImageOps.exif_transpose(source).convert("RGB"),
+            VK_EXPORT_SIZES[ratio], method=Image.Resampling.LANCZOS,
+            centering=(.5, .5),
+        )
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
     output = buffer.getvalue()
@@ -62,23 +71,29 @@ def export_vk_png(data: bytes) -> bytes:
     return output
 
 
-async def prepare_vk_post_image(db, settings, *, product, task, post, model_choice: str):
+async def prepare_vk_post_image(db, settings, *, product, task, post, model_choice: str,
+                                ratio: str = "4:5"):
     """One paid attempt per post task; recover a completed file after a crash."""
     if json.loads(post.content).get("channel") != "vk":
         raise ValueError("VK illustrations are only for VK posts")
+    if ratio not in VK_EXPORT_SIZES:
+        raise ValueError("Unsupported VK image format")
     model = resolve_model(settings, model_choice)
     folder = image_folder(settings.products_root, product.id, task.id)
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = folder / "frame-01.png"
     meta = json.loads(post.content)
-    prompt = vk_visual_prompt(product.name, meta["title"], meta["body"])
+    prompt = vk_visual_prompt(product.name, meta["title"], meta["body"], ratio=ratio)
     records = generated_images(db, product.id, task.id)
     if len(records) > 1:
         raise ValueError("Multiple image checkpoints for one VK post")
     if records:
         row = records[0]
         saved = verified_file(settings.products_root, product.id, task.id, row)
-        if hashlib.sha256(saved.read_bytes()).hexdigest() != json.loads(row.content).get("sha256"):
+        saved_meta = json.loads(row.content)
+        if saved_meta.get("ratio") != ratio or saved_meta.get("model") != model:
+            raise ValueError("VK image checkpoint profile changed")
+        if hashlib.sha256(saved.read_bytes()).hexdigest() != saved_meta.get("sha256"):
             raise ValueError("VK image checkpoint has been modified")
     else:
         attempts = list(db.scalars(select(Artifact).where(
@@ -93,7 +108,7 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
             picture = path.read_bytes()
             with Image.open(io.BytesIO(picture)) as recovered:
                 recovered.load()
-                if recovered.format != "PNG" or recovered.size != VK_EXPORT_SIZE:
+                if recovered.format != "PNG" or recovered.size != VK_EXPORT_SIZES[ratio]:
                     raise ValueError("Unverified VK image file")
         else:
             if attempts:
@@ -102,14 +117,15 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
                 product_id=product.id, task_id=task.id,
                 kind="vk_post_image_intent", title="VK image generation attempt",
                 content=json.dumps({
-                    "attempt_id": str(uuid4()), "model": model,
+                    "attempt_id": str(uuid4()), "model": model, "ratio": ratio,
                     "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
                     "state": "started",
                 }),
             )
             db.commit()  # Durable marker before the external paid API call.
-            picture = await request_image(settings, model, prompt, "4:5")
-            picture = export_vk_png(picture)
+            picture = await request_image(settings, model, prompt, ratio,
+                                          preserve_source=True)
+            picture = export_vk_png(picture, ratio=ratio)
             temporary = folder / (".frame-01-" + str(uuid4()) + ".partial")
             try:
                 with open(temporary, "xb") as handle:
@@ -125,7 +141,7 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
             kind="generated_image", title="Обложка поста VK",
             content=json.dumps({
                 "frame_number": 1, "filename": "frame-01.png",
-                "model": model, "ratio": "4:5",
+                "model": model, "ratio": ratio,
                 "sha256": digest, "prompt": prompt,
             }, ensure_ascii=False),
         )
@@ -144,6 +160,7 @@ async def prepare_vk_post_image(db, settings, *, product, task, post, model_choi
     meta["image_artifact_id"] = str(row.id)
     meta["image_sha256"] = json.loads(row.content)["sha256"]
     meta["image_state"] = "ready"
+    meta["image_ratio"] = ratio
     post.content = json.dumps(meta, ensure_ascii=False)
     db.commit()
     return row
