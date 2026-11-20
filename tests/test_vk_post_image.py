@@ -73,10 +73,8 @@ async def test_vk_image_saved_and_reused_without_repeat_paid_api(db, tmp_path, m
                     str(task.id) / "frame-01.png") as actual:
         assert actual.size == (1080, 1350)
     assert json.loads(post.content)["image_artifact_id"] == str(asset.id)
-    assert json.loads(post.content)["image_state"] == "ready"
-    from app.api.content_studio import material_detail_page
-    assert ("/images/" + str(asset.id)) in material_detail_page(
-        db, product, post, root=tmp_path)
+    assert json.loads(post.content)["image_state"] == "awaiting_review"
+    assert json.loads(post.content)["image_review_state"] == "pending"
     assert len(requests) == 1 and requests[0][2:] == ("4:5", True)
     again = await prepare_vk_post_image(db, settings, product=product, task=task,
                                          post=post, model_choice="auto")
