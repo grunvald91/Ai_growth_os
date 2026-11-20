@@ -762,6 +762,10 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     assert 'Авторизация одним нажатием пока не настроена.' in owner_html
     assert '<a href="/studio/tune/vk"' in owner_html
     assert owner_html.count('href="https://vk.com/groups"') == 2
+    assert 'id="sg-vk-community-link"' in owner_html
+    assert 'id="sg-vk-token-link"' in owner_html
+    assert 'encodeURIComponent(name) + "?act=tokens"' in owner_html
+    assert 'https://vk.ru/' in owner_html
     assert 'target="_blank" rel="noopener noreferrer"' in owner_html
     assert "Настроить подключение VK" in owner_html
 

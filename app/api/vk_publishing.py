@@ -33,6 +33,46 @@ router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_s
 MOSCOW = ZoneInfo("Europe/Moscow")
 
 
+VK_TOKEN_DEEPLINK_SCRIPT = r"""<script>
+(() => {
+  const input = document.getElementById("sg-vk-community-link");
+  const link = document.getElementById("sg-vk-token-link");
+  if (!input || !link) return;
+  const fallback = link.href;
+  function communityName(value) {
+    const raw = value.trim();
+    if (!raw) return null;
+    let name = raw;
+    if (/^(?:https?:\/\/)?(?:(?:www|m)\.)?vk\.(?:ru|com)\//i.test(raw)) {
+      let url;
+      try {
+        url = new URL(/^https?:\/\//i.test(raw) ? raw : "https://" + raw);
+        if (url.protocol !== "https:" || url.username || url.password ||
+            !["vk.com", "www.vk.com", "m.vk.com", "vk.ru", "www.vk.ru", "m.vk.ru"].includes(url.hostname) ||
+            (url.port && url.port !== "443")) return null;
+        name = decodeURIComponent(url.pathname.replace(/^\/|\/$/g, ""));
+      } catch (_) { return null; }
+    } else if (raw.includes("/") || raw.includes(":") || raw.includes("?") || raw.includes("#")) {
+      return null;
+    }
+    if (/^[1-9]\d{0,14}$/.test(name)) name = "club" + name;
+    if (/^(?:id|app)\d+$/i.test(name)) return null;
+    if (/^(?:club|public|event)\d+$/i.test(name) &&
+        !/^(?:club|public|event)[1-9]\d{0,14}$/i.test(name)) return null;
+    return /^(?:club|public|event)[1-9]\d{0,14}$/i.test(name) ||
+           /^[A-Za-z][A-Za-z0-9_.]{2,99}$/.test(name) ? name : null;
+  }
+  function update() {
+    const name = communityName(input.value);
+    link.href = name ? "https://vk.ru/" + encodeURIComponent(name) + "?act=tokens" : fallback;
+    link.textContent = name ? "Открыть ключи API этого сообщества" : "Открыть сообщества VK";
+  }
+  input.addEventListener("input", update);
+  update();
+})();
+</script>"""
+
+
 def esc(value):
     return html.escape(str(value or ""), quote=True)
 
@@ -190,9 +230,9 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
   <label class="sg-field"><span>Ссылка на сообщество <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
-   <input name="community_link" type="text" maxlength="255" autocomplete="off"
+   <input id="sg-vk-community-link" name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
-  <label class="sg-field"><span>Ключ сообщества <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Перейти к сообществу</a></span>
+  <label class="sg-field"><span>Ключ сообщества <a id="sg-vk-token-link" href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
    <input name="access_token" type="password" maxlength="8000" autocomplete="off"
       placeholder="Ключ из настроек сообщества" required></label>
   <button class="btn primary" type="submit">Проверить и подключить публикации</button>
@@ -227,6 +267,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  {history or '<li class="sg-muted">Публикаций пока нет.</li>'}</ul>
 </section>
 """
+    body += VK_TOKEN_DEEPLINK_SCRIPT
     return HTMLResponse(studio_page_shell(product, active="channels", title="Публикации ВКонтакте",
         subtitle="Авторизация, очередь и история отправок", body=body),
         headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"})
