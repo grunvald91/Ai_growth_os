@@ -638,11 +638,12 @@
       var brief = el('textarea', '');
       brief.value = data.editorial_brief || ''; brief.maxLength = 3500; brief.rows = 2;
       var model = el('select','');
-      [['auto','Автоматически · одна модель'],['gemini','Gemini'],['openai','ChatGPT Image']]
+      [['none','Без изображения'],['auto','Автоматически · одна модель'],['gemini','Gemini'],['openai','ChatGPT Image']]
         .forEach(function (entry) {
           var opt=el('option','',entry[1]);opt.value=entry[0];model.appendChild(opt);
         });
-      model.value=data.image_model && data.image_model!=='none' ? data.image_model : 'auto';
+      model.value=(data.format==='post' ? (data.image_model||'none')
+                    : data.image_model && data.image_model!=='none' ? data.image_model : 'auto');
       var modelField=field('Модель изображения',model);
       var aspect=el('select','');
       [['','По площадке'],['1:1','1:1 · квадрат'],['4:5','4:5 · вертикальный пост'],
@@ -662,8 +663,9 @@
       function refreshOptions() {
         var fmt = kind.value;
         countField.hidden = fmt !== 'story';
-        modelField.hidden = fmt !== 'story' && fmt !== 'static_image';
-        aspectField.hidden = fmt !== 'static_image';
+        modelField.hidden = fmt !== 'story' && fmt !== 'static_image'
+          && !(fmt==='post' && platform.value==='vk');
+        aspectField.hidden = fmt !== 'static_image' && !(fmt==='post' && platform.value==='vk');
         platformField.hidden = fmt === 'package';
         var previous = platform.value || data.platform || '';
         platform.replaceChildren();
@@ -672,8 +674,18 @@
         });
         var choices=(createChannels[fmt] || []).map(function (x) {return x[0];});
         platform.value = choices.indexOf(previous) >= 0 ? previous : createDefaultChannels[fmt];
+        const vkPost=fmt==='post' && platform.value==='vk';
+        modelField.hidden=fmt!=='story' && fmt!=='static_image' && !vkPost;
+        aspectField.hidden=fmt!=='static_image' && !vkPost;
+        Array.from(aspect.options).forEach(option=>{
+          option.disabled=vkPost && !['','4:5','1:1'].includes(option.value);
+        });
+        if(vkPost && !['1:1','4:5'].includes(aspect.value)) aspect.value='4:5';
       }
-      kind.addEventListener('change',function(){aspect.value='';refreshOptions();});
+      platform.addEventListener('change',refreshOptions);
+      kind.addEventListener('change',function(){
+        aspect.value=''; model.value=kind.value==='post'?'none':'auto';refreshOptions();
+      });
       form.appendChild(field('Тип материала',kind));
       form.appendChild(field('Тема',topic));
       form.appendChild(countField);
@@ -713,9 +725,11 @@
           frame_count:kind.value === 'story' && count.value ? Number(count.value) : null,
           platform:kind.value === 'package' ? null : platform.value,
           audience:audience.value.trim(), editorial_brief:brief.value.trim(),
-          image_model:kind.value==='story'||kind.value==='static_image' ? model.value : 'none',
+          image_model:kind.value==='story'||kind.value==='static_image'
+            ||(kind.value==='post'&&platform.value==='vk') ? model.value : 'none',
           aspect_ratio:kind.value==='story' ? '9:16'
-            : kind.value==='static_image' ? (aspect.value || null) : null
+            : kind.value==='static_image' ? (aspect.value || null)
+            : kind.value==='post' && platform.value==='vk' ? (aspect.value || '4:5') : null
         }).then(applyResult).catch(function (error) {
           status.textContent=error.message;status.hidden=false;
           save.disabled=false;discard.disabled=false;
@@ -736,10 +750,13 @@
       if (data.format === 'story')
         details.appendChild(editableRow('Экранов', data.frame_count == null ? 'Автоматически' : String(data.frame_count)));
       details.appendChild(editableRow('Тема',data.topic));
-      if (data.format==='story'||data.format==='static_image')
+      if (data.format==='story'||data.format==='static_image'
+          ||(data.format==='post' && data.platform==='vk' && data.image_model!=='none'))
         details.appendChild(editableRow('Пропорции',data.aspect_ratio ||
-          (data.format==='story'?'9:16':(data.platform==='instagram_reels'?'4:5':'1:1'))));
-      if ((data.format==='story'||data.format==='static_image') && data.image_model!=='none')
+          (data.format==='story'?'9:16':(data.format==='post'?'4:5'
+            :(data.platform==='instagram_reels'?'4:5':'1:1')))));
+      if ((data.format==='story'||data.format==='static_image'
+           ||(data.format==='post'&&data.platform==='vk')) && data.image_model!=='none')
         details.appendChild(editableRow('Изображения', {'auto':'Автоматически',
           'gemini':'Gemini','openai':'ChatGPT Image'}[data.image_model]||'Автоматически'));
       if (data.audience) details.appendChild(editableRow('Аудитория', data.audience));
@@ -1067,6 +1084,8 @@
     var audience=document.getElementById('sg-create-audience');
     var brief=document.getElementById('sg-create-brief');
     var imageModel=document.getElementById('sg-create-image-model');
+    var vkImageModel=document.getElementById('sg-create-vk-image-model');
+    var vkRatio=document.getElementById('sg-create-vk-image-ratio');
     var aspect=document.getElementById('sg-create-aspect');
     var a=audience ? audience.value.trim() : '';
     var b=brief ? brief.value.trim() : '';
@@ -1078,9 +1097,13 @@
       audience:selected==='whiteboard' ? null : a || null,
       editorial_brief:selected==='whiteboard' ? null : b || null,
       image_model:selected==='story'||selected==='static_image'
-        ? (imageModel && imageModel.value || 'auto') : null,
+        ? (imageModel && imageModel.value || 'auto')
+        : selected==='post' && platform && platform.value==='vk'
+        ? (vkImageModel && vkImageModel.value || 'auto') : null,
       aspect_ratio:selected==='story' ? '9:16'
-        : selected==='static_image' && aspect && aspect.value ? aspect.value : null
+        : selected==='static_image' && aspect && aspect.value ? aspect.value
+        : selected==='post' && platform && platform.value==='vk'
+        ? (vkRatio && vkRatio.value || '4:5') : null
     };
   }
 
