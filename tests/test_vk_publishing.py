@@ -810,7 +810,12 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     customer = SimpleNamespace(state=SimpleNamespace(
         studio_login="customer", studio_product_ids=[str(product.id)]))
 
-    owner_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
+    page_response = vk_page(product.id, owner, db=db, settings=settings)
+    # Browsers must be able to submit these same-origin POST forms.
+    # A no-referrer policy previously yielded Origin: null and CSRF 403.
+    assert page_response.headers["referrer-policy"] == "same-origin"
+    assert page_response.headers["cache-control"] == "private, no-store"
+    owner_html = page_response.body.decode()
     assert 'Авторизация одним нажатием пока не настроена.' in owner_html
     assert '<a href="/studio/tune/vk"' in owner_html
     assert 'href="https://vk.com/groups"' not in owner_html
@@ -831,7 +836,9 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     assert 'target="_blank" rel="noopener noreferrer"' in owner_html
     assert "Настроить подключение VK" in owner_html
 
-    customer_html = vk_page(product.id, customer, db=db, settings=settings).body.decode()
+    customer_response = vk_page(product.id, customer, db=db, settings=settings)
+    assert customer_response.headers["referrer-policy"] == "same-origin"
+    customer_html = customer_response.body.decode()
     assert "/studio/tune/vk" not in customer_html
     assert "Используйте ключ сообщества ниже" in customer_html
 

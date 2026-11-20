@@ -326,9 +326,13 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
 </section>
 """
     body += VK_TOKEN_DEEPLINK_SCRIPT
+    # This HTML contains same-origin POST forms protected by require_studio_csrf.
+    # no-referrer can turn their Origin into "null" and suppress Referer in
+    # browsers, so do not use it on the form page. same-origin keeps the
+    # document URL private from third-party VK links while allowing own forms.
     return HTMLResponse(studio_page_shell(product, active="channels", title="Публикации ВКонтакте",
         subtitle="Авторизация, очередь и история отправок", body=body),
-        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"})
+        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "same-origin"})
 
 
 @router.post("/studio/products/{product_id}/vk/group-connect")
