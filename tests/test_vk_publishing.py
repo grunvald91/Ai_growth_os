@@ -628,6 +628,8 @@ async def test_vk_one_click_exchange_verifies_exact_group_and_encrypts_key(monke
     payload = {"group_id": "123456", "product_id": str(company.id)}
     row = await finish_community_oauth(db, settings, payload, "confirmed-code-12345")
     ch = connected(db, company.id)
+    from app.vk_service import group_app_verified
+    assert group_app_verified(settings)
     assert ch.id == row.id and ch.is_community_token
     assert ch.expires_at is not None
     assert VKStore(tmp_path).load_token(row.id) == "new-group-secret-key"
@@ -658,3 +660,20 @@ async def test_vk_one_click_rejects_wrong_group_token_without_mutating_company(m
         await finish_community_oauth(db, settings,
             {"group_id": "123456", "product_id": str(company.id)}, "confirmed-code-12345")
     assert connected(db, company.id) is None
+
+
+def test_vk_group_pilot_gate_before_first_real_success(tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import _can_begin_community_oauth
+    from app.vk_service import mark_group_app_verified
+    settings = Settings(products_root=tmp_path, app_env="production",
+                        studio_tune_usernames="owner",
+                        social_vk_community_app_id="1234567",
+                        social_vk_community_app_secret="secret-only-studio", _env_file=None)
+    pilot = SimpleNamespace(state=SimpleNamespace(studio_login="owner", studio_product_ids=None))
+    customer = SimpleNamespace(state=SimpleNamespace(studio_login="company",
+                                                    studio_product_ids=["12345678-1234-1234-1234-123456789012"]))
+    assert _can_begin_community_oauth(settings, pilot)
+    assert not _can_begin_community_oauth(settings, customer)
+    mark_group_app_verified(settings)
+    assert _can_begin_community_oauth(settings, customer)
