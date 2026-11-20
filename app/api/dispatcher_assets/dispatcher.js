@@ -1086,10 +1086,19 @@
 
   function creationRequest(text) {
     var hints = creationHints();
-    if (hints && hints.format && text.length >= 3 && text.length <= 300 &&
-        !isExplicitInstruction(text)) {
-      // The selected format + entered subject form a complete request.
-      // Keep the original words for the server-side deterministic router.
+    if (hints && hints.format && !isExplicitInstruction(text)) {
+      // Do not silently fall back to the LLM dispatcher for invalid topics:
+      // a selected material type remains an explicit Create intention.
+      var min = hints.format === 'whiteboard' ? 8 : 3;
+      var length = Array.from(text).length;
+      if (length < min) {
+        return {validation_error:'Уточните тему: для этого материала нужно не менее '
+          + min + ' символов.'};
+      }
+      if (length > 300) {
+        return {validation_error:'Сократите тему до 300 символов. Подробности можно '
+          + 'указать в дополнительных требованиях.'};
+      }
       hints.topic = text;
       return {text:text, creation:hints};
     }
@@ -1099,9 +1108,15 @@
   function sendText() {
     var text = input.value.trim();
     if (!text || busy) return;
+    var request = creationRequest(text);
+    if (request.validation_error) {
+      showNote(request.validation_error, true);
+      return; // Keep the original editable draft in the composer.
+    }
+    showNote('');
     input.value = '';
     grow();
-    send(Object.assign({mode:'text'}, creationRequest(text)), text);
+    send(Object.assign({mode:'text'}, request), text);
   }
 
   function grow() {
@@ -1399,10 +1414,20 @@
           if (data.fallback_reason) {
             showNote('Редактор не завершил правку: передаю распознанный текст.', false);
           }
+          var request = creationRequest(transcript);
+          if (request.validation_error) {
+            // Preserve the recognized text for editing instead of issuing a
+            // classifier call that could return "unsupported" again.
+            insertText(transcript);
+            showNote(request.validation_error, true);
+            hideLive();
+            setVoiceState('idle');
+            return;
+          }
           voiceDispatchPending = true;
           setVoiceState('sending');
           showLive('Обрабатываю запрос…', '', true);
-          send(Object.assign({mode:'text'}, creationRequest(transcript)), transcript, true);
+          send(Object.assign({mode:'text'}, request), transcript, true);
         } else {
           applyDictation(data);
         }
