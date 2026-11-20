@@ -439,6 +439,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             topic_params["channel"] = creation.platform or "telegram"
         elif creation.format == "package":
             selected_capability = "create_package"
+        elif creation.format == "whiteboard":
+            # This existing executor creates only a WAITING_APPROVAL draft.
+            # Paid video rendering still needs the owner's explicit confirmation.
+            selected_capability = "whiteboard_video"
         else:
             selected_capability = "create_creative"
             topic_params["format"] = creation.format
