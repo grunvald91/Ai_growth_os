@@ -16,12 +16,14 @@ from sqlalchemy.orm import Session
 from app.api.content_studio import _owner_product, _studio_form, studio_page_shell
 from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.comments.service import CommentService
+from app.comments.contracts import ConnectInput
 from app.core.config import get_settings
 from app.db.session import get_db
 from app.models.domain import Artifact, Publication
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
+    community_reference, resolve_community, verify_community_key, client_id, redirect_uri,
 )
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
@@ -38,11 +40,24 @@ def feedback(key):
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
-            "connected_key": "Ключ сообщества сохранён. Отправьте один тестовый пост, чтобы проверить доступ."}.get(key, "")
+            "connected_key": "Подключены текстовые публикации и чтение комментариев. Отправку тестового поста и ответа нужно проверить отдельно.",
+            "connected_post_only": "Ключ сообщества сохранён для текстовых публикаций. Чтение комментариев пока недоступно: сервисный ключ не настроен или проверка чтения не прошла.",
+            }.get(key, "")
+
+
+def connection_error(key):
+    return {
+        "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
+        "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
+        "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
+        "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
+        "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
+        "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
+    }.get(key, "")
 
 
 @router.get("/studio/products/{product_id}/vk", response_class=HTMLResponse)
-def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
+def vk_page(product_id: UUID, done: str = "", error: str = "", db: Session = Depends(get_db),
             settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     channel = connected(db, product_id)
@@ -77,42 +92,61 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
         history += (f'<li class="sg-publication-row"><div><b>{esc(statuses.get(row.status, row.status))}</b>'
                     f'<small>{esc(stamp)} МСК</small>{reference}</div>{buttons}</li>')
     alert = f'<p role="status" class="sg-notice">{esc(feedback(done))}</p>' if feedback(done) else ""
+    if connection_error(error):
+        alert += f'<p role="alert" class="sg-notice">{esc(connection_error(error))}</p>'
     if channel:
         current = (f'<div class="sg-channel-line"><span class="sg-link-dot">✓</span><div>'
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
-                   ('<span class="sg-channel-status">Ключ сообщества · отправка не проверена</span></div>'
+                   ('<span class="sg-channel-status">Ключ сообщества · можно проверить текстовую публикацию</span></div>'
                     if channel.is_community_token else
-                    '<span class="sg-channel-status">VK ID · отправка не проверена</span></div>') +
+                    '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
                    f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
                    '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
+        reply_channel = CommentService(db, settings).channel(product_id, "vk")
+        replies_ready = bool(reply_channel and reply_channel.status == "connected"
+                             and reply_channel.account_id == channel.account_id)
+        current += ('<p class="sg-footnote">Комментарии: подключены, отправка ответов не проверена.</p>'
+                    if replies_ready else '<p class="sg-footnote">Комментарии: не подключены.</p>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     enabled = bool(settings.content_vk_autopost_enabled)
+    can_schedule = bool(channel and posts)
+    try:
+        client_id(settings)
+        redirect_uri(settings)
+        vk_oauth_ready = True
+    except ValueError:
+        vk_oauth_ready = False
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
     body = f"""
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
- <p>Подключите сообщество через VK ID без копирования токенов. Нужны права редактора или администратора.</p></div></div>
+ <p>Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно.</p></div></div>
  {alert}{current}
- <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Числовой ID сообщества</span>
-   <input type="text" name="group_id" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="15"
-      value="{esc(channel.account_id if channel else '')}" placeholder="Например, 123456789" required>
-  </label>
-  <button class="btn secondary" type="submit">Подключить через VK ID →</button>
+ <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
+  <label class="sg-field"><span>Ссылка на сообщество</span>
+   <input name="community_link" type="text" maxlength="255" autocomplete="off"
+      placeholder="https://vk.com/my_community" required></label>
+  <label class="sg-field"><span>Ключ сообщества</span>
+   <input name="access_token" type="password" maxlength="8000" autocomplete="off"
+      placeholder="Ключ из настроек сообщества" required></label>
+  <button class="btn primary" type="submit">Проверить и подключить публикации</button>
  </form>
- <p class="sg-footnote">Новые токены VK ID не всегда позволяют выполнять wall.post. При отказе используйте ключ своего сообщества.</p>
- <details><summary>Альтернатива: подключить по ключу сообщества</summary>
-   <p class="sg-footnote">Создайте ключ в разделе Управление сообществом → Работа с API. Он сохраняется зашифрованным.
-   Вставляйте ключ только на этой защищённой странице ServGo, не отправляйте в чат.</p>
-   <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
-     <label class="sg-field">Числовой ID сообщества
-       <input name="group_id" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="15" required></label>
-     <label class="sg-field">Ключ сообщества
-       <input name="access_token" type="password" autocomplete="off" maxlength="8000" required></label>
-     <button type="submit" class="btn secondary">Подключить ключ сообщества</button>
-   </form>
+ <details><summary>Как получить ключ сообщества?</summary>
+  <p class="sg-footnote">ВКонтакте → ваше сообщество → Управление → Работа с API → Ключи доступа → Создать ключ.
+  Предоставьте права на стену и управление. Скопируйте ключ в форму выше.
+  ServGo проверит ключ и самостоятельно найдёт ID сообщества по ссылке. Ключ не отправляйте в чат.</p>
+ </details>
+ <p class="sg-footnote">Это подключение для текстовых публикаций. Отправка в стену требует проверки одним постом. Для чтения комментариев может потребоваться отдельный доступ к API; подключение публикаций не означает, что комментарии уже работают.</p>
+ <details><summary>Дополнительный способ: авторизация VK ID</summary>
+  <p class="sg-footnote">Этот способ может разрешать чтение данных сообщества, но VK ID-токены некоторых приложений не поддерживают отправку на стену. Используйте его для проверки чтения комментариев, если VK ID настроен в ServGo.</p>
+  <form method="post" action="/studio/products/{product_id}/vk/connect" class="sg-fields sg-compact-form">
+   <label class="sg-field">Ссылка на сообщество
+    <input name="community_link" type="text" maxlength="255" placeholder="https://vk.com/my_community" required></label>
+   <button class="btn secondary" type="submit" {"disabled" if not vk_oauth_ready else ""}>Подключить через VK ID</button>
+  </form>
+  {'' if vk_oauth_ready else '<p role="status" class="sg-footnote">VK ID пока не настроен администратором ServGo.</p>'}
  </details>
 </section>
 <section class="sg-surface">
@@ -126,11 +160,11 @@ def vk_page(product_id: UUID, done: str = "", db: Session = Depends(get_db),
   <label><input type="checkbox" name="confirmed" value="yes" required>
    Я проверил материал и разрешаю публикацию в подключённом сообществе</label>
   <button name="mode" value="scheduled" class="btn secondary" type="submit"
-   {"disabled" if not channel or not posts else ""}>Запланировать</button>
+   {"disabled" if not can_schedule else ""}>Запланировать</button>
   <button name="mode" value="now" class="btn primary" type="submit"
-   {"disabled" if not channel or not posts else ""}>Опубликовать сейчас</button>
+   {"disabled" if not can_schedule else ""}>Опубликовать сейчас</button>
  </form>
- <p class="sg-footnote">Пока поддерживается публикация текста. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
+ <p class="sg-footnote">Пока доступна только публикация текста. Для проверки выберите один утверждённый тестовый пост. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
 </section>
 <section class="sg-surface">
  <h2>История VK</h2><ul class="sg-publication-list">
@@ -148,10 +182,11 @@ async def vk_connect(product_id: UUID, request: Request, db: Session = Depends(g
     _owner_product(db, product_id)
     fields = await _studio_form(request)
     try:
-        url, cookie = begin_oauth(settings, product_id, fields.get("group_id", ""),
+        url, cookie = begin_oauth(settings, product_id, fields.get("community_link", fields.get("group_id", "")),
                                   owner_login=getattr(request.state, "studio_login", None))
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+        key = "vk_not_configured" if ("SOCIAL_VK_CLIENT_ID" in str(exc) or "HTTPS origin VK" in str(exc)) else "vk_id_input"
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error={key}", status_code=303)
     response = RedirectResponse(url, status_code=303,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
     response.set_cookie(OAUTH_COOKIE, cookie, max_age=600, path=OAUTH_PATH,
@@ -165,12 +200,43 @@ async def vk_community_key(product_id: UUID, request: Request,
                            db: Session = Depends(get_db), settings=Depends(get_settings)):
     _owner_product(db, product_id)
     fields = await _studio_form(request)
+    token = fields.get("access_token", "")
+    reference = fields.get("community_link", fields.get("group_id", ""))
     try:
-        connect_community(db, settings, product_id, fields.get("group_id", ""),
-                          fields.get("access_token", ""))
-    except (LookupError, ValueError) as exc:
+        community_reference(reference)
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_link", status_code=303)
+    if not token or len(token) > 8000 or any(ord(ch) < 32 for ch in token):
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+    try:
+        account_id, name = await resolve_community(token, reference)
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+    try:
+        await verify_community_key(token, account_id)
+    except ValueError:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+    existing = connected(db, product_id)
+    if existing is not None and not existing.is_community_token:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=already_connected",
+                                status_code=303)
+    try:
+        connect_community(db, settings, product_id, account_id, token, name=name)
+    except (LookupError, ValueError):
         db.rollback()
-        raise HTTPException(422, str(exc)) from None
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=save_failed", status_code=303)
+    # A community key can write text, but reading public posts needs a separate
+    # operator-owned VK service key. Never claim comments work without probing.
+    if not settings.social_vk_service_token:
+        return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_post_only",
+                                status_code=303)
+    try:
+        await CommentService(db, settings).connect(
+            product_id, ConnectInput(platform="vk", account_id=account_id, token=token))
+    except (LookupError, ValueError):
+        db.rollback()
+        return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_post_only",
+                                status_code=303)
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=connected_key",
                             status_code=303)
 

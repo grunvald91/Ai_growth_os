@@ -12,6 +12,7 @@ from app.models.domain import Artifact, Product, Publication
 from app.social_vk import (
     VKStore, begin_oauth, read_oauth_cookie, approved_posts,
     cancel, schedule, deliver_once, redirect_uri, connect_community, connected,
+    community_reference, resolve_community, verify_community_key,
 )
 
 
@@ -63,10 +64,15 @@ def test_vk_oauth_pkce_and_company_binding(tmp_path):
         read_oauth_cookie(settings, cookie[:-8] + "tampered", state)
     assert "123456" not in cookie
 
+    vanity_url, vanity_cookie = begin_oauth(settings, "3ecb2135-1077-428e-9a65-ea1d895a8432",
+                                          "https://vk.com/my_studio")
+    vanity_state = parse_qs(urlsplit(vanity_url).query)["state"][0]
+    assert read_oauth_cookie(settings, vanity_cookie, vanity_state)["account_id"] == "my_studio"
+
 
 def test_vk_oauth_rejects_bad_group_or_missing_app(tmp_path):
     settings = Settings(products_root=tmp_path, social_vk_client_id="12345678")
-    for value in ("-1234", "club12", "0", "abc"):
+    for value in ("-1234", "id12", "0", "not-a-url", "a!"):
         with pytest.raises(ValueError):
             begin_oauth(settings, "3ecb2135-1077-428e-9a65-ea1d895a8432", value)
     with pytest.raises(ValueError):
@@ -190,16 +196,213 @@ def test_vk_publisher_key_is_encrypted_and_isolated(db, tmp_path):
         connect_community(db, settings, second.id, "-321", private_key)
     when = datetime.now(timezone.utc) + timedelta(minutes=25)
     pub = schedule(db, product.id, post.id, when)
-    assert pub.product_id == product.id
+    assert pub.channel == "vk" and pub.status == "scheduled"
 
 
 def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_path):
     product, post = business_and_post(db, slug="community-rotate")
     settings = Settings(products_root=tmp_path)
     old = connect_community(db, settings, product.id, "123456", "first-test-token")
-    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
     new = connect_community(db, settings, product.id, "654321", "second-test-token")
     assert new.id != old.id
     assert connected(db, product.id).account_id == "654321"
     assert not VKStore(tmp_path).path(old.id).exists()
-    assert pub.status == "scheduled"  # Worker must reject the old destination at claim.
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=25))
+    assert pub.status == "scheduled" and connected(db, product.id).id == new.id
+
+
+@pytest.mark.parametrize(("value", "expected"), [
+    ("123456", "123456"),
+    ("club123456", "123456"),
+    ("https://vk.com/public123456", "123456"),
+    ("https://m.vk.com/club123456?from=share", "123456"),
+    ("https://vk.ru/my_company", "my_company"),
+    ("vk.com/my_company", "my_company"),
+])
+def test_vk_community_reference_accepts_links(value, expected):
+    assert community_reference(value) == expected
+
+
+@pytest.mark.parametrize("value", [
+    "https://evil.example/club123456", "http://vk.com/club123456",
+    "https://vk.com@evil.example/club123456", "https://vk.com/wall-1_2",
+    "https://vk.com/id123456", "https://vk.com/club123456/anything",
+    "javascript:alert(1)", "", "vk.com/club0",
+])
+def test_vk_community_reference_rejects_invalid(value):
+    with pytest.raises(ValueError):
+        community_reference(value)
+
+
+@pytest.mark.asyncio
+async def test_vk_resolve_link_and_verify_key(monkeypatch):
+    calls = []
+
+    async def call(self, method, token, **params):
+        assert token == "test-group-key"
+        calls.append((method, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Моя компания"}]}
+        return {"mask": 8192}
+
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    account_id, name = await resolve_community("test-group-key", "https://vk.com/my_company")
+    assert (account_id, name) == ("123456", "Моя компания")
+    await verify_community_key("test-group-key", account_id)
+    assert [name for name, _ in calls] == [
+        "groups.getById", "groups.getTokenPermissions", "groups.getCallbackSettings"]
+    assert calls[-1][1] == {"group_id": "123456"}
+
+
+@pytest.mark.asyncio
+async def test_vk_resolve_rejects_different_numeric_id(monkeypatch):
+    async def call(self, method, token, **params):
+        return {"groups": [{"id": 654321, "name": "Чужое сообщество"}]}
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    with pytest.raises(ValueError, match="другое сообщество"):
+        await resolve_community("test-group-key", "https://vk.com/club123456")
+
+
+@pytest.mark.asyncio
+async def test_vk_key_verification_rejects_missing_group_access(monkeypatch):
+    async def call(self, method, token, **params):
+        if method == "groups.getCallbackSettings":
+            raise ValueError("VK rejected")
+        return {}
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    with pytest.raises(ValueError, match="Нужен ключ"):
+        await verify_community_key("test-group-key", "123456")
+
+
+@pytest.mark.asyncio
+async def test_vk_comment_group_key_cannot_pass_read_check(monkeypatch):
+    from app.comments.vk import VKAdapter
+    from app.comments.gateway import CommentGateway, PlatformError
+
+    calls = []
+
+    async def call(self, method, token, **params):
+        calls.append((method, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "VK Business"}]}
+        if method == "wall.get":
+            raise PlatformError("wall.get requires a user or service token")
+        return {"mask": 8192}
+
+    monkeypatch.setattr(VKAdapter, "call", call)
+    adapter = VKAdapter(CommentGateway(), "vk")
+    with pytest.raises(PlatformError, match="wall.get"):
+        await adapter.check("123456", "test-group-key")
+    wall = next(p for m, p in calls if m == "wall.get")
+    assert wall["owner_id"] == -123456
+    assert "domain" not in wall
+    assert "groups.getTokenPermissions" in [m for m, _ in calls]
+    assert "groups.getCallbackSettings" in [m for m, _ in calls]
+
+
+@pytest.mark.asyncio
+async def test_vk_comment_token_refreshes_before_sync_and_send(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app.comments.service import CommentService
+
+    service = object.__new__(CommentService)
+    service.settings = Settings(products_root=tmp_path)
+    async def fresh(settings, channel):
+        assert channel.platform == "vk"
+        return "refreshed-vk-user-token"
+
+    monkeypatch.setattr("app.social_vk.active_token", fresh)
+    channel = SimpleNamespace(platform="vk", id="stub-id")
+    assert await service.channel_token(channel) == "refreshed-vk-user-token"
+
+
+@pytest.mark.asyncio
+async def test_vk_group_key_rejects_missing_wall_permission(monkeypatch):
+    async def call(self, method, token, **params):
+        if method == "groups.getTokenPermissions":
+            return {"mask": 262144}
+        raise AssertionError("No other calls allowed without wall bit")
+    monkeypatch.setattr("app.social_vk.VKAdapter.call", call)
+    with pytest.raises(ValueError, match="Нужен ключ"):
+        await verify_community_key("test-key", "123456")
+
+
+@pytest.mark.asyncio
+async def test_vk_group_key_text_post_once_and_no_duplicate(db, tmp_path):
+    product, post = business_and_post(db, slug="community-wall-post")
+    settings = Settings(products_root=tmp_path, content_vk_autopost_enabled=True)
+    conn = connect_community(db, settings, product.id, "123456", "group-token", name="Компания")
+    pub = schedule(db, product.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=4))
+    calls = []
+    async def sender(group_id, body, guid):
+        calls.append((group_id, body, guid))
+        return 777
+    due = datetime.now(timezone.utc) + timedelta(seconds=8)
+    assert await deliver_once(lambda: sessions(db), settings, sender=sender, now=due) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert pub.external_reference == "vk:-123456_777"
+    assert calls == [("123456", "Проверка интеграции ServGo", str(pub.id))]
+    assert await deliver_once(lambda: sessions(db), settings, sender=sender, now=due) == 0
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_vk_split_read_and_write_tokens_for_comments(monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app.comments.vk import VKAdapter
+    from app.comments.gateway import CommentGateway
+
+    group_id = "123456"
+    owner = -123456
+    calls = []
+
+    async def fake(self, method, token, **params):
+        calls.append((method, token, params))
+        if method == "groups.getById":
+            return {"groups": [{"id": 123456, "name": "Тест", "is_admin": 0}]}
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192 + 262144}
+        if method == "groups.getCallbackSettings":
+            return {"events": {}}
+        if method == "wall.get":
+            return {"items": [{"id": 15, "owner_id": owner, "text": "Пост"}], "count": 1}
+        if method == "wall.getComments":
+            return {"items": [{"id": 91, "post_id": 15, "text": "Цена?",
+                               "from_id": 77, "thread": {"count": 0}}], "count": 1}
+        if method == "wall.createComment":
+            return {"comment_id": 92}
+        raise AssertionError("Unexpected VK method: " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    adapter = VKAdapter(CommentGateway(vk_read_token="service-read-token"), "vk")
+    assert await adapter.check(group_id, "community-write-token") == "Тест"
+    comment = SimpleNamespace(id=uuid4(), external_id="-123456_15_91",
+                              target={"owner_id": owner, "post_id": 15, "comment_id": 91})
+    channel = SimpleNamespace(platform="vk", account_id=group_id)
+    assert await adapter.send(channel, "community-write-token", comment, "Ответ") == "92"
+    reading = {"wall.get", "wall.getComments"}
+    writing = {"wall.createComment"}
+    assert all(token == "service-read-token" for method, token, _ in calls if method in reading)
+    assert all(token == "community-write-token" for method, token, _ in calls if method in writing)
+    assert all(method not in {"wall.getById", "wall.getComment"} for method, _, _ in calls)
+    post_check = [params for method, _, params in calls if method == "wall.getComments"][-1]
+    assert post_check["owner_id"] == owner
+    assert post_check["post_id"] == 15
+    assert post_check["start_comment_id"] == 91
+
+
+@pytest.mark.asyncio
+async def test_vk_service_token_used_only_for_read(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from app.comments.service import CommentService
+    service = object.__new__(CommentService)
+    service.settings = Settings(products_root=tmp_path, social_vk_service_token="read-only-key")
+    async def fake_active(settings, channel):
+        assert channel.platform == "vk"
+        return "community-write-key"
+    monkeypatch.setattr("app.social_vk.active_token", fake_active)
+    channel = SimpleNamespace(platform="vk", id="test-channel")
+    assert await service.channel_token(channel, for_read=True) == "read-only-key"
+    assert await service.channel_token(channel) == "community-write-key"

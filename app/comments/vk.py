@@ -30,20 +30,34 @@ class VKAdapter:
         data = await self.call("groups.getById", token, group_id=account_id)
         groups = data.get("groups", []) if isinstance(data, dict) else data
         group = next((g for g in groups if str(g.get("id")) == account_id), None)
-        if not group or group.get("is_admin") != 1 or group.get("admin_level", 0) < 2:
-            raise PlatformError("Нужен пользовательский токен редактора или администратора этого сообщества VK")
+        if not group:
+            raise PlatformError("Сообщество ВКонтакте не найдено")
+        if group.get("is_admin") == 1 and group.get("admin_level", 0) >= 2:
+            return group
+        # VK community keys do not carry a user-level is_admin flag.
+        # Validate their kind and their authority for the specific group.
+        try:
+            await self.call("groups.getTokenPermissions", token)
+            await self.call("groups.getCallbackSettings", token, group_id=account_id)
+        except PlatformError:
+            raise PlatformError(
+                "Нужен ключ этого сообщества с правами управления и работы со стеной"
+            ) from None
         return group
 
     async def objects(self, account_id, token, offset=0, count=25):
-        params = {"owner_id": self.owner(account_id)} if self.video else {"domain": f"club{account_id}", "filter": "owner"}
+        params = {"owner_id": self.owner(account_id)}
+        if not self.video:
+            params["filter"] = "owner"
         return await self.call(f"{self.namespace}.get", token, **params, offset=offset, count=count)
 
     async def check(self, account_id, token):
         group = await self.manager(account_id, token)
-        data = await self.objects(account_id, token, count=1)
+        read_token = (self.gateway.vk_read_token or token) if not self.video else token
+        data = await self.objects(account_id, read_token, count=1)
         for item in data.get("items", []):
             if item.get("owner_id") == self.owner(account_id):
-                await self.call(f"{self.namespace}.getComments", token, owner_id=self.owner(account_id),
+                await self.call(f"{self.namespace}.getComments", read_token, owner_id=self.owner(account_id),
                                 **{self.object_key: item["id"]}, count=1)
         return group.get("name", account_id)
 
@@ -97,18 +111,28 @@ class VKAdapter:
         if target.get("owner_id") != owner or not object_id or not comment_id or comment.external_id != f"{owner}_{object_id}_{comment_id}":
             raise PlatformError("Комментарий относится к другому сообществу VK")
         await self.manager(channel.account_id, token)
-        if self.video:
-            data = await self.call("video.get", token, videos=f"{owner}_{object_id}", count=1)
+        read_token = (self.gateway.vk_read_token or token) if not self.video else token
+        if not self.video and self.gateway.vk_read_token:
+            # A service key may read wall.getComments but is not guaranteed
+            # to support wall.getById or wall.getComment. The owner+post pair
+            # is verified by VK when querying that exact discussion.
+            check = await self.call(
+                "wall.getComments", read_token, owner_id=owner,
+                post_id=object_id, start_comment_id=comment_id,
+                count=1, sort="asc")
         else:
-            data = await self.call("wall.getById", token, posts=f"{owner}_{object_id}")
-        items = data.get("items", []) if isinstance(data, dict) else data
-        if not any(i.get("owner_id") == owner and i.get("id") == object_id for i in items):
-            raise PlatformError("Исходная публикация VK удалена или принадлежит другому сообществу")
-        if self.video:
-            check = await self.call("video.getComments", token, owner_id=owner, video_id=object_id,
-                                    start_comment_id=comment_id, count=1, sort="asc")
-        else:
-            check = await self.call("wall.getComment", token, owner_id=owner, comment_id=comment_id)
+            if self.video:
+                data = await self.call("video.get", read_token, videos=f"{owner}_{object_id}", count=1)
+            else:
+                data = await self.call("wall.getById", read_token, posts=f"{owner}_{object_id}")
+            items = data.get("items", []) if isinstance(data, dict) else data
+            if not any(i.get("owner_id") == owner and i.get("id") == object_id for i in items):
+                raise PlatformError("Исходная публикация VK удалена или принадлежит другому сообществу")
+            if self.video:
+                check = await self.call("video.getComments", read_token, owner_id=owner, video_id=object_id,
+                                        start_comment_id=comment_id, count=1, sort="asc")
+            else:
+                check = await self.call("wall.getComment", read_token, owner_id=owner, comment_id=comment_id)
         if not any(c.get("id") == comment_id and not c.get("deleted")
                    and c.get(self.object_key, object_id if self.video else None) == object_id
                    for c in check.get("items", [])):
