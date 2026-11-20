@@ -13,7 +13,7 @@ from app.comments.models import CommentChannel
 from app.comments.service import CommentService
 
 log = logging.getLogger(__name__)
-SUPPORTED = ("youtube", "instagram")
+SUPPORTED = ("youtube", "instagram", "vk")
 PAGE_SIZE = 500
 
 
