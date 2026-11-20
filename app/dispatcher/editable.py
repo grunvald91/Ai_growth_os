@@ -51,10 +51,15 @@ class EditCreation(BaseModel):
             raise ValueError("У полного пакета площадка не задаётся")
         if self.platform is not None and self.platform not in CHANNELS[self.format]:
             raise ValueError("Эта площадка не подходит для выбранного формата")
-        if self.image_model not in (None, "none") and self.format not in {"story", "static_image"}:
-            raise ValueError("Image model only applies to Stories or images")
-        if self.aspect_ratio is not None and self.format not in {"story", "static_image"}:
+        if self.image_model not in (None, "none") and self.format not in {"story", "static_image", "post"}:
+            raise ValueError("Model selection only applies to images")
+        if self.aspect_ratio is not None and self.format not in {"story", "static_image", "post"}:
             raise ValueError("Aspect ratio only applies to images")
+        if self.format == "post":
+            if self.image_model not in (None, "none") and self.platform != "vk":
+                raise ValueError("Пост с иллюстрацией пока доступен только ВКонтакте")
+            if self.aspect_ratio not in (None, "4:5", "1:1"):
+                raise ValueError("Пост ВКонтакте: только 4:5 или 1:1")
         if self.format == "story" and self.aspect_ratio not in (None, "9:16"):
             raise ValueError("Stories must be vertical 9:16")
         return self
@@ -87,10 +92,15 @@ class CreateHints(BaseModel):
             raise ValueError("Для пакета и простого видео площадка здесь не выбирается")
         if self.platform and self.platform not in CHANNELS[self.format]:
             raise ValueError("Несовместимая площадка и формат")
-        if self.image_model not in (None, "none") and self.format not in {"story", "static_image", None}:
-            raise ValueError("Model selection only applies to Stories and images")
-        if self.aspect_ratio is not None and self.format not in {"story", "static_image", None}:
+        if self.image_model not in (None, "none") and self.format not in {"story", "static_image", "post", None}:
+            raise ValueError("Model selection only applies to images")
+        if self.aspect_ratio is not None and self.format not in {"story", "static_image", "post", None}:
             raise ValueError("Aspect ratio only applies to images")
+        if self.format == "post":
+            if self.image_model not in (None, "none") and self.platform != "vk":
+                raise ValueError("Картинка пока доступна только для постов ВКонтакте")
+            if self.aspect_ratio not in (None, "4:5", "1:1"):
+                raise ValueError("Для поста выберите 4:5 или 1:1")
         if self.format == "whiteboard" and (self.frame_count is not None
                                             or self.image_model not in (None, "none")
                                             or self.aspect_ratio is not None):
@@ -124,7 +134,9 @@ def draft_view(capability_id: str | None, params: dict) -> dict | None:
                         ("auto" if fmt in {"story", "static_image"} else "none")),
         # None means "according to platform"; preserve it as an automatic choice
         # rather than freezing the previously displayed default on later edits.
-        "aspect_ratio": "9:16" if fmt == "story" else params.get("aspect_ratio"),
+        "aspect_ratio": ("9:16" if fmt == "story" else
+                         params.get("image_ratio") if fmt == "post" else
+                         params.get("aspect_ratio")),
     }
 
 
@@ -139,7 +151,8 @@ def target_for_edit(edit: EditCreation, existing: dict | None = None):
     if edit.format == "post":
         return "create_post", PostParams(topic=edit.topic,
             channel=edit.platform or "telegram", audience=audience,
-            editorial_brief=editorial_brief)
+            editorial_brief=editorial_brief, image_model=edit.image_model or "none",
+            image_ratio=edit.aspect_ratio or "4:5")
     if edit.format == "package":
         return "create_package", PackageParams(
             topic=edit.topic, audience=audience, editorial_brief=editorial_brief)
