@@ -111,6 +111,18 @@ async def resolve_community(token, reference):
     return account_id, name
 
 
+async def resolve_publisher_community(token, reference):
+    """Use a numeric VK club/public/event URL without an unnecessary API lookup.
+
+    For screen names, resolve via the VK API. Identity and wall access are
+    independently verified by verify_community_key before saving anything.
+    """
+    name_or_id = community_reference(reference)
+    if name_or_id.isdigit():
+        return name_or_id, f"Сообщество VK #{name_or_id}"
+    return await resolve_community(token, reference)
+
+
 async def verify_community_key(token, account_id):
     """Read-only check that this is a community key with access to this group."""
     adapter = VKAdapter(CommentGateway(), "vk")

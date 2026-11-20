@@ -12,7 +12,7 @@ from app.models.domain import Artifact, Product, Publication
 from app.social_vk import (
     VKStore, begin_oauth, read_oauth_cookie, approved_posts,
     cancel, schedule, deliver_once, redirect_uri, connect_community, connected,
-    community_reference, resolve_community, verify_community_key,
+    community_reference, resolve_community, resolve_publisher_community, verify_community_key,
     begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
     community_oauth_config, community_oauth_redirect,
 )
@@ -219,6 +219,7 @@ def test_vk_publisher_key_rotation_invalidates_previous_scheduled_post(db, tmp_p
     ("https://vk.com/public123456", "123456"),
     ("https://m.vk.com/club123456?from=share", "123456"),
     ("https://vk.ru/my_company", "my_company"),
+    ("https://vk.ru/club241947800", "241947800"),
     ("vk.com/my_company", "my_company"),
 ])
 def test_vk_community_reference_accepts_links(value, expected):
@@ -234,6 +235,45 @@ def test_vk_community_reference_accepts_links(value, expected):
 def test_vk_community_reference_rejects_invalid(value):
     with pytest.raises(ValueError):
         community_reference(value)
+
+
+@pytest.mark.asyncio
+async def test_vkr_u_numeric_group_link_does_not_require_public_api_lookup(monkeypatch):
+    """Regression for the real user group: the URL is valid independent of VK token."""
+    from app.comments.vk import VKAdapter
+    calls = []
+
+    async def fake(self, method, token, **params):
+        calls.append((method, params))
+        if method == "groups.getById":
+            raise AssertionError("Numeric group must not require groups.getById")
+        if method == "groups.getTokenPermissions":
+            return {"mask": 8192}
+        if method == "groups.getCallbackSettings":
+            assert params["group_id"] == "241947800"
+            return {}
+        raise AssertionError("Unexpected request to " + method)
+
+    monkeypatch.setattr(VKAdapter, "call", fake)
+    account_id, label = await resolve_publisher_community(
+        "test-group-key", "https://vk.ru/club241947800")
+    assert account_id == "241947800"
+    assert label
+    assert calls == []
+    await verify_community_key("test-group-key", account_id)
+    assert [method for method, _ in calls] == [
+        "groups.getTokenPermissions", "groups.getCallbackSettings"]
+
+
+@pytest.mark.asyncio
+async def test_vkr_u_short_name_still_requires_api_lookup(monkeypatch):
+    async def fake(token, reference):
+        assert reference == "https://vk.ru/my_company"
+        return "241947800", "Studio"
+
+    monkeypatch.setattr("app.social_vk.resolve_community", fake)
+    assert await resolve_publisher_community("key", "https://vk.ru/my_company") == (
+        "241947800", "Studio")
 
 
 @pytest.mark.asyncio
@@ -726,6 +766,18 @@ async def test_vk_one_click_fake_sender_does_not_verify_app(monkeypatch, db, tmp
     assert not group_app_verified(settings)
 
 
+def test_vk_connection_guides_match_2fa_and_current_menu():
+    from app.comments.platforms import PLATFORMS, CONNECTION_GUIDES
+
+    # Users reach VK from both publications and the comments workspace.
+    for guide in (PLATFORMS["vk"], CONNECTION_GUIDES["vk"]):
+        rendered = " ".join(guide["steps"]) + " " + guide.get("help", "")
+        assert "Дополнительно" in rendered
+        assert "Работа с API" in rendered
+        assert "Ключи доступа" in rendered
+        assert "2FA" in rendered
+
+
 def test_vk_pilot_gate_uses_exact_operator_access_rules(tmp_path):
     from types import SimpleNamespace
     from app.api.vk_publishing import _can_begin_community_oauth, _is_tune_owner
@@ -761,10 +813,20 @@ def test_vk_page_shows_contextual_settings_link_only_to_operator(db, tmp_path):
     owner_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert 'Авторизация одним нажатием пока не настроена.' in owner_html
     assert '<a href="/studio/tune/vk"' in owner_html
-    assert owner_html.count('href="https://vk.com/groups"') == 2
+    assert 'href="https://vk.com/groups"' not in owner_html
+    assert 'id="sg-vk-group-link"' in owner_html
     assert 'id="sg-vk-community-link"' in owner_html
     assert 'id="sg-vk-token-link"' in owner_html
     assert 'encodeURIComponent(name) + "?act=tokens"' in owner_html
+    assert 'id="sg-vk-token-link" target="_blank" rel="noopener noreferrer" hidden' in owner_html
+    assert 'id="sg-vk-token-copy" type="button"' in owner_html
+    assert 'id="sg-vk-token-help" role="status" aria-live="polite"' in owner_html
+    assert "двухфакторную аутентификацию (2FA)" in owner_html
+    assert "«Дополнительно»" in owner_html
+    assert "«Работа с API»" in owner_html
+    assert "«Создать ключ»" in owner_html
+    assert 'link.removeAttribute("href")' in owner_html
+    assert 'id="sg-vk-oauth-community-link"' not in owner_html
     assert 'https://vk.ru/' in owner_html
     assert 'target="_blank" rel="noopener noreferrer"' in owner_html
     assert "Настроить подключение VK" in owner_html
@@ -792,7 +854,9 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
 
     pilot_html = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert "Проверить вход ВКонтакте" in pilot_html
-    assert pilot_html.count('href="https://vk.com/groups"') == 3
+    assert 'href="https://vk.com/groups"' not in pilot_html
+    assert 'id="sg-vk-oauth-group-link"' in pilot_html
+    assert 'id="sg-vk-oauth-community-link"' in pilot_html
     assert 'совместимость с вашим VK-приложением ещё не подтверждена.' in pilot_html
     assert '<a href="/studio/tune/vk"' in pilot_html
     assert "/studio/tune/vk" not in vk_page(

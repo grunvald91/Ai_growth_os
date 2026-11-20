@@ -24,7 +24,7 @@ from app.vk_service import platform_service_token, group_app_verified
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
-    community_reference, resolve_community, verify_community_key, client_id, redirect_uri,
+    community_reference, resolve_community, resolve_publisher_community, verify_community_key, client_id, redirect_uri,
     GROUP_OAUTH_COOKIE, GROUP_OAUTH_PATH, community_oauth_config,
     begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
 )
@@ -36,17 +36,22 @@ MOSCOW = ZoneInfo("Europe/Moscow")
 VK_TOKEN_DEEPLINK_SCRIPT = r"""<script>
 (() => {
   const input = document.getElementById("sg-vk-community-link");
+  const mainInput = document.getElementById("sg-vk-oauth-community-link");
   const link = document.getElementById("sg-vk-token-link");
-  if (!input || !link) return;
-  const fallback = link.href;
+  const groupLink = document.getElementById("sg-vk-group-link");
+  const mainGroupLink = document.getElementById("sg-vk-oauth-group-link");
+  const copy = document.getElementById("sg-vk-token-copy");
+  const hint = document.getElementById("sg-vk-token-help");
+  if (!input || !link || !hint || !copy) return;
+  let manualChange = false;
+
   function communityName(value) {
     const raw = value.trim();
     if (!raw) return null;
     let name = raw;
     if (/^(?:https?:\/\/)?(?:(?:www|m)\.)?vk\.(?:ru|com)\//i.test(raw)) {
-      let url;
       try {
-        url = new URL(/^https?:\/\//i.test(raw) ? raw : "https://" + raw);
+        const url = new URL(/^https?:\/\//i.test(raw) ? raw : "https://" + raw);
         if (url.protocol !== "https:" || url.username || url.password ||
             !["vk.com", "www.vk.com", "m.vk.com", "vk.ru", "www.vk.ru", "m.vk.ru"].includes(url.hostname) ||
             (url.port && url.port !== "443")) return null;
@@ -62,12 +67,52 @@ VK_TOKEN_DEEPLINK_SCRIPT = r"""<script>
     return /^(?:club|public|event)[1-9]\d{0,14}$/i.test(name) ||
            /^[A-Za-z][A-Za-z0-9_.]{2,99}$/.test(name) ? name : null;
   }
-  function update() {
-    const name = communityName(input.value);
-    link.href = name ? "https://vk.ru/" + encodeURIComponent(name) + "?act=tokens" : fallback;
-    link.textContent = name ? "Открыть ключи API этого сообщества" : "Открыть сообщества VK";
+
+  function updateGroupLink(anchor, value) {
+    if (!anchor) return;
+    const name = communityName(value);
+    if (!name) { anchor.removeAttribute("href"); anchor.hidden = true; }
+    else { anchor.href = "https://vk.ru/" + encodeURIComponent(name); anchor.hidden = false; }
   }
-  input.addEventListener("input", update);
+
+  function update() {
+    updateGroupLink(groupLink, input.value);
+    updateGroupLink(mainGroupLink, mainInput ? mainInput.value : "");
+    const name = communityName(input.value);
+    // No href at all until we know which community the user is managing.
+    // The old /groups fallback silently took the user to the wrong page.
+    if (!name) {
+      link.removeAttribute("href");
+      link.hidden = true;
+      copy.hidden = true;
+      hint.textContent = input.value.trim()
+        ? "Проверьте адрес: нужна ссылка на сообщество vk.com/название."
+        : "Вставьте ссылку на своё сообщество выше — появится переход прямо к ключам API.";
+      return;
+    }
+    link.href = "https://vk.ru/" + encodeURIComponent(name) + "?act=tokens";
+    link.hidden = false;
+    copy.hidden = false;
+    hint.textContent = "Если ВКонтакте открыл приложение вместо настроек, скопируйте ссылку и вставьте её в адресную строку браузера.";
+  }
+
+  input.addEventListener("input", () => { manualChange = true; update(); });
+  // Reuse the group address already entered in the one-click connection form.
+  if (mainInput) {
+    if (!input.value.trim() && mainInput.value.trim()) input.value = mainInput.value;
+    mainInput.addEventListener("input", () => {
+      if (!manualChange) { input.value = mainInput.value; update(); }
+    });
+  }
+  copy.addEventListener("click", async () => {
+    if (!link.href || link.hidden) return;
+    try {
+      await navigator.clipboard.writeText(link.href);
+      hint.textContent = "Ссылка на настройки скопирована. Вставьте её в адресную строку браузера.";
+    } catch (_) {
+      hint.textContent = "Не удалось скопировать автоматически. Откройте ссылку на настройки выше.";
+    }
+  });
   update();
 })();
 </script>"""
@@ -123,7 +168,9 @@ def _vk_owner_settings_link(settings, request: Request, product_id: UUID) -> str
 def connection_error(key):
     return {
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
-        "bad_key": "ВКонтакте не подтвердил ключ или его права. Проверьте ссылку и создайте ключ сообщества с правами управления и работы со стеной.",
+        "bad_key": "Ключ не указан либо содержит недопустимые символы. Вставьте ключ доступа из «Работа с API» вашего сообщества.",
+        "group_lookup_failed": "Адрес принят, но ВКонтакте не подтвердил сообщество по короткому имени. Попробуйте адрес вида vk.ru/club241947800; ключ и разрешения проверяются отдельно.",
+        "key_rights_failed": "Адрес сообщества принят, но ВКонтакте не подтвердил права ключа на его стену и управление. Проверьте ключ в настройках указанного сообщества.",
         "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
         "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
@@ -205,8 +252,8 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
     settings_link = _vk_owner_settings_link(settings, request, product_id)
     oauth_first = (f"""
  <form method="post" action="/studio/products/{product_id}/vk/group-connect" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
-   <input type="text" name="community_link" maxlength="255" autocomplete="url"
+  <label class="sg-field"><span>Ссылка на сообщество ВКонтакте <a id="sg-vk-oauth-group-link" target="_blank" rel="noopener noreferrer" hidden>Открыть указанное сообщество</a></span>
+   <input id="sg-vk-oauth-community-link" type="text" name="community_link" maxlength="255" autocomplete="url"
      placeholder="https://vk.com/my_community" required></label>
   <button class="btn primary" type="submit">{"Проверить вход ВКонтакте" if pilot_mode else "Подключить ВКонтакте"}</button>
   <p class="sg-footnote">Вы перейдёте во ВКонтакте, чтобы подтвердить доступ ServGo.
@@ -229,18 +276,29 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  {oauth_first}
  <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
-  <label class="sg-field"><span>Ссылка на сообщество <a href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
+  <label class="sg-field"><span>Ссылка на сообщество <a id="sg-vk-group-link" target="_blank" rel="noopener noreferrer" hidden>Открыть указанное сообщество</a></span>
    <input id="sg-vk-community-link" name="community_link" type="text" maxlength="255" autocomplete="off"
       placeholder="https://vk.com/my_community" required></label>
-  <label class="sg-field"><span>Ключ сообщества <a id="sg-vk-token-link" href="https://vk.com/groups" target="_blank" rel="noopener noreferrer">Открыть сообщества VK</a></span>
+  <p class="sg-footnote" id="sg-vk-token-help" role="status" aria-live="polite">Вставьте ссылку на своё сообщество выше — появится переход прямо к ключам API.</p>
+  <label class="sg-field"><span>Ключ сообщества <a id="sg-vk-token-link" target="_blank" rel="noopener noreferrer" hidden>Открыть ключи API моего сообщества</a></span>
    <input name="access_token" type="password" maxlength="8000" autocomplete="off"
       placeholder="Ключ из настроек сообщества" required></label>
+  <button id="sg-vk-token-copy" type="button" class="btn secondary small" hidden>Скопировать ссылку на настройки в браузере</button>
   <button class="btn primary" type="submit">Проверить и подключить публикации</button>
  </form>
- <details><summary>Как получить ключ сообщества?</summary>
-  <p class="sg-footnote">ВКонтакте → ваше сообщество → Управление → Работа с API → Ключи доступа → Создать ключ.
-  Предоставьте права на стену и управление. Скопируйте ключ в форму выше.
-  ServGo проверит ключ и самостоятельно найдёт ID сообщества по ссылке. Ключ не отправляйте в чат.</p>
+ <details open><summary>Как получить ключ сообщества? Пошаговая инструкция</summary>
+  <p class="sg-footnote"><strong>Сначала включите двухфакторную аутентификацию (2FA) для VK ID.</strong>
+  Это дополнительная защита аккаунта: при входе, кроме пароля, требуется ещё одно подтверждение.
+  Если 2FA выключена, ВКонтакте предложит включить её перед созданием ключа.</p>
+  <ol class="sg-footnote">
+    <li>Откройте <strong>своё сообщество ВКонтакте</strong> (ссылка выше).</li>
+    <li>Перейдите в <strong>Управление</strong> сообществом, затем нажмите <strong>«Дополнительно»</strong>.</li>
+    <li>Откройте <strong>«Работа с API» → «Ключи доступа»</strong>.</li>
+    <li>Нажмите <strong>«Создать ключ»</strong>, предоставьте необходимые права на управление и работу со стеной и подтвердите создание в VK.</li>
+    <li>Скопируйте полученный ключ и вставьте его в поле <strong>«Ключ сообщества»</strong> выше.</li>
+  </ol>
+  <p class="sg-footnote">Если адрес содержит номер, например vk.ru/club123456, ServGo извлечёт ID автоматически — отдельно искать его не нужно.
+  Ключ храните в секрете; никому не отправляйте его в сообщениях или чатах.</p>
  </details>
  </details>
  <p class="sg-footnote">Это подключение для текстовых публикаций. Отправка в стену требует проверки одним постом. Для чтения комментариев может потребоваться отдельный доступ к API; подключение публикаций не означает, что комментарии уже работают.</p>
@@ -374,13 +432,15 @@ async def vk_community_key(product_id: UUID, request: Request,
     if not token or len(token) > 8000 or any(ord(ch) < 32 for ch in token):
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
     try:
-        account_id, name = await resolve_community(token, reference)
+        account_id, name = await resolve_publisher_community(token, reference)
     except ValueError:
-        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=group_lookup_failed",
+                                status_code=303)
     try:
         await verify_community_key(token, account_id)
     except ValueError:
-        return RedirectResponse(f"/studio/products/{product_id}/vk?error=bad_key", status_code=303)
+        return RedirectResponse(f"/studio/products/{product_id}/vk?error=key_rights_failed",
+                                status_code=303)
     existing = connected(db, product_id)
     if existing is not None and not existing.is_community_token:
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=already_connected",
