@@ -24,7 +24,7 @@ from app.vk_service import platform_service_token, group_app_verified
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
     cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
-    community_reference, resolve_community, resolve_publisher_community, verify_community_key, client_id, redirect_uri,
+    community_reference, resolve_community, resolve_publisher_community, verify_community_key, VKKeyVerificationError, client_id, redirect_uri,
     GROUP_OAUTH_COOKIE, GROUP_OAUTH_PATH, community_oauth_config,
     begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
 )
@@ -170,7 +170,10 @@ def connection_error(key):
         "bad_link": "Не удалось распознать ссылку. Скопируйте адрес страницы сообщества из ВКонтакте.",
         "bad_key": "Ключ не указан либо содержит недопустимые символы. Вставьте ключ доступа из «Работа с API» вашего сообщества.",
         "group_lookup_failed": "Адрес принят, но ВКонтакте не подтвердил сообщество по короткому имени. Попробуйте ссылку вида vk.ru/club123456; ключ и разрешения проверяются отдельно.",
-        "key_rights_failed": "Адрес сообщества принят, но ВКонтакте не подтвердил права ключа на его стену и управление. Проверьте ключ в настройках указанного сообщества.",
+        "key_rights_failed": "Адрес сообщества принят, но VK не завершил проверку ключа. Это не обязательно означает недостаток разрешений; проверьте повторно после обновления страницы.",
+        "key_permissions_unverified": "VK не смог подтвердить действительность ключа и его разрешения через API. Ключ не сохранён. Повторите попытку; дополнительные разрешения могут не требоваться.",
+        "key_wall_missing": "VK ответил, но разрешение «Стена» в правах этого ключа не найдено. Проверьте выбранный ключ в разделе «Работа с API».",
+        "key_group_unverified": "Право на стену подтверждено, но VK не подтвердил, что ключ принадлежит именно указанному сообществу. Ключ не сохранён. Если адрес и ключ верны, причина может быть в доступности метода VK API.",
         "save_failed": "Не удалось сохранить подключение. Проверьте настройки и повторите.",
         "already_connected": "Сообщество уже подключено через VK ID. Ограниченный ключ не заменит действующее подключение.",
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
@@ -442,6 +445,15 @@ async def vk_community_key(product_id: UUID, request: Request,
                                 status_code=303)
     try:
         await verify_community_key(token, account_id)
+    except VKKeyVerificationError as exc:
+        reason_to_error = {
+            "permissions_unverified": "key_permissions_unverified",
+            "wall_missing": "key_wall_missing",
+            "group_unverified": "key_group_unverified",
+        }
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error={reason_to_error[exc.reason]}",
+            status_code=303)
     except ValueError:
         return RedirectResponse(f"/studio/products/{product_id}/vk?error=key_rights_failed",
                                 status_code=303)

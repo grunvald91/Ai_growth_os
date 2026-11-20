@@ -123,22 +123,37 @@ async def resolve_publisher_community(token, reference):
     return await resolve_community(token, reference)
 
 
+class VKKeyVerificationError(ValueError):
+    """A safe onboarding failure code; never contains a key or VK API payload."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__({
+            "permissions_unverified": "VK не подтвердил права ключа доступа.",
+            "wall_missing": "У ключа VK отсутствует разрешение на работу со стеной.",
+            "group_unverified": "VK не подтвердил доступ ключа к указанному сообществу.",
+        }[reason])
+
+
 async def verify_community_key(token, account_id):
-    """Read-only check that this is a community key with access to this group."""
+    """Verify publishing permission AND community binding without posting.
+
+    Only read-only API requests; do not require a configured Callback API server
+    to enable wall publishing. A token for another group must still fail.
+    """
+    group_id(account_id)
     adapter = VKAdapter(CommentGateway(), "vk")
     try:
         permissions = await adapter.call("groups.getTokenPermissions", token)
-        # A successful API call alone is not sufficient: wall permission must be granted.
         mask = int(permissions.get("mask") or 0) if isinstance(permissions, dict) else 0
-        if not mask & 8192:
-            raise ValueError("Ключ VK не имеет права доступа к стене")
-        # Ensures the key is bound to *this* community, not merely any VK group.
-        await adapter.call("groups.getCallbackSettings", token, group_id=account_id)
     except (ValueError, TypeError):
-        raise ValueError(
-            "Нужен ключ указанного сообщества с правами на стену и управление. "
-            "Создайте его в Управление → Дополнительно → Работа с API → Ключи доступа."
-        ) from None
+        raise VKKeyVerificationError("permissions_unverified") from None
+    if not mask & 8192:
+        raise VKKeyVerificationError("wall_missing")
+    try:
+        await adapter.prove_group_key_access(account_id, token)
+    except ValueError:
+        raise VKKeyVerificationError("group_unverified") from None
 
 
 class VKStore(CommentSecrets):

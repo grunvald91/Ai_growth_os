@@ -25,6 +25,37 @@ class VKAdapter:
             raise PlatformError("Укажите положительный числовой ID сообщества VK без club/public")
         return -int(account_id)
 
+    async def prove_group_key_access(self, account_id, token):
+        """Read-only group-scoped proof, independent of configured Callback servers.
+
+        getCallbackSettings queries one specific Callback server and can fail
+        for a perfectly valid wall token when that server is not configured.
+        An empty getCallbackServers result is valid: there simply are no
+        servers. Fall back to obtaining (and immediately discarding) the
+        group-scoped confirmation code if listing servers is unavailable.
+        Neither response is ever logged, returned to the browser or stored.
+        """
+        self.owner(account_id)
+        try:
+            servers = await self.call("groups.getCallbackServers", token, group_id=account_id)
+            if (isinstance(servers, dict)
+                    and isinstance(servers.get("count"), int)
+                    and not isinstance(servers["count"], bool)
+                    and servers["count"] >= 0
+                    and isinstance(servers.get("items"), list)):
+                return
+        except PlatformError:
+            pass
+        try:
+            confirmation = await self.call(
+                "groups.getCallbackConfirmationCode", token, group_id=account_id)
+        except PlatformError:
+            raise PlatformError("VK не подтвердил принадлежность ключа указанному сообществу") from None
+        if (not isinstance(confirmation, dict)
+                or not isinstance(confirmation.get("code"), str)
+                or not confirmation["code"]):
+            raise PlatformError("VK не подтвердил принадлежность ключа указанному сообществу")
+
     async def manager(self, account_id, token):
         self.owner(account_id)
         data = await self.call("groups.getById", token, group_id=account_id)
@@ -35,13 +66,17 @@ class VKAdapter:
         if group.get("is_admin") == 1 and group.get("admin_level", 0) >= 2:
             return group
         # VK community keys do not carry a user-level is_admin flag.
-        # Validate their kind and their authority for the specific group.
+        # Verify explicit permissions, then prove this token belongs to the
+        # requested community without requiring a configured Callback server.
         try:
-            await self.call("groups.getTokenPermissions", token)
-            await self.call("groups.getCallbackSettings", token, group_id=account_id)
-        except PlatformError:
+            permissions = await self.call("groups.getTokenPermissions", token)
+            mask = int(permissions.get("mask") or 0) if isinstance(permissions, dict) else 0
+            if not self.video and not (mask & 8192):
+                raise PlatformError("Ключ VK не имеет доступа к стене")
+            await self.prove_group_key_access(account_id, token)
+        except (PlatformError, ValueError, TypeError):
             raise PlatformError(
-                "Нужен ключ этого сообщества с правами управления и работы со стеной"
+                "VK не подтвердил доступ ключа к этому сообществу"
             ) from None
         return group
 
