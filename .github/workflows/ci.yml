@@ -50,6 +50,11 @@ jobs:
             echo "Required media packages already installed"
             exit 0
           fi
+          # GitHub-hosted Ubuntu's Azure apt mirror can stall indefinitely.
+          # Prefer the other official Ubuntu mirrors in this ephemeral runner.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\\.archive\\.ubuntu\\.com/d' /etc/apt/apt-mirrors.txt
+          fi
           # The Ubuntu mirror intermittently stalls for minutes before tests.
           # Try to install missing language packs, but evaluate the full pytest
           # suite when the runner already has all required media executables.
