@@ -126,6 +126,22 @@ def test_create_topic_suggestions_are_format_aware_and_tenant_scoped(environment
             Product(name="Салон", slug="whiteboard-jobs"), "invalid")
 
 
+def test_create_publication_connection_hint_is_scoped_and_nonblocking(environment):
+    _, _, product_id, other_id = environment
+    browser = client()
+    response = browser.get(f"/studio/products/{product_id}/create/platforms.json")
+    assert response.status_code == 200
+    assert response.json() == {
+        "vk": {"state": "not_configured"},
+        "telegram": {"state": "not_configured"},
+    }
+    # The other product is independently checked without revealing credentials.
+    other = browser.get(f"/studio/products/{other_id}/create/platforms.json")
+    assert other.status_code == 200
+    assert set(other.json()) == {"vk", "telegram"}
+    assert "token" not in response.text.lower()
+
+
 def test_picker_paid_start_rejects_unlisted_topic_without_creating_job(environment):
     _, settings, product_id, _ = environment
     _write_profile(settings, "whiteboard-jobs")
