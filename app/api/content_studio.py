@@ -2475,13 +2475,15 @@ def studio_speed_page(product_id: UUID, days: int = 7, db: Session = Depends(get
 
 @router.get("/studio/products/{product_id}/work", response_class=HTMLResponse)
 def studio_work_page(product_id: UUID, tab: str = "all", q: str = "",
-                     period: str = "all", page: int = 1, partial: bool = False,
+                     period: str = "all", kind: str = "all",
+                     page: int = 1, partial: bool = False,
                      db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    data = work_page(db, product.id, tab=tab, query=q, period=period, page=page)
+    data = work_page(db, product.id, tab=tab, query=q, period=period,
+                     kind=kind, page=page)
     html_body = activity_html(
         product.id, data["items"], tab=data["tab"],
-        q=data["q"], period=data["period"], page=data["page"],
+        q=data["q"], period=data["period"], kind=data["kind"], page=data["page"],
         total=data["total"], page_size=data["page_size"], counts=data["counts"],
     )
     if partial:
