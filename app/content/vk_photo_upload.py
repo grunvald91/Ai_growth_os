@@ -36,7 +36,7 @@ def prepared_image(db, products_root: Path | None, post: Artifact) -> tuple[Arti
         if not requested:
             return None
         if products_root is None or post.task_id is None or not data.get("image_sha256"):
-            raise ValueError("Для публикации изображения необходима проверенная версия")
+            raise ValueError("Пост содержит иллюстрацию: для публикации нужна её проверенная версия")
         image_id = UUID(str(data["image_artifact_id"]))
         image = db.scalar(select(Artifact).where(
             Artifact.id == image_id,
@@ -53,7 +53,7 @@ def prepared_image(db, products_root: Path | None, post: Artifact) -> tuple[Arti
             raise ValueError("Файл изображения изменился после согласования")
         return image, path
     except (KeyError, TypeError, OSError, LookupError, ValueError) as exc:
-        if isinstance(exc, ValueError) and str(exc).startswith(("Критик", "Файл", "Для публикации")):
+        if isinstance(exc, ValueError) and str(exc).startswith(("Критик", "Файл", "Пост содержит иллюстрацию")):
             raise
         raise ValueError("Иллюстрация повреждена или отсутствует подтверждение критика") from None
 
