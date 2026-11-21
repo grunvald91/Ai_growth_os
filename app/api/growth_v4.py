@@ -89,7 +89,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     )
     tools = [
         ("Контент-план", base + "/plan", "Темы и сроки публикаций."),
-        ("SEO-завод", base + "/seo", "Поисковые запросы, статьи и блог."),
         ("Исследование рынка", base + "/market-research", "Организации и конкуренты по данным Яндекс Карт."),
         ("Кампании", base + "/campaigns", "Цели, аудитории, каналы и результаты."),
         ("Разведка", f"/intelligence?product_id={pid}", "Конкуренты и маркетинговые гипотезы."),
@@ -182,6 +181,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         <div class="sg-create-suggestions" id="sg-create-suggestions" hidden></div>
         <div class="sg-create-layout">
           <div class="sg-create-main">
+            {warning}
             <div class="sg-create-label">1. Что создаём?</div>
             <div class="sg-create-picks">{cards}</div>
             <div class="sg-create-primary-platform" id="sg-create-primary-platform">
@@ -249,9 +249,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           <aside class="sg-create-aside" aria-label="Дополнительные возможности">
             <details class="sg-create-advanced" id="sg-create-advanced">
           <summary>Дополнительные настройки</summary>
-          <p class="sg-create-tip">Нужны особые требования, аудитория или площадка?
-          Укажите их здесь либо просто опишите задачу в строке ниже.</p>
-          {warning}{advanced}
+          <p class="sg-create-tip">Необязательные параметры: аудитория, визуальный формат
+          и требования к материалу. Основную тему укажите в форме слева или выше.</p>
+          {advanced}
         </details>
         <details class="sg-create-timing" id="sg-create-timing">
           <summary>Сколько занимает создание?</summary>
