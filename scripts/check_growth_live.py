@@ -673,7 +673,7 @@ def main():
                         mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,floatingBottom:Math.max(crumbs.bottom,actions.bottom),overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
                     }""")
                     assert metrics['scrollable'] and not metrics['overflow'],metrics
-                    assert -1<=metrics['feedTop']-metrics['floatingBottom']<=32,metrics
+                    assert 0<=metrics['feedTop']<=metrics['floatingBottom']-32,metrics
                     # The transparent floating composer intentionally overlaps
                     # the scroll region; the dedicated voice UI smoke checks
                     # that the latest message stays readable above it.
