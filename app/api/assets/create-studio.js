@@ -201,7 +201,11 @@
     attachGrip(historyOpen,true,-1);  // pull up
     // Voice and typed requests reopen the conversation where the reply appears.
     // Keep focus on the composer to avoid Android keyboard/focus jumps.
-    root.addEventListener('sg:dispatcher:outgoing',()=>showHistory(true,false));
+    root.addEventListener('sg:dispatcher:outgoing',()=>{
+      showHistory(true,false);
+      // The response is inline above the form; reveal it after dispatcher renders.
+      requestAnimationFrame(()=>history.scrollIntoView({block:'nearest',behavior:'auto'}));
+    });
   }
   // Only the lower dispatcher composer can submit a request.
   // Settings are read at send time, including immediately after voice transcription.
