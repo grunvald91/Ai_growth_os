@@ -186,6 +186,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <div class="sg-create-label">1. Что создаём?</div>
             <div class="sg-create-picks" role="group" aria-label="Формат материала">{cards}</div>
             <p class="sg-create-format-help" id="sg-create-format-help"></p>
+            <div class="sg-create-seo-link sg-create-seo-link-main">
+              <a href="{base}/seo">Нужна SEO-статья? Открыть SEO-завод →</a>
+            </div>
             <div class="sg-create-primary-platform" id="sg-create-primary-platform">
               <div class="sg-create-label">2. Площадка</div>
               <div id="sg-create-platform-slot"></div>
@@ -194,7 +197,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               <div class="sg-create-label">Изображение к посту ВКонтакте</div>
               <div id="sg-create-vk-image-slot"></div>
             </div>
-            <label class="sg-create-label sg-create-topic-label" for="dp-input">3. О чём материал?</label>
+            <label class="sg-create-label sg-create-topic-label" id="sg-create-topic-label" for="dp-input">3. О чём материал?</label>
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
         <section class="dp-home sg-create-dispatch" data-create-format=""
           data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
@@ -270,10 +273,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           <summary>Другие инструменты</summary>
           <div class="sg-create-tools">{tool_rows}</div>
         </details>
-            <div class="sg-create-seo-link">
-              <span>Нужна SEO-статья?</span>
-              <a href="{base}/seo">Перейти в SEO-завод →</a>
-            </div>
           </aside>
         </div>
       </div>
