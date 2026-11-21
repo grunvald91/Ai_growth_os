@@ -1041,7 +1041,7 @@ def test_standalone_ai_chat_uses_shared_floating_header_design(chat_env):
     with TestClient(app) as client:
         page=client.get("/studio/chat")
         assert page.status_code == 200
-        assert "ai-chat.css?v=8" in page.text
+        assert "ai-chat.css?v=9" in page.text
         css=client.get("/studio/assets/ai-chat.css")
         assert css.status_code == 200
         source=css.text.split("/* ServGo Studio — unified floating controls for standalone AI Chat.", 1)[1]
