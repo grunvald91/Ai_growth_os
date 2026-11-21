@@ -374,7 +374,7 @@ def sidebar_html(product_id: UUID, active: str = "overview") -> str:
         {item("overview", base, "⌂", "Главная")}
         {item("create", base + "/create", "＋", "Создать материал")}
         {item("chat", f"/studio/chat?product_id={product_id}", "✦", "ИИ-чат")}
-        {item("work", base + "/work", "◴", "В работе")}
+        {item("work", base + "/work", "◴", "Задания")}
         {item("materials", base + "/materials", "▤", "Мои материалы")}
         {item("review", base + "/review", "✓", "На согласовании")}
         {item("channels", base + "/channels", "↗", "Публикации")}
@@ -434,7 +434,7 @@ def mobile_nav_html(product_id: UUID, active: str = "overview") -> str:
     <nav class="mobile-nav" aria-label="Быстрая навигация">
       {item("overview", base, "⌂", "Главная")}
       {item("create", base + "/create", "＋", "Создать")}
-      {item("work", base + "/work", "◴", "В работе")}
+      {item("work", base + "/work", "◴", "Задания")}
       {item("materials", base + "/materials", "▤", "Готово")}
       <details class="m-more" data-m-more>
         <summary class="m-more-tab{more_active}"><span class="m-ico" aria-hidden="true">⋯</span>Ещё</summary>
@@ -1242,7 +1242,7 @@ def studio_page_shell(
     </header>
     <nav class="sg-route-utility" aria-label="Перейти к другим действиям">
       <a href="/studio/products/{product.id}/create">＋ Создать</a>
-      <a href="/studio/products/{product.id}/work">◴ В работе</a>
+      <a href="/studio/products/{product.id}/work">◴ Задания</a>
       <a href="/studio/products/{product.id}/materials">▤ Материалы</a>
       <details class="sg-inline-more">
         <summary>Ещё инструменты</summary>
