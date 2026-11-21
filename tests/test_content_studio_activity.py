@@ -381,3 +381,75 @@ def test_work_steps_use_theme_surface_and_ink_instead_of_white_on_dark():
     assert ".sg-work-steps li{" in CSS
     assert "background:var(--s-surface-2,#F7F9FC)" in CSS
     assert "color:var(--s-text,#344D64)" in CSS
+
+
+def test_worklist_completed_artifact_requires_attention(owner_studio):
+    """Approval belongs to the artifact, even after Task completes."""
+    from app.api.content_studio_activity import work_items
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, title="CONTENT: Карточка на проверке",
+                assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=company.id, task_id=task.id,
+                    title="Подготовленный пост", kind="channel_text",
+                    status="awaiting_approval", content="{}"))
+    db.commit()
+    data = work_items(db, company.id)
+    assert len(data) == 1
+    assert data[0]["state"] == "completed"
+    assert data[0]["needs_decision"] is True
+    assert data[0]["label"] == "Нужно решение"
+    base = f"/studio/products/{company.id}"
+    attention = client.get(base + "/work?tab=approval")
+    assert attention.status_code == 200
+    assert f'/tasks/{task.id}' in attention.text
+    assert "Материал подготовлен — требуется решение" in attention.text
+    assert 'data-sg-resource-details' not in attention.text
+
+
+def test_worklist_draft_without_approval_is_not_an_extra_manual_gate(owner_studio):
+    """Do not force a manual decision for every completed draft."""
+    from app.api.content_studio_activity import work_items
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, title="CONTENT: Готовый черновик",
+                assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=company.id, task_id=task.id,
+                    title="Черновик", kind="article", status="draft",
+                    content="{}"))
+    db.commit()
+    assert work_items(db, company.id)[0]["needs_decision"] is False
+    html = client.get(f"/studio/products/{company.id}/work?tab=approval").text
+    assert f'/tasks/{task.id}' not in html
+
+
+def test_tasks_all_view_puts_attention_before_newer_active_job(owner_studio):
+    """Priority must not rewrite the stored task timestamps or status."""
+    client, db, company, _ = owner_studio
+    waiting = Task(product_id=company.id, title="CONTENT: Проверить текст",
+                   assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(waiting)
+    db.flush()
+    db.add(Artifact(product_id=company.id, task_id=waiting.id,
+                    title="Проверить", kind="channel_text",
+                    status="awaiting_approval", content="{}"))
+    active = Task(product_id=company.id, title="CONTENT: Новый материал",
+                  assigned_agent="content_factory", status=TaskStatus.RUNNING)
+    db.add(active)
+    db.add(AgentRun(task_id=active.id, agent_name="post_strategist",
+                    status="running"))
+    db.commit()
+    html = client.get(f"/studio/products/{company.id}/work?tab=all").text
+    assert html.index(f'/tasks/{waiting.id}') < html.index(f'/tasks/{active.id}')
+    assert "Идея и структура поста" in html
+    assert 'aria-label="Фильтр заданий"' in html
+
+
+def test_worklist_compact_css_has_one_row_filters_and_finger_targets():
+    from app.api.content_studio_work_ui import CSS
+    assert ".sg-work-board .sg-work-tabs{display:flex;flex-wrap:nowrap" in CSS
+    assert "overflow-x:auto" in CSS
+    assert "min-height:44px" in CSS
+    assert ".sg-work-board .sg-work-item:focus-visible" in CSS
