@@ -15,10 +15,27 @@
   if(vkImageSlot && vkImageRow)vkImageSlot.appendChild(vkImageRow);
   const vkRatioRow=document.getElementById('sg-create-vk-ratio-row');
   const vkReviewTip=document.getElementById('sg-create-vk-review-tip');
+  const vkImageRadios=screen.querySelectorAll('[name="vk_image_enabled"]');
+  const vkImageModel=document.getElementById('sg-create-vk-image-model');
+  const vkModelChoice=document.getElementById('sg-create-vk-model-choice');
+  const vkModelChoiceRow=document.getElementById('sg-create-vk-model-choice-row');
+  const summary=document.getElementById('sg-create-review-summary');
+  const formatOptions=document.getElementById('sg-create-format-options');
+  const formatOptionsSlot=document.getElementById('sg-create-format-options-slot');
+  const extrasSlot=document.getElementById('sg-create-extra-settings-slot');
+  const advanced=document.getElementById('sg-create-advanced');
   // The image generation/critic cost note must accompany the visible VK option.
   if(vkImageSlot && vkReviewTip)vkImageSlot.appendChild(vkReviewTip);
   const aspectRow=document.getElementById('sg-create-aspect-row');
   const storyRatio=document.getElementById('sg-create-story-ratio');
+  // All format-affecting controls precede the topic and submit button on
+  // narrow screens. Optional wishes stay in the same form, before submit.
+  if(formatOptionsSlot){
+    [countRow,modelRow,aspectRow,vkRatioRow,storyRatio].forEach(row=>{
+      if(row)formatOptionsSlot.appendChild(row);
+    });
+  }
+  if(extrasSlot && advanced)extrasSlot.appendChild(advanced);
   // The destination platform belongs next to the selected format, not in advanced settings.
   const platformSlot=document.getElementById('sg-create-platform-slot');
   if(platformSlot && platformRow)platformSlot.appendChild(platformRow);
@@ -57,14 +74,48 @@
       'затем стратег формирует подход, специалисты готовят материал, а проверка ищет проблемы качества. '+
       'Готовый результат появляется в заданиях для вашего просмотра. Публикация — отдельное действие.');
   });
+  function imageEnabled(){
+    const checked=screen.querySelector('[name="vk_image_enabled"]:checked');
+    return !checked || checked.value==='yes';
+  }
+  function updateSummary(){
+    if(!summary)return;
+    const names={post:'Пост',story:'Stories',static_image:'Изображение',
+      short_video:'Видеосценарий',whiteboard:'Простое видео MP4',package:'Контент-пакет'};
+    const key=root.getAttribute('data-create-format');
+    const platformLabel=platform.selectedOptions && platform.selectedOptions[0]
+      ? platform.selectedOptions[0].textContent : '';
+    let line=names[key]||'Материал';
+    if(platformLabel && key!=='whiteboard' && key!=='package')line+=' · '+platformLabel;
+    if(key==='post' && platform.value==='vk'){
+      line+=imageEnabled()?' · с иллюстрацией':' · только текст';
+    }
+    if(key==='story' && count.value)line+=' · '+count.value+' экранов';
+    summary.textContent=line+'. Проверка и публикация — отдельные действия.';
+  }
   function syncVkImage(){
     const show=root.getAttribute('data-create-format')==='post' && platform.value==='vk';
-    if(vkImageRow) vkImageRow.hidden=!show;
+    const withImage=show && imageEnabled();
+    // Keep a single source of truth for the existing dispatcher payload.
+    if(vkImageModel)vkImageModel.value=withImage ? vkModelChoice.value : 'none';
+    if(vkImageRow)vkImageRow.hidden=true; // compatibility-only select
     const vkImageShell=document.getElementById('sg-create-vk-image-primary');
     if(vkImageShell)vkImageShell.hidden=!show;
-    if(vkRatioRow) vkRatioRow.hidden=!show;
-    if(vkReviewTip) vkReviewTip.hidden=!show;
+    if(vkModelChoiceRow)vkModelChoiceRow.hidden=!withImage;
+    if(vkRatioRow)vkRatioRow.hidden=!withImage;
+    if(vkReviewTip)vkReviewTip.hidden=!withImage;
+    updateFormatOptionVisibility();
+    updateSummary();
   }
+  function updateFormatOptionVisibility(){
+    const key=root.getAttribute('data-create-format');
+    const show=key==='story' || key==='static_image' ||
+      (key==='post' && platform.value==='vk' && imageEnabled());
+    if(formatOptions)formatOptions.hidden=!show;
+  }
+  vkImageRadios.forEach(radio=>radio.addEventListener('change',syncVkImage));
+  if(vkModelChoice)vkModelChoice.addEventListener('change',syncVkImage);
+  if(count)count.addEventListener('change',updateSummary);
   platform.addEventListener('change',syncVkImage);
 
   function chooseFormat(key){
@@ -101,7 +152,6 @@
     context.textContent=key==='whiteboard'
       ? 'Выбрано: Простое видео (обычно около 30 секунд). Укажите тему ниже. Платные операции запускаются только после подтверждения.'
       : 'Выбрано: '+names[key]+'. Укажите тему и нажмите «Продолжить». Перед созданием появится подтверждение.';
-    const advanced=document.getElementById('sg-create-advanced');
     if(advanced) advanced.hidden=key==='whiteboard';
     if(key==='whiteboard'){
       const link=document.createElement('a');link.href=base+'/whiteboard';
