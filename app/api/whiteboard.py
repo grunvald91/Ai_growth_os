@@ -623,6 +623,20 @@ def studio_create_topic_suggestions(
     )
 
 
+@router.get('/studio/products/{product_id}/create/platforms.json')
+def studio_create_platforms(product_id: UUID, db: Session = Depends(get_db)):
+    """Return saved connection records only, not unverified live API availability."""
+    from app.social_vk import connected as vk_connection
+    from app.content.telegram_publishing import connected_channels
+    product = _owner_product(db, product_id)
+    return {
+        "vk": {"state": "configured" if vk_connection(db, product.id) else "not_configured"},
+        "telegram": {
+            "state": "configured" if connected_channels(db, product.id) else "not_configured"
+        },
+    }
+
+
 @router.get('/studio/products/{product_id}/whiteboard/quote.json')
 @router.post('/studio/products/{product_id}/whiteboard/quote.json')
 async def studio_topic_quote(product_id: UUID, request: Request, db: Session = Depends(get_db)):
