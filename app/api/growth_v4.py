@@ -198,7 +198,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               <div class="sg-create-label">2. Площадка</div>
               <div id="sg-create-platform-slot"></div>
               <div class="sg-create-platform-state" id="sg-create-platform-state">
-                <span id="sg-create-platform-status">Для создания черновика подключение не требуется.</span>
+                <span id="sg-create-platform-status">Черновик доступен без подключения.</span>
                 <a href="{base}/channels">Настроить публикацию</a>
               </div>
             </div>
@@ -259,9 +259,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </button>
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
-              <textarea id="dp-input" name="topic" class="dp-input" rows="3"
-                placeholder="Например: зачем небольшому бизнесу CRM?"
-                enterkeyhint="send" aria-describedby="sg-create-context" required></textarea>
+              <textarea id="dp-input" name="topic" class="dp-input" rows="2"
+                placeholder="Например: зачем бизнесу CRM?"
+                enterkeyhint="send" aria-describedby="sg-create-context sg-create-voice-hint" required></textarea>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
@@ -271,15 +271,15 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
                 <rect x="9" y="2.5" width="6" height="12" rx="3"/>
                 <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
               </svg></button>
+              <div class="sg-create-suggest-row">
+                <button type="button" data-sg-suggest>✦ Предложить тему</button>
+                <span id="sg-create-voice-hint">🎙 Удерживайте поле — голосом</span>
+              </div>
               <div id="sg-create-extra-settings-slot" class="sg-create-extra-settings-slot"></div>
               <div class="sg-create-review-summary" id="sg-create-review-summary" role="note"></div>
               <button class="dp-send command-go" id="dp-send" type="submit"
-                aria-label="Проверить параметры задания">Проверить задание <span aria-hidden="true">→</span></button>
+                aria-label="Проверить задание">Проверить задание <span aria-hidden="true">→</span></button>
             </form>
-            <div class="sg-create-suggest-row">
-              <button type="button" data-sg-suggest>✦ Предложить тему</button>
-              <span>Для голосового ввода удерживайте поле темы</span>
-            </div>
             <div class="command-tools"><div class="command-hints" id="dp-chips"
               aria-label="Подсказки"></div></div>
           </div>
@@ -551,10 +551,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-journey-polish-v3-20261121', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-editor-compact-v4-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=create-journey-polish-v3-20261121"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-journey-polish-v3-20261121"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=create-editor-compact-v4-20261121"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-editor-compact-v4-20261121"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -598,7 +598,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=27-create-instant-theme">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=28-create-compact">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=13">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
