@@ -163,12 +163,15 @@ def main():
                       const placeholder=getComputedStyle(document.querySelector('#dp-input'),'::placeholder');
                       return {mainBg:main.backgroundColor,barBg:bar.backgroundColor,
                         inputBg:input.backgroundColor,mainText:getComputedStyle(document.querySelector('.sg-create-label')).color,
-                        inputText:input.color,placeholderText:placeholder.color};
+                        inputText:input.color,placeholderText:placeholder.color,
+                        inputSize:parseFloat(input.fontSize),
+                        selectSize:parseFloat(getComputedStyle(document.querySelector('#sg-create-platform')).fontSize)};
                     }""")
                     assert colors['barBg']==colors['mainBg'], colors
                     assert colors['inputBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
                     assert colors['inputText']==colors['mainText'], colors
                     assert colors['placeholderText']!=colors['mainBg'], colors
+                    assert colors['inputSize']>=16 and colors['selectSize']>=16, colors
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
                 page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
