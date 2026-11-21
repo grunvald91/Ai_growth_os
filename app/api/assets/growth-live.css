@@ -1030,3 +1030,33 @@ body[data-growth-design="v4"] .sg-create-suggestions{
 @media(prefers-reduced-motion:reduce){
   body[data-growth-design="v4"] .sg-create-format{transition:none!important;}
 }
+
+/* Review 2026-11-21: use available workspace width and keep product options visible. */
+body[data-growth-design="v4"] .sg-create-scroll{container-type:inline-size;}
+body[data-growth-design="v4"] .sg-create-picks{margin-bottom:7px;}
+body[data-growth-design="v4"] .sg-create-format-help{
+  margin:0 0 20px;color:var(--muted);font-size:13px;line-height:1.5;
+}
+body[data-growth-design="v4"] .sg-create-vk-image-primary{
+  display:grid;gap:0;margin:0 0 20px;
+}
+body[data-growth-design="v4"] .sg-create-vk-image-primary[hidden]{display:none!important;}
+body[data-growth-design="v4"] .sg-create-vk-image-primary .sg-create-setting>span{display:none;}
+body[data-growth-design="v4"] .sg-create-vk-image-primary select{
+  box-sizing:border-box;width:100%;min-height:48px;
+  padding:10px 12px;border:1px solid var(--line);border-radius:12px;
+  background:var(--card);color:var(--text);font-size:15px;
+}
+@container (max-width:850px){
+  .sg-create-scroll .sg-create-layout{grid-template-columns:minmax(0,1fr);}
+}
+@media(max-width:780px){
+  body[data-growth-design="v4"] .sg-create-picks{margin-bottom:7px;}
+  body[data-growth-design="v4"] .sg-create-format-help{margin-bottom:17px;}
+}
+/* Scale controls and descriptions with browser text settings. */
+body[data-growth-design="v4"] .sg-create-format{font-size:.875rem;}
+body[data-growth-design="v4"] .sg-create-format small{font-size:.75rem;}
+body[data-growth-design="v4"] .sg-create-topic-label,
+body[data-growth-design="v4"] .sg-create-label{font-size:.9375rem;}
+body[data-growth-design="v4"] :is(.sg-create-primary-platform,.sg-create-vk-image-primary) select{font-size:.9375rem;}
