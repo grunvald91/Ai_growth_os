@@ -52,6 +52,7 @@
   const panel=document.getElementById('sg-create-info-panel');
   const topics=document.getElementById('sg-create-suggestions');
   const suggestRow=screen.querySelector('.sg-create-suggest-row');
+  if(suggestRow && extrasSlot)extrasSlot.before(suggestRow);
   if(suggestRow && topics)suggestRow.after(topics);
   const base=root.getAttribute('data-api').replace(/\/dispatch$/, '');
 
