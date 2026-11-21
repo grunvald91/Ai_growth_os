@@ -533,42 +533,68 @@ def work_url(product_id: UUID, item: dict) -> str:
     return f"{base}/{kind}/{item['id']}"
 
 
-def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
-    """Compact, content-first listing; navigation remains native links."""
+def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
+                  q: str = "", period: str = "all", page: int = 1,
+                  total: int | None = None, page_size: int = WORK_PAGE_SIZE,
+                  counts: dict | None = None) -> str:
+    """Native navigation + compact responsive cards; supports server-side pages.
+
+    Keep legacy list calls working (home overview / tests), but render only
+    the already filtered/ordered page when 'total' is supplied by SQL.
+    """
     base = f"/studio/products/{product_id}"
+    paged = total is not None
     tabs = (
         ("approval", "Внимание"), ("active", "В работе"),
         ("ready", "Готово"), ("all", "Все"), ("problems", "Ошибки"),
     )
+
+    def href(next_tab: str, next_page: int = 1, *, partial: bool = False) -> str:
+        params = {"tab": next_tab}
+        if q:
+            params["q"] = q
+        if period != "all":
+            params["period"] = period
+        if next_page > 1:
+            params["page"] = str(next_page)
+        if partial:
+            params["partial"] = "1"
+        return f"{base}/work?{safe(urlencode(params))}"
+
     selector = '<nav class="sg-work-tabs" aria-label="Фильтр заданий">' + "".join(
-        f'<a href="{base}/work?tab={name}"'
+        f'<a href="{href(name)}"'
         f' class="{"active" if name == tab else ""}"'
-        f'{" aria-current=page" if name == tab else ""}>{label}</a>'
+        f'{" aria-current=page" if name == tab else ""}>'
+        f'{label}'
+        + (f' <span class="sg-work-tab-count">{int(counts[name])}</span>'
+           if counts is not None and name in counts else '')
+        + '</a>'
         for name, label in tabs
     ) + '</nav>'
-    visible = [item for item in items if (
-        tab == "all" or
-        (tab == "active" and item["state"] in {"queued", "running"}) or
-        (tab == "approval" and (item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"})) or
-        (tab == "ready" and item["state"] == "completed") or
-        (tab == "problems" and item["state"] in {"failed", "cancelled"})
-    )]
-    # Stable sort retains creation order within priority groups.
-    if tab == "all":
-        def order(item):
-            if item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"}:
-                return 0
-            if item["state"] in {"queued", "running"}:
-                return 1
-            if item["state"] in {"failed", "cancelled"}:
-                return 2
-            return 3
-        visible.sort(key=order)
+    if paged:
+        visible = list(items)
+    else:
+        visible = [item for item in items if (
+            tab == "all" or
+            (tab == "active" and item["state"] in {"queued", "running"}) or
+            (tab == "approval" and (item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"})) or
+            (tab == "ready" and item["state"] == "completed") or
+            (tab == "problems" and item["state"] in {"failed", "cancelled"})
+        )]
+        if tab == "all":
+            def order(item):
+                if item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"}:
+                    return 0
+                if item["state"] in {"queued", "running"}:
+                    return 1
+                if item["state"] == "cancelled":
+                    return 2
+                return 3
+            visible.sort(key=order)
 
     cards = []
     for item in visible:
-        artifacts = item.get("artifacts") or []
-        count = item.get("result_count", len(artifacts))
+        count = item.get("result_count", len(item.get("artifacts") or []))
         state = item["state"]
         summary = item.get("current_stage") if state == "running" else None
         if item.get("agent") == "whiteboard_renderer":
@@ -589,9 +615,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
         iso = item.get("created_at")
         if iso:
             try:
-                value = datetime.fromisoformat(iso)
-                # Date only: do not pretend the timestamp uses the visitor timezone.
-                created = value.strftime("%d.%m.%Y")
+                created = datetime.fromisoformat(iso).strftime("%d.%m.%Y")
             except (TypeError, ValueError):
                 pass
         meta = (f'<time datetime="{safe(iso)}">Создано {safe(created)}</time>'
@@ -609,11 +633,8 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
             '<span class="sg-work-open">Открыть <span aria-hidden="true">→</span></span>'
             '</span></a>'
         )
-        # Existing SDK wrapper remains; the list view is one destination, so
-        # do not duplicate its text in a second disclosure.
         cards.append(resource_widget(
-            kind="task", primary_html=primary, description="",
-            detail_label=None,
+            kind="task", primary_html=primary, description="", detail_label=None,
         ))
     messages = {
         "all": "Здесь появятся созданные задания.",
@@ -622,18 +643,71 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
         "ready": "Готовых заданий пока нет.",
         "problems": "Ошибок в показанных заданиях нет.",
     }
-    empty = ('<div class="sg-work-empty" role="status">'
-             f'<p>{safe(messages.get(tab, messages["all"]))}</p>'
-             + (f'<a class="btn primary" href="{base}/create">Создать материал</a>'
-                if tab == "all" and not items else '')
-             + '</div>')
+    empty_message = (
+        "По этому запросу задания не найдены. Измените поиск или период."
+        if q or period != "all" else messages.get(tab, messages["all"])
+    )
+    empty = (
+        '<div class="sg-work-empty" role="status">'
+        f'<p>{safe(empty_message)}</p>'
+        + (f'<a class="btn primary" href="{base}/create">Создать материал</a>'
+           if tab == "all" and not q and period == "all" and not items else '')
+        + '</div>'
+    )
+    search_form = (
+        f'<form class="sg-work-search" action="{base}/work" method="get" role="search">'
+        f'<input type="hidden" name="tab" value="{safe(tab)}">'
+        '<label class="sg-work-search-label" for="sg-work-q">Поиск задания</label>'
+        f'<input type="search" id="sg-work-q" name="q" maxlength="120"'
+        f' placeholder="Название или тема" value="{safe(q)}" enterkeyhint="search">'
+        '<label class="sg-work-search-label" for="sg-work-period">Период</label>'
+        '<select id="sg-work-period" name="period" aria-label="Период заданий">'
+        + "".join(
+            f'<option value="{value}"{" selected" if period == value else ""}>{label}</option>'
+            for value, label in (
+                ("all", "За всё время"), ("7", "7 дней"),
+                ("30", "30 дней"), ("90", "90 дней"),
+            )
+        )
+        + '</select><button class="btn" type="submit">Найти</button></form>'
+    )
+    page_count = max(1, ((total or 0) + page_size - 1) // page_size) if paged else 1
+    start_at = (page - 1) * page_size + 1 if paged and total else 0
+    end_at = min(page * page_size, total) if paged and total else 0
+    pagination = ""
+    if paged:
+        links = ""
+        if page > 1:
+            links += f'<a rel="prev" href="{href(tab, page - 1)}">← Назад</a>'
+        links += f'<span>Страница {page} из {page_count}</span>'
+        if page < page_count:
+            links += f'<a rel="next" href="{href(tab, page + 1)}">Вперёд →</a>'
+        pagination = (
+            '<nav class="sg-work-pagination" aria-label="Страницы заданий">'
+            f'<span class="sg-work-page-summary">Показано {start_at}–{end_at} из {total}</span>'
+            f'<div class="sg-work-page-links">{links}</div></nav>'
+        )
+    payload = {
+        "jobs": visible,
+        "count": total if paged else len(visible),
+        "counts": counts or {},
+    }
+    signature = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:20]
+    refresh = f' data-sg-refresh-url="{href(tab, page, partial=True)}"' if paged else ""
     return (
-        '<section class="sg-surface sg-work-board" aria-label="Список заданий">'
+        f'<section class="sg-surface sg-work-board" aria-label="Список заданий"'
+        f' data-sg-work-board data-sg-list-signature="{signature}"{refresh}>'
         '<div class="sg-work-toolbar">'
         '<p>Недавние задания. Активные и требующие внимания — в приоритете.</p>'
         f'<a class="btn primary" href="{base}/create">＋ Создать</a></div>'
-        + selector + '<div class="sg-work-list">'
-        + ("".join(cards) or empty) + '</div></section>'
+        + search_form + selector
+        + '<button type="button" class="sg-work-update" data-sg-work-update hidden>'
+        'Есть обновления. Показать</button>'
+        + '<div class="sg-work-list">'
+        + ("".join(cards) or empty) + '</div>'
+        + pagination + '</section>'
     )
 
 
