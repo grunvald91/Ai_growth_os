@@ -271,10 +271,20 @@
     attachGrip(historyOpen,true,-1);  // pull up
     // Voice and typed requests reopen the conversation where the reply appears.
     // Keep focus on the composer to avoid Android keyboard/focus jumps.
-    root.addEventListener('sg:dispatcher:outgoing',()=>{
+    root.addEventListener('sg:dispatcher:outgoing',()=>showHistory(true,false));
+    root.addEventListener('sg:dispatcher:response',event=>{
+      // Wait until the server response is rendered, not the send click. This
+      // also reveals a confirmation that arrives after the mobile keyboard hides.
       showHistory(true,false);
-      // The response is inline above the form; reveal it after dispatcher renders.
-      requestAnimationFrame(()=>history.scrollIntoView({block:'nearest',behavior:'auto'}));
+      requestAnimationFrame(()=>{
+        const pending=[...history.querySelectorAll('.dp-confirm')].filter(card=>
+          card.querySelector('.dp-confirm-actions')).pop();
+        const latest=history.querySelector('.dp-msg:last-child');
+        const target=pending || latest || history;
+        target.setAttribute('tabindex','-1');
+        target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
+        if(pending)target.focus({preventScroll:true});
+      });
     });
   }
   // Only the lower dispatcher composer can submit a request.
