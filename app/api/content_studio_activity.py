@@ -11,8 +11,10 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
+from urllib.parse import urlencode
+import hashlib
 
-from sqlalchemy import select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
@@ -178,6 +180,11 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
     ).order_by(Task.created_at.desc(), Task.id.desc()).limit(limit)))
     tasks = pinned + [row for row in recent if row.id not in {task.id for task in pinned}]
     tasks = tasks[:max(limit, len(pinned))]
+    return _work_items_for_tasks(db, product_id, tasks)
+
+
+def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> list[dict]:
+    """Hydrate only task IDs selected by the caller (avoids paginating in Python)."""
     if not tasks:
         return []
     ids = [task.id for task in tasks]
@@ -219,16 +226,55 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
                 animator_calls = animator_data.get("calls")
             except (TypeError, ValueError):
                 pass
-        # 'completed' means the worker finished its job, not that a material
-        # was approved or that a video file exists.
+        # A completed worker may still have an artifact waiting for an owner.
+        # Keep publication state separate from task completion.
+        pending_artifacts = any(
+            getattr(art.status, "value", str(art.status)) == "awaiting_approval"
+            for art in items
+        )
+        draft_plan = False
+        for art in items:
+            if art.kind != "editorial_plan":
+                continue
+            try:
+                draft_plan = json.loads(art.content or "{}").get("approval_state") == "draft"
+            except (ValueError, TypeError, AttributeError):
+                pass
+            if draft_plan:
+                break
+        needs_decision = key == "waiting_approval" or pending_artifacts or draft_plan
+        recent_runs = by_runs.get(task.id, [])
+        active_run = next((run for run in reversed(recent_runs)
+                           if run.status == "running"), None)
+        stage_name = STAGE_NAMES.get(active_run.agent_name, "Работа ИИ-команды") if active_run else None
+        kind_name = {
+            "content_factory": "Материал", "content_creative": "Креатив",
+            "content_editor": "Редактирование", "content_renderer": "Видео",
+            "editorial_planner": "Контент-план",
+            "whiteboard_renderer": "Видео",
+        }.get(task.assigned_agent, "Задание")
+        if by_request.get(task.id):
+            try:
+                request_data = json.loads(by_request[task.id].content or "{}")
+            except (ValueError, TypeError):
+                request_data = {}
+            if isinstance(request_data, dict) and request_data.get("mode") == "post":
+                kind_name = "Пост"
+            elif isinstance(request_data, dict) and request_data.get("mode") == "article":
+                kind_name = "Статья"
+        # 'completed' means worker finished, not approved or published.
         output.append({
             "id": str(task.id),
             "agent": task.assigned_agent,
             "title": task_title(task, by_request.get(task.id)),
             "state": key,
-            "label": title,
-            "tone": kind,
+            "label": "Нужно решение" if needs_decision else title,
+            "tone": "review" if needs_decision else kind,
             "description": explanation,
+            "needs_decision": needs_decision,
+            "kind_label": kind_name,
+            "current_stage": stage_name,
+            "result_count": len(items),
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
                 "title": readable_artifact_title(art),
@@ -240,9 +286,144 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
                 str(run.id) + ":" + run.status
                 for run in by_runs.get(task.id, [])[-20:]
             ),
-            "created_at": task.created_at.isoformat() if task.created_at else None,
+            # DB timestamps are UTC; SQLite returns func.now() without tzinfo.
+            "created_at": (
+                (task.created_at.replace(tzinfo=timezone.utc)
+                 if task.created_at.tzinfo is None else
+                 task.created_at.astimezone(timezone.utc)).isoformat()
+                if task.created_at else None
+            ),
         })
     return output
+
+
+WORK_PAGE_SIZE = 20
+WORK_PERIODS = {"all": None, "7": 7, "30": 30, "90": 90}
+WORK_TYPES = {
+    "all": "Все виды", "post": "Посты", "article": "Статьи",
+    "creative": "Креативы", "video": "Видео",
+    "plan": "Контент-планы", "edit": "Доработки",
+}
+
+
+def work_page(db: Session, product_id: UUID, *, tab: str = "all",
+              query: str = "", period: str = "all", kind: str = "all",
+              page: int = 1,
+              page_size: int = WORK_PAGE_SIZE) -> dict:
+    """Tenant-scoped SQL filtering/counting before pagination.
+
+    Active, failed and waiting tasks cannot disappear behind a global recent
+    limit. Only the currently displayed page is hydrated with artifacts/runs.
+    """
+    tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
+    period = period if period in WORK_PERIODS else "all"
+    q = " ".join(str(query or "").split())[:120]
+    kind = kind if kind in WORK_TYPES else "all"
+    page = max(1, min(int(page), 100_000))
+    page_size = max(1, min(int(page_size), 60))
+    base = [Task.product_id == product_id, Task.assigned_agent.in_(WORK_AGENTS)]
+    if WORK_PERIODS[period] is not None:
+        base.append(Task.created_at >=
+                    datetime.now(timezone.utc) - timedelta(days=WORK_PERIODS[period]))
+    if kind != "all":
+        types = {
+            "creative": ("content_creative",),
+            "video": ("content_renderer", "whiteboard_renderer"),
+            "plan": ("editorial_planner",),
+            "edit": ("content_editor",),
+        }
+        if kind in types:
+            base.append(Task.assigned_agent.in_(types[kind]))
+        else:
+            req_mode = exists(select(Artifact.id).where(
+                Artifact.product_id == product_id,
+                Artifact.task_id == Task.id,
+                Artifact.kind == "content_request",
+                or_(
+                    Artifact.content.like(f'%"mode": "{kind}"%'),
+                    Artifact.content.like(f'%"mode":"{kind}"%'),
+                ),
+            ))
+            base.append(Task.assigned_agent == "content_factory")
+            base.append(or_(req_mode,
+                            Task.title.ilike("POST:%") if kind == "post"
+                            else Task.title.ilike("ARTICLE:%")))
+    if q:
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        request_match = exists(select(Artifact.id).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id == Task.id,
+            Artifact.kind.in_(("content_request", "creative_request", "edit_request")),
+            Artifact.content.ilike(pattern, escape="\\"),
+        ))
+        base.append(or_(
+            Task.title.ilike(pattern, escape="\\"),
+            Task.description.ilike(pattern, escape="\\"),
+            request_match,
+        ))
+    # The latest draft editorial plan is a real user decision even when the
+    # Artifact status field is not awaiting_approval.
+    plan_candidates = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "editorial_plan",
+    ).order_by(Artifact.created_at.desc()).limit(12)))
+    draft_plans = set()
+    for art in plan_candidates:
+        try:
+            payload = json.loads(art.content or "{}")
+            if (isinstance(payload, dict) and payload.get("approval_state") == "draft"
+                    and art.task_id):
+                draft_plans.add(art.task_id)
+                break
+        except (TypeError, ValueError):
+            continue
+    pending = exists(select(Artifact.id).where(
+        Artifact.product_id == product_id,
+        Artifact.task_id == Task.id,
+        Artifact.kind.in_(RESULT_KINDS),
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ))
+    attention_parts = [Task.status.in_((TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED)), pending]
+    if draft_plans:
+        attention_parts.append(Task.id.in_(draft_plans))
+    attention = or_(*attention_parts)
+    active = Task.status.in_((TaskStatus.QUEUED, TaskStatus.RUNNING))
+    predicates = {
+        "all": None,
+        "approval": attention,
+        "active": active,
+        "ready": Task.status == TaskStatus.COMPLETED,
+        "problems": Task.status.in_((TaskStatus.FAILED, TaskStatus.CANCELLED)),
+    }
+    counts = {
+        name: int(db.scalar(select(func.count(Task.id)).where(
+            *base, *((predicate,) if predicate is not None else ()),
+        )) or 0)
+        for name, predicate in predicates.items()
+    }
+    total = counts[tab]
+    max_page = max(1, (total + page_size - 1) // page_size)
+    page = min(page, max_page)
+    stmt = select(Task).where(
+        *base, *((predicates[tab],) if predicates[tab] is not None else ()),
+    )
+    if tab == "all":
+        priority = case(
+            (attention, 0), (active, 1),
+            (Task.status == TaskStatus.CANCELLED, 2),
+            else_=3,
+        )
+        stmt = stmt.order_by(priority, Task.created_at.desc(), Task.id.desc())
+    else:
+        stmt = stmt.order_by(Task.created_at.desc(), Task.id.desc())
+    tasks = list(db.scalars(stmt.limit(page_size).offset((page - 1) * page_size)))
+    return {
+        "items": _work_items_for_tasks(db, product_id, tasks),
+        "total": total, "counts": counts, "page": page,
+        "page_size": page_size, "q": q, "tab": tab, "period": period,
+        "kind": kind,
+    }
 
 
 def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
@@ -389,60 +570,190 @@ def work_url(product_id: UUID, item: dict) -> str:
     return f"{base}/{kind}/{item['id']}"
 
 
-def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
+def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
+                  q: str = "", period: str = "all", kind: str = "all",
+                  page: int = 1, total: int | None = None, page_size: int = WORK_PAGE_SIZE,
+                  counts: dict | None = None) -> str:
+    """Native navigation + compact responsive cards; supports server-side pages.
+
+    Keep legacy list calls working (home overview / tests), but render only
+    the already filtered/ordered page when 'total' is supplied by SQL.
+    """
     base = f"/studio/products/{product_id}"
-    tabs = (("all", "Все"), ("active", "В работе"), ("approval", "Нужно решение"),
-            ("ready", "Готово"), ("problems", "Ошибки"))
-    selector = '<nav class="sg-work-tabs" aria-label="Состояния заданий">' + "".join(
-        f'<a href="{base}/work?tab={name}" class="{"active" if name==tab else ""}">'
-        f'{label}</a>' for name, label in tabs
+    paged = total is not None
+    tabs = (
+        ("approval", "Внимание"), ("active", "В работе"),
+        ("ready", "Готово"), ("all", "Все"), ("problems", "Ошибки"),
+    )
+
+    def href(next_tab: str, next_page: int = 1, *, partial: bool = False) -> str:
+        params = {"tab": next_tab}
+        if q:
+            params["q"] = q
+        if period != "all":
+            params["period"] = period
+        if kind != "all":
+            params["kind"] = kind
+        if next_page > 1:
+            params["page"] = str(next_page)
+        if partial:
+            params["partial"] = "1"
+        return f"{base}/work?{safe(urlencode(params))}"
+
+    selector = '<nav class="sg-work-tabs" aria-label="Фильтр заданий">' + "".join(
+        f'<a href="{href(name)}"'
+        f' class="{"active" if name == tab else ""}"'
+        f'{" aria-current=page" if name == tab else ""}>'
+        f'{label}'
+        + (f' <span class="sg-work-tab-count">{int(counts[name])}</span>'
+           if counts is not None and name in counts else '')
+        + '</a>'
+        for name, label in tabs
     ) + '</nav>'
-    visible = [i for i in items if (
-        tab == "all" or
-        (tab == "active" and i["state"] in {"queued", "running"}) or
-        (tab == "approval" and i["state"] == "waiting_approval") or
-        (tab == "ready" and i["state"] == "completed") or
-        (tab == "problems" and i["state"] in {"failed", "cancelled"})
-    )]
+    if paged:
+        visible = list(items)
+    else:
+        visible = [item for item in items if (
+            tab == "all" or
+            (tab == "active" and item["state"] in {"queued", "running"}) or
+            (tab == "approval" and (item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"})) or
+            (tab == "ready" and item["state"] == "completed") or
+            (tab == "problems" and item["state"] in {"failed", "cancelled"})
+        )]
+        if tab == "all":
+            def order(item):
+                if item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"}:
+                    return 0
+                if item["state"] in {"queued", "running"}:
+                    return 1
+                if item["state"] == "cancelled":
+                    return 2
+                return 3
+            visible.sort(key=order)
+
     cards = []
     for item in visible:
-        artifact_count = len(item["artifacts"])
-        label = item["label"]
-        if item["state"] == "completed" and artifact_count:
-            label = "Материалы готовы"
+        count = item.get("result_count", len(item.get("artifacts") or []))
+        state = item["state"]
+        summary = item.get("current_stage") if state == "running" else None
         if item.get("agent") == "whiteboard_renderer":
-            stage = ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"])
-            calls = item.get("animator_calls")
-            summary = stage + (f" · API-вызовов: {calls}" if isinstance(calls, int) else "")
-        else:
+            stage = ANIMATOR_PHASES.get(str(item.get("animator_stage")))
+            if stage:
+                summary = stage
+        if item.get("needs_decision") and state == "completed":
+            summary = "Материал подготовлен — требуется решение"
+        if not summary:
             summary = (
-                f'{artifact_count} материалов. Откройте результат и проверьте перед публикацией.'
-                if artifact_count else item["description"]
+                f"Подготовлено материалов: {count}. Публикация отдельно."
+                if state == "completed" and count else
+                "Задание завершено, но готовый результат не найден."
+                if state == "completed" else
+                item.get("description") or "Подробности доступны в задании."
             )
+        created = ""
+        iso = item.get("created_at")
+        if iso:
+            try:
+                created = datetime.fromisoformat(iso).strftime("%d.%m.%Y")
+            except (TypeError, ValueError):
+                pass
+        meta = (f'<time datetime="{safe(iso)}">Создано {safe(created)}</time>'
+                if created else "")
         primary = (
-            f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
-            f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
-            f'<p>{safe(summary)}</p></div>'
-            f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(label)}</span>'
-            '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
+            f'<a class="sg-work-item sg-work-{safe(item["tone"])}"'
+            f' href="{work_url(product_id, item)}">'
+            '<span class="sg-work-item-head">'
+            f'<span class="sg-work-kind">{safe(item.get("kind_label") or "Задание")}</span>'
+            f'<span class="sg-work-status sg-work-{safe(item["tone"])}">'
+            f'{safe(item["label"])}</span></span>'
+            f'<span class="sg-work-item-main"><b>{safe(item["title"])}</b>'
+            f'<span class="sg-work-summary">{safe(summary)}</span></span>'
+            f'<span class="sg-work-item-foot">{meta}'
+            '<span class="sg-work-open">Открыть <span aria-hidden="true">→</span></span>'
+            '</span></a>'
         )
         cards.append(resource_widget(
-            kind="task", primary_html=primary,
-            description=item["description"],
-            note=(f"Результатов: {artifact_count}. Каждый материал проверяется отдельно."
-                  if artifact_count else "Подробные этапы и действия доступны на странице задания."),
-            detail_label="Сведения о задании",
+            kind="task", primary_html=primary, description="", detail_label=None,
         ))
-    empty = ('<section class="sg-work-empty"><h3>Пока здесь пусто</h3>'
-             '<p>Все созданные задания будут отображаться здесь, даже если вы закроете страницу.</p>'
-             f'<a class="btn primary" href="{base}/create">Создать материал →</a></section>')
+    messages = {
+        "all": "Здесь появятся созданные задания.",
+        "active": "Сейчас нет заданий в работе.",
+        "approval": "Нет заданий, требующих решения или исправления.",
+        "ready": "Готовых заданий пока нет.",
+        "problems": "Ошибок в показанных заданиях нет.",
+    }
+    empty_message = (
+        "По выбранным условиям задания не найдены. Измените поиск или фильтры."
+        if q or period != "all" or kind != "all" else messages.get(tab, messages["all"])
+    )
+    empty = (
+        '<div class="sg-work-empty" role="status">'
+        f'<p>{safe(empty_message)}</p>'
+        + (f'<a class="btn primary" href="{base}/create">Создать материал</a>'
+           if tab == "all" and not q and period == "all" and kind == "all" and not items else '')
+        + '</div>'
+    )
+    search_form = (
+        f'<form class="sg-work-search" action="{base}/work" method="get" role="search">'
+        f'<input type="hidden" name="tab" value="{safe(tab)}">'
+        '<label class="sg-work-search-label" for="sg-work-q">Поиск задания</label>'
+        f'<input type="search" id="sg-work-q" name="q" maxlength="120"'
+        f' placeholder="Название или тема" value="{safe(q)}" enterkeyhint="search">'
+        '<label class="sg-work-search-label" for="sg-work-period">Период</label>'
+        '<select id="sg-work-period" name="period" aria-label="Период заданий">'
+        + "".join(
+            f'<option value="{value}"{" selected" if period == value else ""}>{label}</option>'
+            for value, label in (
+                ("all", "За всё время"), ("7", "7 дней"),
+                ("30", "30 дней"), ("90", "90 дней"),
+            )
+        )
+        + '</select>'
+        + '<label class="sg-work-search-label" for="sg-work-kind">Вид задания</label>'
+        + '<select id="sg-work-kind" name="kind" aria-label="Вид задания">'
+        + "".join(
+            f'<option value="{value}"{" selected" if kind == value else ""}>{label}</option>'
+            for value, label in WORK_TYPES.items()
+        )
+        + '</select><button class="btn" type="submit">Найти</button></form>'
+    )
+    page_count = max(1, ((total or 0) + page_size - 1) // page_size) if paged else 1
+    start_at = (page - 1) * page_size + 1 if paged and total else 0
+    end_at = min(page * page_size, total) if paged and total else 0
+    pagination = ""
+    if paged:
+        links = ""
+        if page > 1:
+            links += f'<a rel="prev" href="{href(tab, page - 1)}">← Назад</a>'
+        links += f'<span>Страница {page} из {page_count}</span>'
+        if page < page_count:
+            links += f'<a rel="next" href="{href(tab, page + 1)}">Вперёд →</a>'
+        pagination = (
+            '<nav class="sg-work-pagination" aria-label="Страницы заданий">'
+            f'<span class="sg-work-page-summary">Показано {start_at}–{end_at} из {total}</span>'
+            f'<div class="sg-work-page-links">{links}</div></nav>'
+        )
+    payload = {
+        "jobs": visible,
+        "count": total if paged else len(visible),
+        "counts": counts or {},
+    }
+    signature = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:20]
+    refresh = f' data-sg-refresh-url="{href(tab, page, partial=True)}"' if paged else ""
     return (
-        '<section class="sg-surface"><div class="sg-section-head"><div>'
-        '<h2>Создание материалов</h2>'
-        '<p>Состояние берётся из реальных заданий. Не нужно запоминать, что и где запускалось.</p>'
-        '</div><a class="btn primary" href="' + base + '/create">＋ Создать</a></div>'
-        + selector + '<div class="sg-work-list">'
-        + ("".join(cards) or empty) + '</div></section>'
+        f'<section class="sg-surface sg-work-board" aria-label="Список заданий"'
+        f' data-sg-work-board data-sg-list-signature="{signature}"{refresh}>'
+        '<div class="sg-work-toolbar">'
+        '<p>Недавние задания. Активные и требующие внимания — в приоритете.</p>'
+        f'<a class="btn primary" href="{base}/create">＋ Создать</a></div>'
+        + search_form + selector
+        + '<button type="button" class="sg-work-update" data-sg-work-update hidden>'
+        'Есть обновления. Показать</button>'
+        + '<div class="sg-work-list">'
+        + ("".join(cards) or empty) + '</div>'
+        + pagination + '</section>'
     )
 
 
@@ -557,13 +868,32 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     next_action = (f'<p><a class="btn secondary" href="{base}/seo">Открыть SEO-завод</a></p>'
                    if seo_proposal else "")
     stage_sig = "|".join(str(run.id) + ":" + run.status for run in runs[-20:])
+    # Prioritize the output when it exists, and avoid a long process log
+    # pushing the useful material down the screen.
+    if key == "completed" and count:
+        stages_html = (
+            '<details class="sg-work-steps sg-work-steps-collapsible">'
+            '<summary>Этапы создания</summary><ol>'
+            + "".join(steps) + '</ol></details>'
+        )
+    else:
+        stages_html = (
+            '<div class="sg-work-steps"><h3>Этапы создания</h3><ol>'
+            + "".join(steps) + '</ol></div>'
+        )
+    results_html = (
+        '<div class="sg-work-results"><h3>Результаты</h3>'
+        + ("".join(rendered) or empty_result) + '</div>'
+    )
+    output_first = key in {"completed", "waiting_approval"} and bool(count)
+    sections = (
+        results_html + stages_html if output_first
+        else stages_html + results_html
+    )
     return (
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
-        f'<div class="sg-work-steps"><h3>Этапы создания</h3><ol>{"".join(steps)}</ol></div>'
-        f'<div class="sg-work-results"><h3>Результаты</h3>'
-        + ("".join(rendered) or empty_result)
-        + '</div>' + refresh + fail + next_action
+        + fail + sections + refresh + next_action
         + f'<p><a class="sg-mini-link" href="{base}/work">← Все задания</a></p></section>'
     )

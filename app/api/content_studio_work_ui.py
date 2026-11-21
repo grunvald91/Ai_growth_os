@@ -152,6 +152,106 @@ CSS = r"""
  .sg-notify-popover{width:min(375px,calc(100vw - 25px))}
  .sg-work-result{flex-wrap:wrap}
 }
+
+/* Finished work: keep the result above technical history. */
+.sg-work-steps-collapsible>summary{min-height:44px;display:flex;align-items:center;
+  cursor:pointer;font-size:17px;font-weight:700;color:var(--s-text,var(--text,#263D56))}
+.sg-work-steps-collapsible>summary:focus-visible{outline:2px solid var(--s-accent,var(--blue,#2F5BEB));
+  outline-offset:3px;border-radius:7px}
+.sg-work-steps-collapsible[open]>ol{margin-top:10px}
+
+/* Filter and pagination are part of the document, not extra fixed bars. */
+.sg-work-board .sg-work-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(112px,auto) minmax(122px,auto) auto;
+  align-items:center;gap:8px;margin:0 0 13px;min-width:0}
+.sg-work-board .sg-work-search-label{position:absolute;width:1px;height:1px;
+  padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.sg-work-board .sg-work-search input,.sg-work-board .sg-work-search select{
+  box-sizing:border-box;min-height:44px;min-width:0;width:100%;font:inherit;
+  padding:10px 12px;border-radius:10px;border:1px solid var(--s-line,#DDE5EE);
+  background:var(--s-surface,#fff);color:var(--s-text,#24364F)}
+.sg-work-board .sg-work-search input:focus-visible,.sg-work-board .sg-work-search select:focus-visible{
+  outline:2px solid var(--s-accent,#2F5BEB);outline-offset:2px}
+.sg-work-board .sg-work-search .btn{box-sizing:border-box;min-height:44px;white-space:nowrap}
+.sg-work-board .sg-work-tab-count{font-variant-numeric:tabular-nums;opacity:.72;
+  font-size:11px;margin-left:4px}
+.sg-work-board .sg-work-pagination{display:flex;flex-wrap:wrap;align-items:center;
+  justify-content:space-between;gap:10px;margin-top:16px;padding:12px 0 0;
+  border-top:1px solid var(--s-line,#DFE7F0)}
+.sg-work-board .sg-work-page-summary{font-size:12px;color:var(--s-text-muted,#587085)}
+.sg-work-board .sg-work-page-links{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sg-work-board .sg-work-page-links a,.sg-work-board .sg-work-update{display:inline-flex;
+  box-sizing:border-box;align-items:center;justify-content:center;min-height:44px;
+  border-radius:10px;padding:9px 12px;border:1px solid var(--s-line,#DFE7F0);
+  text-decoration:none;font-size:13px;color:var(--s-text,#263D56);
+  background:var(--s-surface,#fff);cursor:pointer}
+.sg-work-board .sg-work-page-links a:focus-visible,.sg-work-board .sg-work-update:focus-visible{
+  outline:2px solid var(--s-accent,#2F5BEB);outline-offset:2px}
+.sg-work-board .sg-work-page-links>span{font-size:12px;white-space:nowrap;
+  color:var(--s-text-muted,#587085)}
+.sg-work-board .sg-work-update{margin-bottom:10px;width:100%;font-weight:600}
+.sg-work-board .sg-work-update[hidden]{display:none}
+@media(max-width:880px){
+  .sg-work-board .sg-work-search{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .sg-work-board .sg-work-search input{grid-column:1 / -1}
+  .sg-work-board .sg-work-search select{min-width:0}
+  .sg-work-board .sg-work-search .btn{grid-column:1 / -1}
+}
+@media(max-width:520px){
+  .sg-work-board .sg-work-pagination{gap:7px}
+}
+
+/* Tasks page: compact, content-first cards, adaptive without a second toolbar. */
+.sg-work-board .sg-work-toolbar{display:flex;justify-content:space-between;
+  gap:14px;align-items:center;margin-bottom:12px}
+.sg-work-board .sg-work-toolbar p{max-width:630px;margin:0;line-height:1.5;
+  color:var(--s-text-muted,var(--muted,#587085));font-size:13px}
+.sg-work-board .sg-work-toolbar .btn{flex-shrink:0;min-height:44px;display:inline-flex;
+  align-items:center;justify-content:center}
+.sg-work-board .sg-work-tabs{display:flex;flex-wrap:nowrap;gap:6px;
+  max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;
+  scrollbar-width:thin;scroll-padding-inline:12px;
+  padding:0 0 12px;margin:0 0 14px}
+.sg-work-board .sg-work-tabs a{flex:0 0 auto;white-space:nowrap;min-height:44px;
+  padding:11px 14px;border-radius:10px;border:1px solid transparent;
+  text-decoration:none}
+.sg-work-board .sg-work-tabs a.active{border-color:var(--s-line,var(--line,#D8E3FF));
+  border-bottom:2px solid var(--s-accent,var(--blue,#2F5BEB))}
+.sg-work-board .sg-work-list{display:grid;gap:9px;min-width:0}
+.sg-work-board .sg-resource-widget{min-width:0;overflow:visible;
+  border:1px solid var(--s-line,var(--line,#DFE7F0));
+  border-radius:14px;background:var(--s-surface,var(--card,#fff))}
+.sg-work-board .sg-work-item{display:block;box-sizing:border-box;
+  min-height:104px;padding:14px 16px;border:0;border-radius:14px;
+  text-decoration:none;color:var(--s-text,var(--text,#263D56))}
+.sg-work-board .sg-work-item:hover{background:var(--s-surface-2,var(--tint,#F6F9FC))}
+.sg-work-board .sg-work-item:focus-visible{outline:3px solid var(--s-accent,var(--blue,#2F5BEB));
+  outline-offset:2px}
+.sg-work-board .sg-work-item-head,.sg-work-board .sg-work-item-foot{display:flex;
+  align-items:center;justify-content:space-between;gap:12px;min-width:0}
+.sg-work-board .sg-work-kind{font-size:12px;line-height:1.4;
+  color:var(--s-text-muted,var(--muted,#587085));font-weight:600}
+.sg-work-board .sg-work-item-main{display:grid;gap:4px;margin-top:9px;min-width:0}
+.sg-work-board .sg-work-item-main b{font-size:15px;line-height:1.42;
+  font-weight:650;color:var(--s-text,var(--text,#263D56));overflow-wrap:break-word}
+.sg-work-board .sg-work-summary{font-size:13px;line-height:1.5;
+  color:var(--s-text-muted,var(--muted,#587085));overflow-wrap:break-word}
+.sg-work-board .sg-work-item-foot{margin-top:11px;font-size:12px;
+  color:var(--s-text-muted,var(--muted,#587085))}
+.sg-work-board .sg-work-open{color:var(--s-accent,var(--blue,#2F5BEB));font-weight:650;
+  white-space:nowrap;margin-left:auto}
+.sg-work-board .sg-work-status{margin:0;max-width:60%;flex-shrink:0}
+@media(max-width:660px){
+  .sg-work-board .sg-work-toolbar p{font-size:12px}
+  .sg-work-board .sg-work-toolbar .btn{padding-inline:13px}
+  .sg-work-board .sg-work-item{padding:12px 13px}
+  .sg-work-board .sg-work-item-head{align-items:flex-start}
+  .sg-work-board .sg-work-status{font-size:11px;max-width:64%}
+  .sg-work-board .sg-work-item-main b{font-size:14px}
+  .sg-work-board .sg-work-tabs{margin-inline:-2px}
+}
+@media(prefers-reduced-motion:reduce){
+  .sg-work-board .sg-work-item{transition:none}
+}
 """
 JS = r"""
 (function(){
@@ -177,10 +277,20 @@ JS = r"""
  const detail=document.querySelector('[data-sg-task]');
  const showWork=document.querySelector('[data-sg-work-overview]');
  const workList=document.querySelector('.sg-work-list');
+ const workBoard=document.querySelector('[data-sg-work-board]');
+ const updateButton=workBoard?.querySelector('[data-sg-work-update]');
+ let pendingBoard=null;
  let lastSignature=null;
  let shown=[];
  const readAll=widget.querySelector('[data-sg-read-all]');
  let ongoing=false;
+ function localizeWorkTimes(root){
+   const formatter=new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short'});
+   root.querySelectorAll('time[datetime]').forEach(el=>{
+     const value=new Date(el.getAttribute('datetime'));
+     if(Number.isFinite(value.getTime()))el.textContent='Создано '+formatter.format(value);
+   });
+ }
  const anchor=(item)=>{
    const a=document.createElement('a');
    a.className='sg-notify-entry '+(item.kind==='error'?'sg-notify-error':'');
@@ -191,10 +301,72 @@ JS = r"""
    else a.href=widget.querySelector('.sg-notify-all')?.getAttribute('href')||'/studio';
    return a;
  };
+ // Refresh only the server-rendered task cards. Never reload the whole page
+ // while someone is reading a long card, scrolling, or using the search field.
+ function applyBoard(fresh){
+   const previous=workBoard?.querySelector('.sg-work-list');
+   const next=fresh?.querySelector('.sg-work-list');
+   if(!previous||!next)return;
+   const oldY=window.scrollY;
+   previous.replaceChildren(...Array.from(next.childNodes));
+   localizeWorkTimes(previous);
+   const oldPages=workBoard.querySelector('.sg-work-pagination');
+   const newPages=fresh.querySelector('.sg-work-pagination');
+   if(oldPages&&newPages)oldPages.replaceWith(newPages);
+   else if(oldPages)oldPages.remove();
+   else if(newPages)previous.after(newPages);
+   const oldCounts=workBoard.querySelectorAll('.sg-work-tab-count');
+   const newCounts=fresh.querySelectorAll('.sg-work-tab-count');
+   if(oldCounts.length===newCounts.length){
+     oldCounts.forEach((node,i)=>{node.textContent=newCounts[i].textContent;});
+   }
+   workBoard.dataset.sgListSignature=fresh.dataset.sgListSignature;
+   pendingBoard=null;
+   if(updateButton)updateButton.hidden=true;
+   // Keep the reading position stable if row counts or heights changed.
+   window.scrollTo({top:oldY,behavior:'instant'});
+ }
+ async function refreshBoard(){
+   const url=workBoard?.dataset.sgRefreshUrl;
+   if(!url)return;
+   const response=await fetch(url,{cache:'no-store',credentials:'same-origin',
+     headers:{'Accept':'application/vnd.servgo.tasks+html'}});
+   if(!response.ok || !(response.headers.get('content-type')||'').includes(
+       'application/vnd.servgo.tasks+html'))return;
+   const documentHtml=new DOMParser().parseFromString(await response.text(),'text/html');
+   const fresh=documentHtml.querySelector('[data-sg-work-board]');
+   if(!fresh)return;
+   if(fresh.dataset.sgListSignature===workBoard.dataset.sgListSignature){
+     pendingBoard=null;
+     if(updateButton)updateButton.hidden=true;
+     return;
+   }
+   const list=workBoard.querySelector('.sg-work-list');
+   const focusInList=Boolean(list?.contains(document.activeElement));
+   const readingList=window.scrollY>240&&list?.getBoundingClientRect().top<120;
+   if(focusInList||readingList){
+     pendingBoard=fresh;
+     if(updateButton)updateButton.hidden=false;
+     return;
+   }
+   applyBoard(fresh);
+ }
+ if(updateButton)updateButton.addEventListener('click',()=>{
+   if(pendingBoard)applyBoard(pendingBoard);
+ });
+ document.addEventListener('scroll',()=>{
+   if(pendingBoard && window.scrollY<=120 &&
+       !workList?.contains(document.activeElement))applyBoard(pendingBoard);
+ },{passive:true});
  async function poll(){
    if(document.hidden||ongoing)return;
    ongoing=true;
    try{
+     // The fragment endpoint includes the selected page, query, date range
+     // and exact status counts. It must not rely on the recent 45-job feed.
+     if(workBoard){
+       try{await refreshBoard();}catch(_){/* list refresh failure must not block notifications */}
+     }
      const res=await fetch(endpoint,{cache:'no-store',credentials:'same-origin',
        headers:{'Accept':'application/json'}});
      if(!res.ok||!(res.headers.get('content-type')||'').includes('application/json'))return;
@@ -220,10 +392,9 @@ JS = r"""
             j.stage_signature!==detail.dataset.sgStage));
        if(changed&&document.visibilityState==='visible')location.reload();
      }
-     if(workList||showWork){
-       const active=jobs.filter(j=>j.state==='queued'||j.state==='running');
-       const statuses=jobs.slice(0,30).map(j=>j.id+':'+j.state+':'+j.artifacts.length).join('|');
-       const store=workList||showWork;
+     if(showWork&&!workBoard){
+       const statuses=jobs.map(j=>j.id+':'+j.state+':'+Boolean(j.needs_decision)+':'+j.result_count+':'+(j.artifacts||[]).map(a=>a.id+':'+a.status).join(',')).join('|');
+       const store=showWork;
        if(store.hasAttribute('data-sg-signature')&&store.dataset.sgSignature!==statuses&&
           document.activeElement?.tagName!=='INPUT' &&
           document.activeElement?.tagName!=='TEXTAREA' ){
@@ -243,6 +414,7 @@ JS = r"""
      if(res.ok){lastSignature=null;await poll();}
    }finally{readAll.disabled=false;}
  });
+ if(workBoard)localizeWorkTimes(workBoard);
  poll();
  window.setInterval(poll,20000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});

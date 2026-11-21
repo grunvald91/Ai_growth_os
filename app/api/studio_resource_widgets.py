@@ -9,7 +9,7 @@ from html import escape
 
 
 def resource_widget(*, kind: str, primary_html: str, description: str,
-                    detail_label: str = "Подробнее", note: str = "",
+                    detail_label: str | None = "Подробнее", note: str = "",
                     filter_kind: str | None = None, search_text: str = "") -> str:
     """Wrap existing server-rendered card markup; text from records is escaped.
 
@@ -26,11 +26,15 @@ def resource_widget(*, kind: str, primary_html: str, description: str,
         f' data-search="{escape(search_text, quote=True)}"'
         if filter_kind is not None else ""
     )
-    return (
-        f'<article class="sg-resource-widget" data-sg-resource-widget="{kind}"{filter_data}>'
-        + primary_html
-        + '<details class="sg-resource-details" data-sg-resource-details>'
+    # A single-destination task card needs no redundant "details" disclosure.
+    # Existing material/workflow callers retain the accessible native fallback.
+    disclosure = (
+        '<details class="sg-resource-details" data-sg-resource-details>'
         + f'<summary>{escape(detail_label)}</summary>'
         + f'<div class="sg-resource-details-body">{details}</div>'
-        + '</details></article>'
+        + '</details>'
+    ) if detail_label is not None else ""
+    return (
+        f'<article class="sg-resource-widget" data-sg-resource-widget="{kind}"{filter_data}>'
+        + primary_html + disclosure + '</article>'
     )
