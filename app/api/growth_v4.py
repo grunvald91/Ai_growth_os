@@ -83,7 +83,8 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     }
     cards = ''.join(
         f'<button type="button" class="sg-create-format" data-sg-format="{key}" '
-        f'aria-pressed="false"><span>{html.escape(label)}</span>'
+        f'aria-pressed="false" data-sg-description="{html.escape(description,quote=True)}">'
+        f'<span>{html.escape(label)}</span>'
         f'<small>{html.escape(summaries[key])}</small></button>'
         for key, label, description in formats
     )
@@ -184,9 +185,14 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             {warning}
             <div class="sg-create-label">1. Что создаём?</div>
             <div class="sg-create-picks" role="group" aria-label="Формат материала">{cards}</div>
+            <p class="sg-create-format-help" id="sg-create-format-help"></p>
             <div class="sg-create-primary-platform" id="sg-create-primary-platform">
               <div class="sg-create-label">2. Площадка</div>
               <div id="sg-create-platform-slot"></div>
+            </div>
+            <div class="sg-create-vk-image-primary" id="sg-create-vk-image-primary" hidden>
+              <div class="sg-create-label">Изображение к посту ВКонтакте</div>
+              <div id="sg-create-vk-image-slot"></div>
             </div>
             <label class="sg-create-label sg-create-topic-label" for="dp-input">3. О чём материал?</label>
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
@@ -513,10 +519,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-topic-validation-v3-20261120', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-layout-review-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=create-topic-validation-v3-20261120"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-topic-validation-v3-20261120"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=create-layout-review-20261121"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-layout-review-20261121"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -560,7 +566,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=21">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=22-create-layout">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=13">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
