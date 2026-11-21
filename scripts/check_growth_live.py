@@ -94,11 +94,21 @@ def main():
                                      style.pointerEvents==='none' &&
                                      left.left>=0 && right.right<=innerWidth+1 &&
                                      left.right<=right.left+1 &&
-                                     (parseFloat(getComputedStyle(main).paddingTop)>=62 ||
-                                     parseFloat(getComputedStyle(main).marginTop)>=62) &&
+                                     (() => {
+                                       const pad=parseFloat(getComputedStyle(main).paddingTop);
+                                       const liveChat=!document.body.classList.contains('home-empty') &&
+                                         !!document.querySelector('.dp-home.has-feed');
+                                       if (liveChat) return main.getBoundingClientRect().top<=3 &&
+                                         pad<2 &&
+                                         parseFloat(getComputedStyle(document.querySelector('.dp-feed')).paddingTop)>=70;
+                                       if (create) return main.getBoundingClientRect().top<=3 &&
+                                         pad<2 &&
+                                         parseFloat(getComputedStyle(document.querySelector('.sg-create-scroll')).paddingTop)>=70;
+                                       return pad>=62;
+                                     })() &&
                                      surface.backgroundColor!=='rgba(0, 0, 0, 0)' &&
                                      surface.opacity==='1' &&
-                                     (!create || create.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
+                                     (!create || document.querySelector('.sg-create-scroll').firstElementChild?.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
                                      document.documentElement.scrollWidth<=innerWidth;
                             }""")
                             if not correct:
