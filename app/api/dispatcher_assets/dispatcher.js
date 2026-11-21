@@ -1151,7 +1151,13 @@
   form.addEventListener('submit', function (event) { event.preventDefault(); sendText(); });
   input.addEventListener('input', grow);
   input.addEventListener('keydown', function (event) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendText(); }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      // Safari may report the IME confirmation Enter after compositionend.
+      // keyCode 229 complements isComposing so unfinished text is not submitted.
+      event.preventDefault();
+      if (event.isComposing || event.keyCode === 229) return;
+      sendText();
+    }
   });
   newButton.addEventListener('click', function () {
     if (busy) return;
