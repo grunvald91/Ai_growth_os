@@ -198,7 +198,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               <div class="sg-create-label">2. Площадка</div>
               <div id="sg-create-platform-slot"></div>
               <div class="sg-create-platform-state" id="sg-create-platform-state">
-                <span id="sg-create-platform-status">Для создания черновика подключение не требуется.</span>
+                <span id="sg-create-platform-status">Черновик доступен без подключения.</span>
                 <a href="{base}/channels">Настроить публикацию</a>
               </div>
             </div>
