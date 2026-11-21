@@ -75,7 +75,8 @@ def _upload_destination(url: str) -> str:
 
 
 async def upload_wall_photo(adapter, token: str, group_id: str, picture: Path,
-                            *, client: httpx.AsyncClient | None = None) -> str:
+                            *, expected_sha256: str | None = None,
+                            client: httpx.AsyncClient | None = None) -> str:
     """One upload attempt; token stays in VK method form, never at upload_url."""
     try:
         server = await adapter.call("photos.getWallUploadServer", token, group_id=int(group_id))
@@ -92,6 +93,8 @@ async def upload_wall_photo(adapter, token: str, group_id: str, picture: Path,
     picture_bytes = picture.read_bytes()
     if not picture_bytes.startswith(b"\x89PNG\r\n\x1a\n") or not 0 < len(picture_bytes) <= 10 * 1024 * 1024:
         raise VKPhotoUploadError("Файл для VK должен быть корректным PNG до 10 МБ")
+    if expected_sha256 is not None and hashlib.sha256(picture_bytes).hexdigest() != expected_sha256:
+        raise VKPhotoUploadError("Изображение изменилось непосредственно перед отправкой в VK")
     try:
         if client is None:
             async with httpx.AsyncClient(
