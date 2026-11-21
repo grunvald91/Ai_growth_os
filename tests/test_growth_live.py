@@ -240,9 +240,17 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'platformSlot.appendChild(platformRow)' in js
     assert "chooseFormat('post')" in js
     assert "history.scrollIntoView" in js
+    assert "swipeDirection*velocity>.65" in js
+    assert "translate3d(0," in js
     css = client.get('/studio/assets/growth-live.css').text
     assert '.sg-create-layout' in css
     assert '.sg-create-dispatch .command-dock' in css
+    assert 'container-type:inline-size' in css
+    assert 'touch-action:pan-x' in css
+    assert 'name="topic"' in html
+    assert 'name="platform"' in html
+    dispatcher = client.get('/studio/assets/dispatcher.js').text
+    assert "event.isComposing || event.keyCode === 229" in dispatcher
 
 
 def test_create_has_only_dispatcher_submit_and_reusable_details(live):
