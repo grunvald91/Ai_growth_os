@@ -231,6 +231,9 @@ def test_chat_page_renders_without_growth_design_wrapper_and_serves_assets(chat_
         assert "renderMarkdownInto" in js.text
         assert "setupVoiceInput" in js.text
         assert "Вернуть как сказано" in js.text
+        assert "const VOICE_HOLD_START_MS = 120;" in js.text
+        assert 'performance.measure("servgo:voice-startup"' in js.text
+        assert 'ai-chat.js?v=9' in page.text
 
 
 def test_chat_requires_auth_and_csrf_when_configured(chat_env):
