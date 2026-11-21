@@ -551,10 +551,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-journey-polish-v3-20261121', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-editor-compact-v4-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=create-journey-polish-v3-20261121"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-journey-polish-v3-20261121"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=create-editor-compact-v4-20261121"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-editor-compact-v4-20261121"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -598,7 +598,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=27-create-instant-theme">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=28-create-compact">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=13">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
