@@ -169,9 +169,13 @@
     topics.hidden=false;topics.replaceChildren();
     const status=document.createElement('p');status.textContent='Подбираем темы из профиля компании…';topics.append(status);
     try{
-      const response=await fetch(base+'/whiteboard/topics.json',{credentials:'same-origin',headers:{Accept:'application/json'}});
+      const requestedFormat=root.getAttribute('data-create-format') || 'post';
+      const response=await fetch(base+'/create/topics.json?format='+encodeURIComponent(requestedFormat),
+        {credentials:'same-origin',headers:{Accept:'application/json'}});
       if(!response.ok)throw new Error('Не удалось получить темы');
       const data=await response.json();
+      // Ignore suggestions that belong to an earlier selected format.
+      if(root.getAttribute('data-create-format')!==requestedFormat){topics.hidden=true;return;}
       topics.replaceChildren();
       const list=Array.isArray(data.topics)?data.topics:[];
       if(!list.length){
