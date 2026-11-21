@@ -473,3 +473,34 @@ def test_failed_task_is_in_attention_but_cancelled_task_is_not(owner_studio):
     problem = client.get(base + "?tab=problems").text
     assert f'/tasks/{failed.id}' in problem
     assert f'/tasks/{cancelled.id}' in problem
+
+
+def test_completed_task_result_precedes_collapsible_process_log(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: Проверенная тема", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(product_id=company.id, task_id=task.id,
+                    title="Пост", kind="channel_text",
+                    status="awaiting_approval", content="{}"))
+    db.add(AgentRun(task_id=task.id, agent_name="post_strategist",
+                    status="completed"))
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
+    assert page.status_code == 200
+    assert page.text.index('<div class="sg-work-results">') < page.text.index('<details class="sg-work-steps')
+    assert "<summary>Этапы создания</summary>" in page.text
+
+
+def test_failed_task_keeps_steps_visible_and_retry_available(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: Сбой", status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
+    assert page.status_code == 200
+    assert "Повторить задание" in page.text
+    assert '<div class="sg-work-steps">' in page.text
+    assert '<details class="sg-work-steps' not in page.text
