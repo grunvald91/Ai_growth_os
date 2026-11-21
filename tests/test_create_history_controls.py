@@ -27,7 +27,9 @@ def test_create_history_gestures_preserve_feed_and_voice_input():
                   "app/api/dispatcher_assets/dispatcher.js").read_text(encoding="utf-8")
     assert "attachGrip(historyClose,false,1)" in script
     assert "attachGrip(historyOpen,true,-1)" in script
-    assert "swipeDirection*movement>24" in script
+    assert "swipeDirection*displacement>24" in script
+    assert "swipeDirection*velocity>.65" in script
+    assert "button.style.transform='translate3d(0,'" in script
     assert "setPointerCapture(event.pointerId)" in script
     assert "suppressClickUntil=performance.now()+350" in script
     assert "root.classList.toggle('sg-history-collapsed',!open)" in script
