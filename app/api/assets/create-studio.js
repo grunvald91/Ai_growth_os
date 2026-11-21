@@ -301,10 +301,10 @@
       // also reveals a confirmation that arrives after the mobile keyboard hides.
       showHistory(true,false);
       requestAnimationFrame(()=>{
-        const pending=[...history.querySelectorAll('.dp-confirm')].filter(card=>
-          card.querySelector('.dp-confirm-actions')).pop();
-        const latest=history.querySelector('.dp-msg:last-child');
-        const target=pending || latest || history;
+        const latest=[...history.querySelectorAll('.dp-msg')].pop();
+        // Never jump to an older unrelated confirmation card.
+        const pending=latest && latest.querySelector('.dp-confirm-actions');
+        const target=(pending && pending.closest('.dp-confirm')) || latest || history;
         target.setAttribute('tabindex','-1');
         target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
         if(pending)target.focus({preventScroll:true});
