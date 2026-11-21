@@ -164,6 +164,9 @@ def main():
                                   const feed=document.querySelector('#dp-feed');
                                   const box=feed.getBoundingClientRect();
                                   const controls=document.querySelector('.topbar .top-actions').getBoundingClientRect();
+                                  // The dispatcher may auto-scroll on a pending frame.
+                                  // Measure both positions synchronously after resetting scroll.
+                                  feed.scrollTop=0;
                                   const first=feed.querySelector('.dp-msg').getBoundingClientRect();
                                   const initial=first.top;
                                   feed.scrollTop=70;
