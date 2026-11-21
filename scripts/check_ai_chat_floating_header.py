@@ -33,6 +33,7 @@ def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 390, "height": 800})
+        page.emulate_media(reduced_motion="reduce")
         html = _static_html()
         for width in (320, 360, 390, 768, 860, 861, 1024, 1440):
             page.set_viewport_size({"width": width, "height": 800})
