@@ -52,7 +52,8 @@
   const panel=document.getElementById('sg-create-info-panel');
   const topics=document.getElementById('sg-create-suggestions');
   const suggestRow=screen.querySelector('.sg-create-suggest-row');
-  if(suggestRow && extrasSlot)extrasSlot.before(suggestRow);
+  // Both controls and their help now live next to the editor in source order.
+  // Suggestions are inserted in the same place so Tab order matches layout.
   if(suggestRow && topics)suggestRow.after(topics);
   const base=root.getAttribute('data-api').replace(/\/dispatch$/, '');
   const platformStatus=document.getElementById('sg-create-platform-status');
@@ -110,7 +111,7 @@
       line+=imageEnabled()?' · с иллюстрацией':' · только текст';
     }
     if(key==='story' && count.value)line+=' · '+count.value+' экранов';
-    summary.textContent=line+'. Проверка и публикация — отдельные действия.';
+    summary.textContent=line;
   }
   function syncVkImage(){
     const show=root.getAttribute('data-create-format')==='post' && platform.value==='vk';
@@ -169,9 +170,11 @@
     const context=document.getElementById('sg-create-context');
     const formatHelp=document.getElementById('sg-create-format-help');
     if(formatHelp)formatHelp.textContent=selected.dataset.sgDescription || '';
+    // Format and platform already appear immediately above the editor;
+    // repeat only special information that changes the decision to proceed.
     context.textContent=key==='whiteboard'
-      ? 'Выбрано: Простое видео (обычно около 30 секунд). Укажите тему ниже. Платные операции запускаются только после подтверждения.'
-      : 'Выбрано: '+names[key]+'. Укажите тему и нажмите «Проверить задание». Создание начнётся только после подтверждения.';
+      ? 'Готовое видео MP4. Платный запуск — только после подтверждения.'
+      : '';
     if(advanced) advanced.hidden=key==='whiteboard';
     if(key==='whiteboard'){
       const link=document.createElement('a');link.href=base+'/whiteboard';
