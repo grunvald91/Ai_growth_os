@@ -55,3 +55,11 @@ Sources:
 - An image may be marked ready only by a matching approved critic record. `verified_vk_image_approval` validates the audit and content fingerprints. If a user or AI revises the text, the image and critic endorsement are invalidated; it must not be published with a stale picture.
 - Owner views show the picture together with critique status and concrete severe findings; a blocked image is still reviewable and downloadable. No automated regeneration of rejected pictures is included in this phase.
 - Publication remains blocked for posts requesting an image until the separate VK photo-upload authorization and API path is verified; this PR does **not** assert live VK image publishing.
+
+## Verified live-provider canary, 2026-11-21
+- Evidence: [GitHub Actions run 44871088437](https://github.com/grunvald91/Ai_growth_os/actions/runs/44871088437); result `LIVE_CANARY_OK image=1080x1350 vision=approved publication_count=0`. The job ended in `success`; 17 preparatory offline tests passed.
+- **Two real calls through ClaudeHub** with the repository's existing secret `API`: `gemini-3.1-flash-image` generated the image, and `gemini-flash-3.8` returned an `approved` visual verdict. Export PNG 1080×1350 was verified; image SHA256 prefix: `7c95005607473ca2`.
+- The test used fictional company data, separate temporary SQLite, and no public post/VK write. It confirmed `verified_vk_image_approval=true` and `owner_approval_gate=allowed`.
+- The image shows the workshop and phone, aligning with the theme, but the phone screen has decorative English words and an invented number despite the image prompt banning lettering. It depicts an incoming rather than already missed call; these are not considered release-blocking in this example, and the critic approved it.
+- The successful canary is **not** proof of the model's ability to recognize and block every serious mismatch. Offline tests exercise blocking with scripted model responses. The actual VK image-upload API still has not been integrated.
+- The temporarily installed automatic workflow was deleted immediately after success to prevent accidental repeat paid calls. The audited Python canary script remains in `scripts/operations/vk_post_image_live_canary.py`, without an automated trigger.
