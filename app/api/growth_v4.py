@@ -259,9 +259,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </button>
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
-              <textarea id="dp-input" name="topic" class="dp-input" rows="3"
-                placeholder="Например: зачем небольшому бизнесу CRM?"
-                enterkeyhint="send" aria-describedby="sg-create-context" required></textarea>
+              <textarea id="dp-input" name="topic" class="dp-input" rows="2"
+                placeholder="Например: зачем бизнесу CRM?"
+                enterkeyhint="send" aria-describedby="sg-create-context sg-create-voice-hint" required></textarea>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
@@ -271,15 +271,15 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
                 <rect x="9" y="2.5" width="6" height="12" rx="3"/>
                 <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
               </svg></button>
+              <div class="sg-create-suggest-row">
+                <button type="button" data-sg-suggest>✦ Предложить тему</button>
+                <span id="sg-create-voice-hint">🎙 Удерживайте поле — голосом</span>
+              </div>
               <div id="sg-create-extra-settings-slot" class="sg-create-extra-settings-slot"></div>
               <div class="sg-create-review-summary" id="sg-create-review-summary" role="note"></div>
               <button class="dp-send command-go" id="dp-send" type="submit"
-                aria-label="Проверить параметры задания">Проверить задание <span aria-hidden="true">→</span></button>
+                aria-label="Проверить задание">Проверить задание <span aria-hidden="true">→</span></button>
             </form>
-            <div class="sg-create-suggest-row">
-              <button type="button" data-sg-suggest>✦ Предложить тему</button>
-              <span>Для голосового ввода удерживайте поле темы</span>
-            </div>
             <div class="command-tools"><div class="command-hints" id="dp-chips"
               aria-label="Подсказки"></div></div>
           </div>
