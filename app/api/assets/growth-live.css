@@ -1259,7 +1259,7 @@ body[data-growth-design="v4"] .sg-create-work-link{
 /* Contrast fix from actual 390/1440 dark screenshots: other Studio surfaces
    set a generic composer fill, but Create has its own dark card. */
 body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar{
-  background:var(--card)!important;color:var(--text);
+  background:var(--s-surface)!important;color:var(--s-text);
 }
 body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar #dp-input{
   background:transparent!important;
@@ -1281,4 +1281,18 @@ body[data-growth-design="v4"] .sg-create-screen :is(
 ){
   font-size:1rem!important;
   line-height:1.45;
+}
+
+/* Use canonical ServGo Air surfaces, not the legacy --card token which
+   remains white in dark mode. Keep one source of truth for editor controls. */
+body[data-growth-design="v4"] .sg-create-screen :is(
+  .sg-create-primary-platform select,
+  .sg-create-vk-image-primary select,
+  .sg-create-format-options select,
+  .sg-create-extra-settings-slot input,
+  .sg-create-extra-settings-slot textarea
+){
+  background:var(--s-surface-2)!important;
+  color:var(--s-text)!important;
+  border-color:var(--s-line-2)!important;
 }
