@@ -262,6 +262,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               <textarea id="dp-input" name="topic" class="dp-input" rows="2"
                 placeholder="Например: зачем бизнесу CRM?"
                 enterkeyhint="send" aria-describedby="sg-create-context sg-create-voice-hint" required></textarea>
+              <span id="sg-create-voice-hint" class="sg-create-input-voice-hint">Удерживайте поле — голосом</span>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
@@ -273,7 +274,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               </svg></button>
               <div class="sg-create-suggest-row">
                 <button type="button" data-sg-suggest>✦ Предложить тему</button>
-                <span id="sg-create-voice-hint">🎙 Удерживайте поле — голосом</span>
               </div>
               <div id="sg-create-extra-settings-slot" class="sg-create-extra-settings-slot"></div>
               <div class="sg-create-review-summary" id="sg-create-review-summary" role="note"></div>
@@ -598,7 +598,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=28-create-compact">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=29-create-voice-hint">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=13">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'

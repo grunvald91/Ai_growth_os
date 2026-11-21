@@ -1387,3 +1387,20 @@ body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar
 body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar.voice-text-editing #dp-input{
   padding-right:58px!important;
 }
+
+/* Voice guidance belongs inside the empty topic field, not below it. The
+   transparent, pointer-ignoring layer does not intercept hold-to-talk. */
+body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar #sg-create-voice-hint{
+  position:absolute;top:69px;left:16px;right:14px;
+  z-index:1;pointer-events:none;user-select:none;
+  color:var(--s-muted);opacity:.78;
+  font-size:.75rem;line-height:1.4;white-space:nowrap;
+}
+body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar :is(
+  #dp-input:focus,#dp-input:not(:placeholder-shown)
+) ~ #sg-create-voice-hint,
+body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar:is(
+  .voice-unavailable,.voice-recording,.voice-connecting,.voice-processing,.voice-sending
+) #sg-create-voice-hint{
+  display:none!important;
+}
