@@ -142,6 +142,36 @@ def main():
                     assert geometry['format']['bottom'] < geometry['platform']['top'], geometry
                     assert geometry['platform']['bottom'] < geometry['input']['top'], geometry
                     assert geometry['input']['bottom'] <= geometry['send']['bottom'], geometry
+                    # A topic field should not occupy a chat-sized card.
+                    composer=page.evaluate("""() => {
+                      const form=document.querySelector('#dp-form');
+                      const input=document.querySelector('#dp-input');
+                      const suggest=document.querySelector('.sg-create-suggest-row');
+                      const extras=document.querySelector('#sg-create-extra-settings-slot');
+                      const summary=document.querySelector('#sg-create-review-summary');
+                      const action=document.querySelector('#dp-send');
+                      const style=getComputedStyle(input);
+                      const formStyle=getComputedStyle(form);
+                      return {height:input.getBoundingClientRect().height,
+                        inputPadding:parseFloat(style.paddingLeft),
+                        inputFont:parseFloat(style.fontSize),
+                        inputBackground:style.backgroundColor,
+                        formBackground:formStyle.backgroundColor,
+                        formBorderTop:parseFloat(formStyle.borderTopWidth),
+                        contextVisible:!!document.querySelector('#sg-create-context').getClientRects().length,
+                        actionOrder:input.compareDocumentPosition(suggest)&Node.DOCUMENT_POSITION_FOLLOWING,
+                        optionsOrder:suggest.compareDocumentPosition(extras)&Node.DOCUMENT_POSITION_FOLLOWING,
+                        summaryOrder:extras.compareDocumentPosition(summary)&Node.DOCUMENT_POSITION_FOLLOWING,
+                        buttonOrder:summary.compareDocumentPosition(action)&Node.DOCUMENT_POSITION_FOLLOWING,
+                        contextText:document.querySelector('#sg-create-context').textContent.trim(),
+                        summaryText:summary.textContent.trim()};
+                    }""")
+                    assert 90<=composer['height']<=125, composer
+                    assert composer['inputPadding']<=18 and composer['inputFont']>=16, composer
+                    assert composer['formBorderTop']==0, composer
+                    assert not composer['contextVisible'] and not composer['contextText'], composer
+                    assert all(composer[k] for k in ('actionOrder','optionsOrder','summaryOrder','buttonOrder')), composer
+                    assert 'Проверка и публикация' not in composer['summaryText'], composer
                     assert geometry['composerPosition']=='static', geometry
                     assert not geometry['pageOverflow'], geometry
                     if width >= 1080:
