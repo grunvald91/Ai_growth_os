@@ -106,18 +106,18 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
       <div id="sg-create-settings" class="sg-create-settings">
         <label class="sg-create-setting" id="sg-create-platform-row" hidden>
           <span>Площадка</span>
-          <select id="sg-create-platform" name="platform" aria-label="Площадка"></select>
+          <select id="sg-create-platform" name="platform" form="dp-form" aria-label="Площадка"></select>
         </label>
         <label class="sg-create-setting" id="sg-create-count-row" hidden>
           <span>Количество экранов Stories</span>
-          <select id="sg-create-count" aria-label="Количество экранов">
+          <select id="sg-create-count" name="frame_count" form="dp-form" aria-label="Количество экранов">
             <option value="">Автоматически (3–10)</option>
             ''' + ''.join(f'<option value="{n}">{n}</option>' for n in range(3, 11)) + '''
           </select>
         </label>
         <label class="sg-create-setting" id="sg-create-aspect-row" hidden>
           <span>Пропорции изображения</span>
-          <select id="sg-create-aspect" aria-label="Пропорции изображения">
+          <select id="sg-create-aspect" name="aspect_ratio" form="dp-form" aria-label="Пропорции изображения">
             <option value="">Автоматически по площадке</option>
             <option value="1:1">1:1 · квадрат</option>
             <option value="4:5">4:5 · вертикальный пост</option>
@@ -127,7 +127,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </label>
         <label class="sg-create-setting" id="sg-create-vk-image-row" hidden>
           <span>Картинка для поста ВКонтакте</span>
-          <select id="sg-create-vk-image-model" aria-label="Генерация изображения к посту VK">
+          <select id="sg-create-vk-image-model" name="vk_image_model" form="dp-form" aria-label="Генерация изображения к посту VK">
             <option value="auto">С картинкой · генерация + критик</option>
             <option value="none">Только текст · без изображения</option>
             <option value="gemini">С картинкой · Gemini</option>
@@ -141,7 +141,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </p>
         <label class="sg-create-setting" id="sg-create-vk-ratio-row" hidden>
           <span>Формат картинки для ВКонтакте</span>
-          <select id="sg-create-vk-image-ratio" aria-label="Формат иллюстрации VK">
+          <select id="sg-create-vk-image-ratio" name="vk_image_ratio" form="dp-form" aria-label="Формат иллюстрации VK">
             <option value="4:5">4:5 · вертикаль 1080×1350 (рекомендуем)</option>
             <option value="1:1">1:1 · квадрат 1080×1080</option>
           </select>
@@ -149,7 +149,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         <p id="sg-create-story-ratio" class="sg-create-tip" hidden>Stories · вертикальные 9:16</p>
         <label class="sg-create-setting" id="sg-create-model-row" hidden>
           <span>Генерация изображений</span>
-          <select id="sg-create-image-model" aria-label="Модель изображений">
+          <select id="sg-create-image-model" name="image_model" form="dp-form" aria-label="Модель изображений">
             <option value="auto">Автоматически · одна модель</option>
             <option value="gemini">Gemini</option>
             <option value="openai">ChatGPT Image</option>
@@ -157,11 +157,11 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </label>
         <label class="sg-create-setting">
           <span>Аудитория <small>· необязательно</small></span>
-          <input id="sg-create-audience" maxlength="300" placeholder="Для кого готовим материал?">
+          <input id="sg-create-audience" name="audience" form="dp-form" maxlength="300" placeholder="Для кого готовим материал?">
         </label>
         <label class="sg-create-setting">
           <span>Дополнительные требования <small>· необязательно</small></span>
-          <textarea id="sg-create-brief" maxlength="3500" rows="2"
+          <textarea id="sg-create-brief" name="editorial_brief" form="dp-form" maxlength="3500" rows="2"
             placeholder="Тон, важные условия, что нельзя обещать…"></textarea>
         </label>
         <p class="sg-create-tip">Параметры попадут в карточку диспетчера.
