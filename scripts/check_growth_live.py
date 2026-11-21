@@ -172,6 +172,23 @@ def main():
                     assert not composer['contextVisible'] and not composer['contextText'], composer
                     assert all(composer[k] for k in ('actionOrder','optionsOrder','summaryOrder','buttonOrder')), composer
                     assert 'Проверка и публикация' not in composer['summaryText'], composer
+                    voice_hint=page.evaluate("""() => {
+                      const input=document.querySelector('#dp-input');
+                      const hint=document.querySelector('#sg-create-voice-hint');
+                      const field=input.getBoundingClientRect();
+                      const text=hint.getBoundingClientRect();
+                      const style=getComputedStyle(hint);
+                      return {inside: text.left>=field.left && text.right<=field.right &&
+                        text.top>=field.top && text.bottom<=field.bottom,
+                        visible:style.display!=='none' && style.visibility!=='hidden',
+                        pointerEvents:style.pointerEvents,
+                        opacity:parseFloat(style.opacity),description:hint.textContent.trim(),
+                        voiceUnavailable:document.querySelector('#dp-form').classList.contains('voice-unavailable')};
+                    }""")
+                    assert voice_hint['inside'] and voice_hint['pointerEvents']=='none', voice_hint
+                    assert voice_hint['description']=='Удерживайте поле — голосом', voice_hint
+                    assert .5<=voice_hint['opacity']<1, voice_hint
+                    assert voice_hint['visible'] != voice_hint['voiceUnavailable'], voice_hint
                     assert geometry['composerPosition']=='static', geometry
                     assert not geometry['pageOverflow'], geometry
                     if width >= 1080:
@@ -182,6 +199,14 @@ def main():
                     else:
                         assert geometry['aside']['top'] >= geometry['main']['bottom'], geometry
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-{width}.png',full_page=True)
+                page.set_viewport_size({'width':390,'height':844})
+                page.locator('#dp-input').fill('Тема для поста')
+                expect(page.locator('#sg-create-voice-hint')).to_be_hidden()
+                page.locator('#dp-input').fill('')
+                page.locator('#dp-input').evaluate('(el)=>el.blur()')
+                if not page.locator('#dp-form').evaluate(
+                    "el=>el.classList.contains('voice-unavailable')"):
+                    expect(page.locator('#sg-create-voice-hint')).to_be_visible()
                 for width in (390, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     page.evaluate("()=>window.ServGoTheme.setPreference('dark')")
