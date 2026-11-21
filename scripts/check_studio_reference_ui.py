@@ -231,7 +231,18 @@ def main():
                   }
                   throw Error('No unobstructed swipe start in the content area');
                 }""")
+                # CDP dispatchTouchEvent can coalesce back-to-back synthetic
+                # moves into a native scroll. Synchronize the initial touch
+                # with the page's event loop before testing drag lock/position.
+                page.evaluate("""() => {
+                  document.body.dataset.sgTouchEvents = '0';
+                  document.addEventListener('touchstart', () => {
+                    document.body.dataset.sgTouchEvents = '1';
+                  }, {capture:true,once:true});
+                }""")
                 touch('touchStart',start['x'],start['y'])
+                page.wait_for_function("document.body.dataset.sgTouchEvents === '1'")
+                page.evaluate("()=>new Promise(resolve=>requestAnimationFrame(resolve))")
                 touch('touchMove',start['x']+60,start['y'])
                 expect(page.locator('body')).to_have_class(__import__('re').compile('sg-daily-dragging'))
                 first = page.locator('#sgDailyDrawer').bounding_box()['x']
