@@ -248,7 +248,9 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'container-type:inline-size' in css
     assert 'touch-action:pan-x' in css
     assert 'name="topic"' in html
-    assert 'name="platform"' in html
+    assert 'name="platform" form="dp-form"' in html
+    assert 'name="audience" form="dp-form"' in html
+    assert 'name="image_model" form="dp-form"' in html
     assert 'id="sg-create-vk-image-primary"' in html
     assert 'id="sg-create-vk-image-slot"' in html
     assert 'id="sg-create-format-help"' in html
@@ -259,6 +261,8 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert "event.target instanceof Node && !history.contains(event.target)" not in js
     dispatcher = client.get('/studio/assets/dispatcher.js').text
     assert "event.isComposing || event.keyCode === 229" in dispatcher
+    assert "function markCreateTopicInvalid(invalid)" in dispatcher
+    assert "sg-create-context dp-voice-note" in dispatcher
 
 
 def test_create_has_only_dispatcher_submit_and_reusable_details(live):
