@@ -144,6 +144,9 @@ def main():
                     assert geometry['input']['bottom'] <= geometry['send']['bottom'], geometry
                     assert geometry['composerPosition']=='static', geometry
                     assert not geometry['pageOverflow'], geometry
+                    if width >= 1080:
+                        assert page.locator('#rail').evaluate(
+                            "e=>getComputedStyle(e).display") == 'none'
                     if geometry['availableWidth'] > 850 and width > 850:
                         assert geometry['aside']['left'] >= geometry['main']['right'], geometry
                     else:
