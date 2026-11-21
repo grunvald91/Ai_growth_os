@@ -438,6 +438,7 @@ def test_tasks_all_view_puts_attention_before_newer_active_job(owner_studio):
     active = Task(product_id=company.id, title="CONTENT: Новый материал",
                   assigned_agent="content_factory", status=TaskStatus.RUNNING)
     db.add(active)
+    db.flush()
     db.add(AgentRun(task_id=active.id, agent_name="post_strategist",
                     status="running"))
     db.commit()
