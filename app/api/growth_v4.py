@@ -192,6 +192,10 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <div class="sg-create-primary-platform" id="sg-create-primary-platform">
               <div class="sg-create-label">2. Площадка</div>
               <div id="sg-create-platform-slot"></div>
+              <div class="sg-create-platform-state" id="sg-create-platform-state">
+                <span id="sg-create-platform-status">Для создания черновика подключение не требуется.</span>
+                <a href="{base}/channels">Настроить публикацию</a>
+              </div>
             </div>
             <div class="sg-create-vk-image-primary" id="sg-create-vk-image-primary" hidden>
               <div class="sg-create-label">Изображение к посту ВКонтакте</div>
