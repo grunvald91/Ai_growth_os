@@ -173,6 +173,15 @@ def main():
                     assert colors['placeholderText']!=colors['mainBg'], colors
                     assert colors['inputSize']>=16 and colors['selectSize']>=16, colors
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
+                    page.locator('#sg-create-platform').select_option('vk')
+                    expect(page.locator('#sg-create-vk-image-primary')).to_be_visible()
+                    select_colors=page.evaluate("""() => ({
+                      platform:getComputedStyle(document.querySelector('#sg-create-platform')).backgroundColor,
+                      model:getComputedStyle(document.querySelector('#sg-create-vk-model-choice')).backgroundColor,
+                      ratio:getComputedStyle(document.querySelector('#sg-create-vk-image-ratio')).backgroundColor
+                    })""")
+                    assert select_colors['platform']==select_colors['model']==select_colors['ratio'], select_colors
+                    page.locator('#sg-create-platform').select_option('telegram')
                 page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
                 # Format-specific controls must be next to the relevant action.
