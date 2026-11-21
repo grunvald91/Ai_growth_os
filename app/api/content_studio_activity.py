@@ -286,7 +286,13 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
                 str(run.id) + ":" + run.status
                 for run in by_runs.get(task.id, [])[-20:]
             ),
-            "created_at": task.created_at.isoformat() if task.created_at else None,
+            # DB timestamps are UTC; SQLite returns func.now() without tzinfo.
+            "created_at": (
+                (task.created_at.replace(tzinfo=timezone.utc)
+                 if task.created_at.tzinfo is None else
+                 task.created_at.astimezone(timezone.utc)).isoformat()
+                if task.created_at else None
+            ),
         })
     return output
 
