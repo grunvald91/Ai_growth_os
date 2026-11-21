@@ -160,6 +160,44 @@ CSS = r"""
   outline-offset:3px;border-radius:7px}
 .sg-work-steps-collapsible[open]>ol{margin-top:10px}
 
+/* Filter and pagination are part of the document, not extra fixed bars. */
+.sg-work-board .sg-work-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(124px,auto) auto;
+  align-items:center;gap:8px;margin:0 0 13px;min-width:0}
+.sg-work-board .sg-work-search-label{position:absolute;width:1px;height:1px;
+  padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.sg-work-board .sg-work-search input,.sg-work-board .sg-work-search select{
+  box-sizing:border-box;min-height:44px;min-width:0;width:100%;font:inherit;
+  padding:10px 12px;border-radius:10px;border:1px solid var(--s-line,#DDE5EE);
+  background:var(--s-surface,#fff);color:var(--s-text,#24364F)}
+.sg-work-board .sg-work-search input:focus-visible,.sg-work-board .sg-work-search select:focus-visible{
+  outline:2px solid var(--s-accent,#2F5BEB);outline-offset:2px}
+.sg-work-board .sg-work-search .btn{box-sizing:border-box;min-height:44px;white-space:nowrap}
+.sg-work-board .sg-work-tab-count{font-variant-numeric:tabular-nums;opacity:.72;
+  font-size:11px;margin-left:4px}
+.sg-work-board .sg-work-pagination{display:flex;flex-wrap:wrap;align-items:center;
+  justify-content:space-between;gap:10px;margin-top:16px;padding:12px 0 0;
+  border-top:1px solid var(--s-line,#DFE7F0)}
+.sg-work-board .sg-work-page-summary{font-size:12px;color:var(--s-text-muted,#587085)}
+.sg-work-board .sg-work-page-links{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.sg-work-board .sg-work-page-links a,.sg-work-board .sg-work-update{display:inline-flex;
+  box-sizing:border-box;align-items:center;justify-content:center;min-height:44px;
+  border-radius:10px;padding:9px 12px;border:1px solid var(--s-line,#DFE7F0);
+  text-decoration:none;font-size:13px;color:var(--s-text,#263D56);
+  background:var(--s-surface,#fff);cursor:pointer}
+.sg-work-board .sg-work-page-links a:focus-visible,.sg-work-board .sg-work-update:focus-visible{
+  outline:2px solid var(--s-accent,#2F5BEB);outline-offset:2px}
+.sg-work-board .sg-work-page-links>span{font-size:12px;white-space:nowrap;
+  color:var(--s-text-muted,#587085)}
+.sg-work-board .sg-work-update{margin-bottom:10px;width:100%;font-weight:600}
+.sg-work-board .sg-work-update[hidden]{display:none}
+@media(max-width:520px){
+  .sg-work-board .sg-work-search{grid-template-columns:minmax(0,1fr) auto}
+  .sg-work-board .sg-work-search input{grid-column:1 / -1}
+  .sg-work-board .sg-work-search select{grid-column:1}
+  .sg-work-board .sg-work-search .btn{grid-column:2}
+  .sg-work-board .sg-work-pagination{gap:7px}
+}
+
 /* Tasks page: compact, content-first cards, adaptive without a second toolbar. */
 .sg-work-board .sg-work-toolbar{display:flex;justify-content:space-between;
   gap:14px;align-items:center;margin-bottom:12px}
