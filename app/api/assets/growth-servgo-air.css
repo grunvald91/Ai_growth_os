@@ -1721,34 +1721,57 @@ body.home-empty[data-growth-design="v4"] .workspace > #main { min-height: calc(1
     padding-top: calc(85px + env(safe-area-inset-top, 0px)) !important;
   }
 }
-/* Chats and Create need a bounded scroll area. Position each canvas BELOW
-   floating controls with an outer margin, not with an inner padding band:
-   otherwise the message feed starts 63/75px below the usable chat viewport. */
-body[data-growth-design="v4"]:has(.sg-create-screen) .workspace > #main {
-  box-sizing: border-box;
-  height: calc(100dvh - 76px) !important;
-  margin-top: 75px !important;
-  padding-top: 0 !important;
-}
+/* True underlay: chat messages and Create content now scroll from the top
+   of the workspace *behind* the separate floating controls. Initial content
+   is padded inside the scrolling surface, so the padding scrolls away.
+   Never restore an opaque/fixed-height top strip or main margin. */
 body.home-page:not(.home-empty)[data-growth-design="v4"] .workspace > #main {
-  height: calc(var(--v4-viewport,100dvh) - 76px - var(--v4-nav,0px)) !important;
-  margin-top: 75px !important;
-  padding-top: 0 !important;
+  box-sizing:border-box;
+  height:calc(var(--v4-viewport,100dvh) - 1px - var(--v4-nav,0px)) !important;
+  margin-top:0 !important;
+  padding-top:0 !important;
+}
+/* Feed viewport must occupy the space under the floating logo and actions;
+   the first message starts at the previous baseline until the user scrolls. */
+body.home-page:not(.home-empty)[data-growth-design="v4"] .dp-home.has-feed .dp-feed {
+  padding-top:83px !important;
+  scroll-padding-top:64px;
+}
+body[data-growth-design="v4"]:has(.sg-create-screen) .workspace > #main {
+  box-sizing:border-box;
+  height:calc(100dvh - 1px) !important;
+  margin-top:0 !important;
+  padding-top:0 !important;
+}
+body[data-growth-design="v4"]:has(.sg-create-screen) .sg-create-scroll {
+  padding-top:87px !important;
+  scroll-padding-top:64px;
 }
 @media(max-width:780px) {
-  body[data-growth-design="v4"]:has(.sg-create-screen) .workspace > #main {
-    height: calc(100dvh - 64px - 65px - env(safe-area-inset-top, 0px)) !important;
-    margin-top: calc(63px + env(safe-area-inset-top, 0px)) !important;
-    padding-top: 0 !important;
-  }
   body.home-page:not(.home-empty)[data-growth-design="v4"] .workspace > #main {
-    height: calc(var(--v4-viewport,100dvh) - 64px - var(--v4-nav,65px) - env(safe-area-inset-top, 0px)) !important;
-    margin-top: calc(63px + env(safe-area-inset-top, 0px)) !important;
-    padding-top: 0 !important;
+    height:calc(var(--v4-viewport,100dvh) - 1px - var(--v4-nav,65px)) !important;
+    margin-top:0 !important;
+    padding-top:0 !important;
+  }
+  body.home-page:not(.home-empty)[data-growth-design="v4"] .dp-home.has-feed .dp-feed {
+    padding-top:calc(71px + env(safe-area-inset-top,0px)) !important;
+    scroll-padding-top:calc(60px + env(safe-area-inset-top,0px));
+  }
+  body[data-growth-design="v4"]:has(.sg-create-screen) .workspace > #main {
+    height:calc(100dvh - 1px - 65px - env(safe-area-inset-top,0px)) !important;
+    margin-top:0 !important;
+    padding-top:0 !important;
+  }
+  body[data-growth-design="v4"]:has(.sg-create-screen) .sg-create-scroll {
+    padding-top:calc(75px + env(safe-area-inset-top,0px)) !important;
+    scroll-padding-top:calc(60px + env(safe-area-inset-top,0px));
   }
   body.home-page.sg-keyboard-open[data-growth-design="v4"] .workspace > #main {
-    height: auto !important;
-    margin-top: calc(63px + env(safe-area-inset-top, 0px)) !important;
-    padding-top: 0 !important;
+    height:auto !important;
+    margin-top:0 !important;
+    padding-top:0 !important;
   }
 }
+/* The remaining Studio routes use the same transparent overlay and shared
+   top-row buttons. They scroll as whole documents rather than clipping at a
+   fixed chat/create scrollport. */

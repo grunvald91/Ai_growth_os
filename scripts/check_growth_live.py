@@ -124,6 +124,46 @@ def main():
                                     documentWidth:document.documentElement.scrollWidth};
                                 }""")
                                 raise AssertionError((width,suffix,theme,'floating-header-geometry',diagnostic))
+                            if suffix == '/create':
+                                assert page.evaluate("""() => {
+                                  const viewport=document.querySelector('.sg-create-scroll').getBoundingClientRect();
+                                  const buttons=document.querySelector('.topbar .top-actions').getBoundingClientRect();
+                                  const main=document.querySelector('#main').getBoundingClientRect();
+                                  const scroll=document.querySelector('.sg-create-scroll');
+                                  const first=scroll.firstElementChild?.getBoundingClientRect();
+                                  return main.top<=3 && viewport.top<15 &&
+                                    viewport.top<buttons.bottom &&
+                                    parseFloat(getComputedStyle(scroll).paddingTop)>=70 &&
+                                    (first===undefined || first.top>=buttons.bottom-1);
+                                }"""), (width,theme,'create-underlay')
+                            if suffix == '':
+                                page.evaluate("""() => {
+                                  document.body.classList.remove('home-empty');
+                                  const home=document.querySelector('.dp-home');
+                                  home.classList.add('has-feed');
+                                  const feed=document.querySelector('#dp-feed');
+                                  for(let i=0;i<24;i++){
+                                    const msg=document.createElement('div');
+                                    msg.className='dp-msg bot';
+                                    msg.textContent='Сквозная проверка прокрутки сообщения '+i;
+                                    feed.appendChild(msg);
+                                  }
+                                  feed.scrollTop=0;
+                                }""")
+                                assert page.evaluate("""() => {
+                                  const feed=document.querySelector('#dp-feed');
+                                  const box=feed.getBoundingClientRect();
+                                  const controls=document.querySelector('.topbar .top-actions').getBoundingClientRect();
+                                  const first=feed.querySelector('.dp-msg').getBoundingClientRect();
+                                  const initial=first.top;
+                                  feed.scrollTop=70;
+                                  const scrolled=feed.querySelector('.dp-msg').getBoundingClientRect();
+                                  return box.top<5 && box.top<controls.bottom &&
+                                    feed.scrollTop>=65 && initial>=controls.bottom-1 &&
+                                    scrolled.top<controls.bottom-20 &&
+                                    scrolled.top>=box.top-5 &&
+                                    getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)';
+                                }"""), (width,theme,'chat-text-must-scroll-behind-floating-controls')
                             if width in (320,390,781,1440) and suffix in ('','/create'):
                                 shot=suffix.removeprefix('/') or 'home'
                                 page.screenshot(path=str(screenshot_dir/f'floating-header-{shot}-{theme}-{width}.png'),animations='disabled')
