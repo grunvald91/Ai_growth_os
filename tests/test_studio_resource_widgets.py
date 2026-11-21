@@ -74,10 +74,13 @@ def test_task_widgets_share_contract_on_work_and_overview():
     overview = activity_overview(product_id, [item])
     for markup in (work, overview):
         assert 'data-sg-resource-widget="task"' in markup
-        assert 'data-sg-resource-details' in markup
         assert f'href="/studio/products/{product_id}/tasks/{item["id"]}"' in markup
         assert "Работа идёт, результат ещё не готов." in markup
         assert '<button type="submit"' not in markup
+    # Worklist cards have one destination, so no duplicate disclosure.
+    assert 'data-sg-resource-details' not in work
+    # The overview retains its existing UI SDK details fallback.
+    assert 'data-sg-resource-details' in overview
 
 
 def test_task_result_status_is_safe_and_scoped_to_matching_id():
