@@ -121,7 +121,7 @@ def main():
                 page.goto(base+'/create')
                 page.set_viewport_size({'width':390,'height':844})
                 # The Create editor is task-first, including on a narrow screen.
-                for width in (390, 1440):
+                for width in (320, 390, 768, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     expect(page.locator('[data-sg-format="post"]')).to_have_attribute('aria-pressed', 'true')
                     expect(page.locator('#sg-create-platform')).to_be_visible()
@@ -197,6 +197,25 @@ def main():
                 expect(page.locator('#sg-create-history-open')).to_be_visible()
                 page.locator('#sg-create-history-open').click()
                 expect(page.locator('#sg-create-history')).to_be_visible()
+                # The server response event must reveal and focus the latest
+                # confirmation, rather than a stale earlier card. No API writes.
+                page.evaluate("""() => {
+                  const root=document.querySelector('.sg-create-dispatch');
+                  const msg=document.createElement('div');
+                  msg.className='dp-msg bot';
+                  const confirm=document.createElement('div');
+                  confirm.className='dp-confirm';
+                  const actions=document.createElement('div');
+                  actions.className='dp-confirm-actions';
+                  confirm.append(actions);
+                  msg.append(confirm);
+                  document.getElementById('dp-feed').appendChild(msg);
+                  root.dispatchEvent(new CustomEvent('sg:dispatcher:response', {
+                    detail:{source:'create',hasConfirmation:true}
+                  }));
+                }""")
+                expect(page.locator('.dp-confirm:last-child')).to_be_focused(timeout=3500)
+                assert page.locator('.dp-confirm:last-child').is_visible()
                 # Pointer-swipe tests the same logic used by real touch devices.
                 page.evaluate("""() => {
                   const handle=document.querySelector('#sg-create-history-close');
