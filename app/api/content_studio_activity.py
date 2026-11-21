@@ -267,6 +267,7 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
             "needs_decision": needs_decision,
             "kind_label": kind_name,
             "current_stage": stage_name,
+            "result_count": len(items),
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
                 "title": readable_artifact_title(art),
@@ -462,7 +463,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     cards = []
     for item in visible:
         artifacts = item.get("artifacts") or []
-        count = len(artifacts)
+        count = item.get("result_count", len(artifacts))
         state = item["state"]
         summary = item.get("current_stage") if state == "running" else None
         if item.get("agent") == "whiteboard_renderer":
@@ -475,6 +476,8 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
             summary = (
                 f"Подготовлено материалов: {count}. Публикация отдельно."
                 if state == "completed" and count else
+                "Задание завершено, но готовый результат не найден."
+                if state == "completed" else
                 item.get("description") or "Подробности доступны в задании."
             )
         created = ""
@@ -522,7 +525,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     return (
         '<section class="sg-surface sg-work-board" aria-label="Список заданий">'
         '<div class="sg-work-toolbar">'
-        '<p>Текущие задания и недавняя история. Незавершённые задания сохраняются в списке.</p>'
+        '<p>Недавние задания. Активные и требующие внимания — в приоритете.</p>'
         f'<a class="btn primary" href="{base}/create">＋ Создать</a></div>'
         + selector + '<div class="sg-work-list">'
         + ("".join(cards) or empty) + '</div></section>'
