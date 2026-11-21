@@ -187,11 +187,11 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <div class="sg-create-picks" role="group" aria-label="Формат материала">{cards}</div>
             <div class="sg-create-format-actions">
               <details class="sg-create-format-more">
-                <summary>Что входит в выбранный формат?</summary>
+                <summary>Что входит?</summary>
                 <p class="sg-create-format-help" id="sg-create-format-help"></p>
               </details>
               <div class="sg-create-seo-link sg-create-seo-link-main">
-                <a href="{base}/seo">Нужна SEO-статья? Открыть SEO-завод →</a>
+                <a href="{base}/seo" aria-label="Нужна SEO-статья? Открыть SEO-завод">SEO-статья →</a>
               </div>
             </div>
             <div class="sg-create-primary-platform" id="sg-create-primary-platform">
