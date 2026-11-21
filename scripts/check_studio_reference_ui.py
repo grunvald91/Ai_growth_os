@@ -210,6 +210,21 @@ def main():
                     cdp.send('Input.dispatchTouchEvent', {'type':kind,'touchPoints':[] if x is None else [
                         {'x':x,'y':y,'id':1}], 'modifiers':0})
                 page.locator('#dp-feed').evaluate('(el)=>el.scrollTop=0')
+                # Content widgets may hydrate links between point selection and
+                # CDP touchStart. Keep the gesture target stable and noninteractive
+                # inside #main, rather than accidentally swiping on a real link.
+                page.evaluate("""() => {
+                  const target=document.createElement('div');
+                  target.id='sg-daily-swipe-test-surface';
+                  target.setAttribute('aria-hidden','true');
+                  target.style.cssText='position:fixed;left:82px;top:374px;' +
+                    'width:160px;height:55px;z-index:50;' +
+                    'background:transparent;pointer-events:auto;touch-action:pan-y pinch-zoom';
+                  document.querySelector('#main').appendChild(target);
+                }""")
+                assert page.evaluate("""() =>
+                  document.elementFromPoint(90,400)?.id==='sg-daily-swipe-test-surface'
+                """), 'Stable noninteractive swipe surface must receive the touch'
                 # An earlier widget may now occupy the old fixed (100,400) test
                 # point. The real touch gesture intentionally ignores buttons
                 # and links, so choose a noninteractive area inside #main rather
@@ -282,6 +297,7 @@ def main():
                 touch('touchMove',140,300)
                 touch('touchCancel')
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','false')
+                page.evaluate("document.getElementById('sg-daily-swipe-test-surface')?.remove()")
                 page.screenshot(path=str(captures / 'daily-dark-390.png'))
                 touch('touchStart',320,500); touch('touchMove',40,500); touch('touchEnd')
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','true')
