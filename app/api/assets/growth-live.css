@@ -1296,3 +1296,10 @@ body[data-growth-design="v4"] .sg-create-screen :is(
   color:var(--s-text)!important;
   border-color:var(--s-line-2)!important;
 }
+
+/* Review summary is also part of the Create editor, not a legacy light card. */
+body[data-growth-design="v4"] .sg-create-screen .sg-create-review-summary{
+  background:var(--s-surface-2)!important;
+  color:var(--s-text)!important;
+  border-color:var(--s-line-2)!important;
+}
