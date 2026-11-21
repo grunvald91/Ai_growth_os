@@ -505,3 +505,135 @@ def test_failed_task_keeps_steps_visible_and_retry_available(owner_studio):
     assert "Повторить задание" in page.text
     assert '<div class="sg-work-steps">' in page.text
     assert '<details class="sg-work-steps' not in page.text
+
+
+def test_work_page_pagination_keeps_old_active_jobs_visible(owner_studio):
+    from datetime import datetime, timedelta, timezone
+    from app.api.content_studio_activity import work_page
+    client, db, company, outsider = owner_studio
+    old = Task(product_id=company.id, assigned_agent="content_factory",
+               title="CONTENT: Долгое задание", status=TaskStatus.RUNNING,
+               created_at=datetime.now(timezone.utc) - timedelta(days=90))
+    db.add(old)
+    db.add(Task(product_id=outsider.id, assigned_agent="content_factory",
+                title="CONTENT: Чужое задание", status=TaskStatus.RUNNING))
+    for i in range(64):
+        db.add(Task(product_id=company.id, assigned_agent="content_factory",
+                    title=f"CONTENT: Результат {i:02}", status=TaskStatus.COMPLETED))
+    db.commit()
+    first = work_page(db, company.id, page=1)
+    last = work_page(db, company.id, page=4)
+    assert first["total"] == 65
+    assert first["counts"]["active"] == 1
+    assert first["items"][0]["id"] == str(old.id)
+    assert len(first["items"]) == 20
+    assert len(last["items"]) == 5
+    url = f"/studio/products/{company.id}/work"
+    html = client.get(url).text
+    assert f'/tasks/{old.id}' in html
+    assert "Показано 1–20 из 65" in html
+    assert 'rel="next"' in html
+    page_four = client.get(url + "?page=4")
+    assert "Показано 61–65 из 65" in page_four.text
+    assert "Страница 4 из 4" in page_four.text
+    assert str(outsider.id) not in html
+
+
+def test_work_search_matches_request_topic_and_is_tenant_scoped(owner_studio):
+    from app.api.content_studio_activity import work_page
+    client, db, company, outsider = owner_studio
+    own = Task(product_id=company.id, assigned_agent="content_factory",
+               title="CONTENT: generic", status=TaskStatus.COMPLETED)
+    other = Task(product_id=outsider.id, assigned_agent="content_factory",
+                 title="CONTENT: generic", status=TaskStatus.COMPLETED)
+    db.add_all([own, other])
+    db.flush()
+    for task in (own, other):
+        db.add(Artifact(product_id=task.product_id, task_id=task.id,
+                        title="Заявка", kind="content_request",
+                        status="draft",
+                        content=json.dumps({"topic": "Неочевидный спрос на запись"},
+                                           ensure_ascii=False)))
+    db.commit()
+    found = work_page(db, company.id, query="спрос")
+    assert found["total"] == 1
+    assert found["items"][0]["id"] == str(own.id)
+    url = f"/studio/products/{company.id}/work"
+    page = client.get(url, params={"q": "спрос"}).text
+    assert f'/tasks/{own.id}' in page
+    assert f'/tasks/{other.id}' not in page
+    assert 'value="спрос"' in page
+
+
+def test_work_date_filter_and_literal_wildcards(owner_studio):
+    from datetime import datetime, timedelta, timezone
+    from app.api.content_studio_activity import work_page
+    _, db, company, _ = owner_studio
+    old = Task(product_id=company.id, assigned_agent="content_factory",
+               title="CONTENT: Давний материал", status=TaskStatus.COMPLETED,
+               created_at=datetime.now(timezone.utc) - timedelta(days=120))
+    now = Task(product_id=company.id, assigned_agent="content_factory",
+               title="CONTENT: скидка 100% на услугу",
+               status=TaskStatus.COMPLETED)
+    plain = Task(product_id=company.id, assigned_agent="content_factory",
+                 title="CONTENT: скидка 1000 на услугу",
+                 status=TaskStatus.COMPLETED)
+    db.add_all([old, now, plain])
+    db.commit()
+    assert work_page(db, company.id, period="30")["total"] == 2
+    literal = work_page(db, company.id, query="100%")
+    assert literal["total"] == 1
+    assert literal["items"][0]["id"] == str(now.id)
+
+
+def test_work_partial_fragment_is_private_and_does_not_recreate_shell(owner_studio):
+    client, db, company, outsider = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: Тест обновления", status=TaskStatus.RUNNING)
+    db.add(task)
+    db.commit()
+    url = f"/studio/products/{company.id}/work"
+    response = client.get(url, params={"tab": "active", "partial": "1"})
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["content-type"].startswith("application/vnd.servgo.tasks+html")
+    assert 'data-sg-list-signature=' in response.text
+    assert 'data-sg-refresh-url=' in response.text
+    assert '<html' not in response.text.lower()
+    assert f'/tasks/{task.id}' in response.text
+    assert f'/tasks/{task.id}' not in client.get(
+        f"/studio/products/{outsider.id}/work", params={"partial": 1}).text
+
+
+def test_work_fragment_signature_changes_on_artifact_approval(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: На утверждение", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    art = Artifact(product_id=company.id, task_id=task.id,
+                   title="Материал", kind="channel_text",
+                   status="awaiting_approval", content="{}")
+    db.add(art)
+    db.commit()
+    url = f"/studio/products/{company.id}/work"
+    page = client.get(url, params={"tab": "approval", "partial": 1})
+    import re
+    signature = re.search(r'data-sg-list-signature="([^"]+)"', page.text).group(1)
+    assert f'/tasks/{task.id}' in page.text
+    art.status = "approved"
+    db.commit()
+    updated = client.get(url, params={"tab": "approval", "partial": 1})
+    refreshed_signature = re.search(
+        r'data-sg-list-signature="([^"]+)"', updated.text).group(1)
+    assert signature != refreshed_signature
+    assert f'/tasks/{task.id}' not in updated.text
+    assert "Нет заданий, требующих решения" in updated.text
+
+
+def test_work_poll_does_not_reload_the_list_page():
+    from app.api.content_studio_work_ui import JS
+    assert "async function refreshBoard()" in JS
+    assert "applyBoard(fresh)" in JS
+    assert "pendingBoard=fresh" in JS
+    assert "if(showWork&&!workBoard)" in JS
