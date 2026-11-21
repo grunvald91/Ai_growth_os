@@ -162,12 +162,13 @@ def main():
                       const input=getComputedStyle(document.querySelector('#dp-input'));
                       const placeholder=getComputedStyle(document.querySelector('#dp-input'),'::placeholder');
                       return {mainBg:main.backgroundColor,barBg:bar.backgroundColor,
-                        inputBg:input.backgroundColor,mainText:main.color,
+                        inputBg:input.backgroundColor,mainText:getComputedStyle(document.querySelector('.sg-create-label')).color,
                         inputText:input.color,placeholderText:placeholder.color};
                     }""")
                     assert colors['barBg']==colors['mainBg'], colors
                     assert colors['inputBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
                     assert colors['inputText']==colors['mainText'], colors
+                    assert colors['placeholderText']!=colors['mainBg'], colors
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
                 page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
