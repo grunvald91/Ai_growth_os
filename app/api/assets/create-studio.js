@@ -63,10 +63,10 @@
     const state=savedConnections && savedConnections[platform.value] &&
       savedConnections[platform.value].state;
     platformStatus.textContent=state==='configured'
-      ? 'Подключение сохранено. Доступность проверяется при публикации.'
+      ? 'Подключение сохранено · доступ проверим при публикации.'
       : state==='not_configured'
-        ? 'Подключение не настроено. Черновик можно подготовить сейчас.'
-        : 'Черновик можно создать без подключения. Статус публикации не проверен.';
+        ? 'Публикация не подключена · черновик доступен.'
+        : 'Статус публикации неизвестен · черновик доступен.';
   }
   fetch(base+'/create/platforms.json',{credentials:'same-origin',
     headers:{Accept:'application/json'}}).then(response=>{
