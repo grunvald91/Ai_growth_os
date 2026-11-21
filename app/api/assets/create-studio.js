@@ -15,6 +15,9 @@
   const vkReviewTip=document.getElementById('sg-create-vk-review-tip');
   const aspectRow=document.getElementById('sg-create-aspect-row');
   const storyRatio=document.getElementById('sg-create-story-ratio');
+  // The destination platform belongs next to the selected format, not in advanced settings.
+  const platformSlot=document.getElementById('sg-create-platform-slot');
+  if(platformSlot && platformRow)platformSlot.appendChild(platformRow);
   const aspect=document.getElementById('sg-create-aspect');
   const channels={
     post:[['telegram','Telegram'],['vk','ВКонтакте'],['dzen','Дзен'],['vc_ru','vc.ru'],['tenchat','TenChat']],
@@ -27,6 +30,8 @@
     static_image:'telegram',package:''};
   const panel=document.getElementById('sg-create-info-panel');
   const topics=document.getElementById('sg-create-suggestions');
+  const suggestRow=screen.querySelector('.sg-create-suggest-row');
+  if(suggestRow && topics)suggestRow.after(topics);
   const base=root.getAttribute('data-api').replace(/\/dispatch$/, '');
 
   function info(title,detail){
@@ -64,6 +69,8 @@
       button.setAttribute('aria-pressed',button===selected?'true':'false');
     });
     platformRow.hidden=!channels[key] || channels[key].length===0;
+    const platformShell=document.getElementById('sg-create-primary-platform');
+    if(platformShell)platformShell.hidden=platformRow.hidden;
     countRow.hidden=key!=='story';
     modelRow.hidden=key!=='story' && key!=='static_image';
     aspectRow.hidden=key!=='static_image';
@@ -82,8 +89,8 @@
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
     const context=document.getElementById('sg-create-context');
     context.textContent=key==='whiteboard'
-      ? 'Выбрано: Простое видео (обычно около 30 секунд). Введите тему в нижней строке и отправьте. Перед платной генерацией появится запрос подтверждения.'
-      : 'Выбрано: '+names[key]+'. Введите тему в нижней строке и отправьте — перед созданием появится подтверждение.';
+      ? 'Выбрано: Простое видео (обычно около 30 секунд). Укажите тему ниже. Платные операции запускаются только после подтверждения.'
+      : 'Выбрано: '+names[key]+'. Укажите тему и нажмите «Продолжить». Перед созданием появится подтверждение.';
     const advanced=document.getElementById('sg-create-advanced');
     if(advanced) advanced.hidden=key==='whiteboard';
     if(key==='whiteboard'){
@@ -95,6 +102,8 @@
   screen.querySelectorAll('[data-sg-format]').forEach(button=>{
     button.addEventListener('click',()=>chooseFormat(button.dataset.sgFormat));
   });
+  // Make the normal path immediately understandable without a preliminary click.
+  chooseFormat('post');
   screen.querySelector('[data-sg-suggest]').addEventListener('click',async()=>{
     topics.hidden=false;topics.replaceChildren();
     const status=document.createElement('p');status.textContent='Подбираем темы из профиля компании…';topics.append(status);
