@@ -1060,3 +1060,13 @@ body[data-growth-design="v4"] .sg-create-format small{font-size:.75rem;}
 body[data-growth-design="v4"] .sg-create-topic-label,
 body[data-growth-design="v4"] .sg-create-label{font-size:.9375rem;}
 body[data-growth-design="v4"] :is(.sg-create-primary-platform,.sg-create-vk-image-primary) select{font-size:.9375rem;}
+
+/* SEO is a nearby alternative creation path, not another format button. */
+body[data-growth-design="v4"] .sg-create-seo-link-main{
+  display:block;margin:-7px 0 18px;padding:0;
+  font-size:.8125rem;line-height:1.5;
+}
+body[data-growth-design="v4"] .sg-create-seo-link-main a{
+  display:inline-flex;align-items:center;min-height:40px;
+  color:var(--blue);text-decoration:underline;text-underline-offset:3px;
+}
