@@ -120,6 +120,35 @@ def main():
                 page.emulate_media(reduced_motion='no-preference')
                 page.goto(base+'/create')
                 page.set_viewport_size({'width':390,'height':844})
+                # The Create editor is task-first, including on a narrow screen.
+                for width in (390, 1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    expect(page.locator('[data-sg-format="post"]')).to_have_attribute('aria-pressed', 'true')
+                    expect(page.locator('#sg-create-platform')).to_be_visible()
+                    expect(page.locator('#dp-input')).to_be_visible()
+                    expect(page.locator('#dp-send')).to_be_visible()
+                    geometry = page.evaluate("""() => {
+                      const rect = selector => {
+                        const r=document.querySelector(selector).getBoundingClientRect();
+                        return {top:r.top,left:r.left,right:r.right,bottom:r.bottom};
+                      };
+                      return {format:rect('.sg-create-picks'),platform:rect('#sg-create-primary-platform'),
+                        input:rect('#dp-input'),send:rect('#dp-send'),
+                        main:rect('.sg-create-main'),aside:rect('.sg-create-aside'),
+                        composerPosition:getComputedStyle(document.querySelector('.command-dock')).position,
+                        pageOverflow:document.documentElement.scrollWidth>innerWidth};
+                    }""")
+                    assert geometry['format']['bottom'] < geometry['platform']['top'], geometry
+                    assert geometry['platform']['bottom'] < geometry['input']['top'], geometry
+                    assert geometry['input']['bottom'] <= geometry['send']['bottom'], geometry
+                    assert geometry['composerPosition']=='static', geometry
+                    assert not geometry['pageOverflow'], geometry
+                    if width == 1440:
+                        assert geometry['aside']['left'] >= geometry['main']['right'], geometry
+                    else:
+                        assert geometry['aside']['top'] >= geometry['main']['bottom'], geometry
+                    page.screenshot(path=f'/tmp/growth-v4-create-layout-{width}.png',full_page=True)
+                page.set_viewport_size({'width':390,'height':844})
                 # Use an isolated DOM message; no AI task or real publication.
                 page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed');
