@@ -275,7 +275,7 @@ JS = r"""
      }
      if(workList||showWork){
        const active=jobs.filter(j=>j.state==='queued'||j.state==='running');
-       const statuses=jobs.map(j=>j.id+':'+j.state+':'+Boolean(j.needs_decision)+':'+(j.artifacts||[]).map(a=>a.id+':'+a.status).join(',')).join('|');
+       const statuses=jobs.map(j=>j.id+':'+j.state+':'+Boolean(j.needs_decision)+':'+j.result_count+':'+(j.artifacts||[]).map(a=>a.id+':'+a.status).join(',')).join('|');
        const store=workList||showWork;
        if(store.hasAttribute('data-sg-signature')&&store.dataset.sgSignature!==statuses&&
           document.activeElement?.tagName!=='INPUT' &&
