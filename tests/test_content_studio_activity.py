@@ -672,3 +672,33 @@ def test_task_kind_filter_preserves_query_and_count(owner_studio):
     assert 'name="kind"' in page
     assert 'value="post" selected' in page
     assert "kind=post" in page
+
+
+def test_work_query_html_is_escaped_and_time_has_timezone(owner_studio):
+    from app.api.content_studio_activity import work_page
+    from app.api.content_studio_work_ui import JS
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: без HTML", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.commit()
+    data = work_page(db, company.id)
+    assert data["items"][0]["created_at"].endswith("+00:00")
+    unsafe = '<svg onload="alert(1)">'
+    html = client.get(f"/studio/products/{company.id}/work",
+                      params={"q": unsafe}).text
+    assert unsafe not in html
+    assert "&lt;svg" in html
+    assert 'name="q"' in html
+    assert "localizeWorkTimes(workBoard)" in JS
+
+
+def test_work_requested_page_beyond_end_is_clamped(owner_studio):
+    client, db, company, _ = owner_studio
+    db.add(Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: одна запись", status=TaskStatus.COMPLETED))
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/work", params={"page": "99999"})
+    assert page.status_code == 200
+    assert "Страница 1 из 1" in page.text
+    assert "Показано 1–1 из 1" in page.text
