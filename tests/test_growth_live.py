@@ -285,7 +285,7 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'id="sg-create-format-help"' in html
     assert 'data-sg-description="' in html
     assert 'create-editor-compact-v4-20261121' in html
-    assert 'growth-live.css?v=28-create-compact' in html
+    assert 'growth-live.css?v=29-create-voice-hint' in html
     assert "vkImageSlot.appendChild(vkImageRow)" in js
     assert "event.target instanceof Node && !history.contains(event.target)" not in js
     dispatcher = client.get('/studio/assets/dispatcher.js').text
@@ -353,7 +353,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=28-create-compact' in page.text
+    assert '/studio/assets/growth-live.css?v=29-create-voice-hint' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
     assert '/studio/assets/dispatcher.js?v=create-editor-compact-v4-20261121' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
