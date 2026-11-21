@@ -171,7 +171,7 @@
     if(formatHelp)formatHelp.textContent=selected.dataset.sgDescription || '';
     context.textContent=key==='whiteboard'
       ? 'Выбрано: Простое видео (обычно около 30 секунд). Укажите тему ниже. Платные операции запускаются только после подтверждения.'
-      : 'Выбрано: '+names[key]+'. Укажите тему и нажмите «Продолжить». Перед созданием появится подтверждение.';
+      : 'Выбрано: '+names[key]+'. Укажите тему и нажмите «Проверить задание». Создание начнётся только после подтверждения.';
     if(advanced) advanced.hidden=key==='whiteboard';
     if(key==='whiteboard'){
       const link=document.createElement('a');link.href=base+'/whiteboard';
