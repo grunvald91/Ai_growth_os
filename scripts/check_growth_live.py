@@ -156,6 +156,18 @@ def main():
                     page.set_viewport_size({'width':width,'height':844})
                     page.evaluate("()=>window.ServGoTheme.setPreference('dark')")
                     expect(page.locator('body')).to_have_class(__import__('re').compile('dark'))
+                    colors=page.evaluate("""() => {
+                      const main=getComputedStyle(document.querySelector('.sg-create-main'));
+                      const bar=getComputedStyle(document.querySelector('.sg-create-dispatch .command-bar'));
+                      const input=getComputedStyle(document.querySelector('#dp-input'));
+                      const placeholder=getComputedStyle(document.querySelector('#dp-input'),'::placeholder');
+                      return {mainBg:main.backgroundColor,barBg:bar.backgroundColor,
+                        inputBg:input.backgroundColor,mainText:main.color,
+                        inputText:input.color,placeholderText:placeholder.color};
+                    }""")
+                    assert colors['barBg']==colors['mainBg'], colors
+                    assert colors['inputBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
+                    assert colors['inputText']==colors['mainText'], colors
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
                 page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
