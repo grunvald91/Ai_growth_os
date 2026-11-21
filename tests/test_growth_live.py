@@ -207,7 +207,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=create-editor-compact-v4-20261121' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-editor-compact-v4-20261121' in page.text
+    assert '/studio/assets/dispatcher.js?v=voice-start-fast-20261121' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -355,7 +355,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=29-create-voice-hint' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-editor-compact-v4-20261121' in page.text
+    assert '/studio/assets/dispatcher.js?v=voice-start-fast-20261121' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text
@@ -1413,6 +1413,8 @@ def test_voice_glow_uses_existing_audio_stream(live):
     assert "window.VoiceGlow.recognize()" in dispatcher
     assert "window.VoiceGlow.hide()" in dispatcher
     assert "window.VoiceGlow.arm()" in dispatcher
+    assert "var VOICE_HOLD_START_MS = 120;" in dispatcher
+    assert "performance.measure('servgo:voice-startup'" in dispatcher
     assert "function arm()" in res.text
     assert "attempt !== resumeAttempt" in res.text
     assert "Math.sqrt(sum / samples.length) - .003" in res.text

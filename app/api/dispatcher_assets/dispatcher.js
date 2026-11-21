@@ -1221,6 +1221,8 @@
   var voiceUrl = root.getAttribute('data-voice-url');
   var voiceHoldEnabled = form.classList.contains('command-bar');
   var voiceDispatchPending = false, discardRecording = false, activeHold = null, holdTimer = null;
+  // Recognise a hold quickly, but leave short taps free for keyboard editing.
+  var VOICE_HOLD_START_MS = 120;
   var previewUrl = root.getAttribute('data-voice-preview-url');
   var voiceHitbox = document.getElementById('dp-voice-hitbox');
   var modeMicButton = document.getElementById('dp-mode-mic');
@@ -1385,11 +1387,16 @@
     showNote('');
     if (voiceHoldEnabled) input.blur(); // close the keyboard before showing the recording glow
     micOpening = true;
+    // Start opening the device before updating the UI: do not make browser
+    // microphone acquisition wait for layout, glow or live-caption work.
+    var microphoneRequest;
+    try { microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (error) { microphoneRequest = Promise.reject(error); }
     if (voiceHoldEnabled) {
       setVoiceState('connecting');
       showLive('Подключаю микрофон…', '', true);
     }
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+    microphoneRequest.then(function (stream) {
       micOpening = false;
       if (voiceHoldEnabled && (!intent || intent !== activeHold || intent.cancelled)) {
         stream.getTracks().forEach(function (track) { track.stop(); });
@@ -1407,6 +1414,10 @@
       try { recorder.start(1000); }
       catch (error) { recorder = null; releaseStream(); hideLive(); setVoiceState('idle'); showNote('Не получилось включить запись.', true); return; }
       recordStarted = Date.now();
+      if (intent && typeof intent.pressedAt === 'number') {
+        try { performance.measure('servgo:voice-startup', { start: intent.pressedAt, end: performance.now() }); }
+        catch (ignored) {}
+      }
       if (voiceHoldEnabled && window.VoiceGlow) window.VoiceGlow.start(stream);
       recordingId += 1; lastLive = '';
       showLive(voiceHoldEnabled ? 'Говорите · отпустите, чтобы отправить' : 'Слушаю…', '', false);
@@ -1623,7 +1634,16 @@
           micOpening || voiceWorking || busy || voiceDispatchPending) return;
       // Defer the Android keyboard/text-selection gesture until a short tap is known.
       if (event.pointerType === 'touch') event.preventDefault();
-      activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, cancelled: false, started: false };
+      activeHold = { id: event.pointerId, x: event.clientX, y: event.clientY, pressedAt: performance.now(), cancelled: false, started: false };
+      // Arm the timer before constructing AudioContext; that work must not
+      // increase the gesture's mandatory wait time.
+      form.classList.add('voice-arming');
+      holdTimer = setTimeout(function () {
+        holdTimer = null;
+        if (!activeHold || activeHold.cancelled) return;
+        activeHold.started = true;
+        startRecording();
+      }, VOICE_HOLD_START_MS);
       if (window.VoiceGlow) {
         window.VoiceGlow.setKnobX(event.clientX);
         window.VoiceGlow.arm(); // Safari/iOS needs AudioContext resumed in a real pointer gesture.
@@ -1632,13 +1652,6 @@
       if (event.pointerType === 'touch' && event.target.setPointerCapture) {
         try { event.target.setPointerCapture(event.pointerId); } catch (error) {}
       }
-      form.classList.add('voice-arming');
-      holdTimer = setTimeout(function () {
-        holdTimer = null;
-        if (!activeHold || activeHold.cancelled) return;
-        activeHold.started = true;
-        startRecording();
-      }, 220);
     });
     function endHold(event, cancelled) {
       if (!activeHold || (event && event.pointerId !== activeHold.id)) return;

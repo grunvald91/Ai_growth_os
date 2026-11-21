@@ -267,6 +267,8 @@ def main():
                       }));
                     }""",[kind,pointer_id])
                 pointer('pointerdown',11)
+                # A real quick tap should not start mic permission/acquisition.
+                page.wait_for_timeout(80)
                 # The Web Audio context must be activated during the user gesture,
                 # not from the later getUserMedia promise.
                 assert page.evaluate('window.__mockAudioResumes')==1, 'AudioContext not armed on pointerdown'
@@ -297,6 +299,8 @@ def main():
                 assert page.evaluate('window.__mockAudioResumes')==2, 'hold did not arm audio in gesture'
                 page.wait_for_function("() => window.__mockMicStarts===1 && document.querySelector('#dp-form').classList.contains('voice-recording')")
                 assert page.evaluate('window.__mockAudioContexts')==2, 'recorder opened a second AudioContext'
+                startup = page.evaluate("() => performance.getEntriesByName('servgo:voice-startup', 'measure').at(-1)?.duration")
+                assert startup is not None and 100 <= startup < 400, f'Voice start delayed: {startup} ms'
                 page.wait_for_timeout(180)
                 active_overlay=page.locator('#dp-voice-overlay').evaluate("""element=>({
                   opacity:parseFloat(getComputedStyle(element).opacity),
@@ -470,6 +474,7 @@ def main():
                     'mic_hides_keyboard':True,'text_editable_with_keyboard':True,
                     'typing_draft_preserved':True,'quiet_voice_moves_bars':True,
                     'context_armed_on_pointerdown':True,'short_tap_releases_context':True,
+                    'voice_startup_instrumented':True,'voice_hold_delay_120ms':True,
                     'old_resume_error_does_not_cancel_new_recording':True,
                     'current_resume_error_releases_analyser':True})
                 page.screenshot(path=str(OUT/'voice-hold-390.png'),animations='disabled')

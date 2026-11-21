@@ -231,6 +231,9 @@ def test_chat_page_renders_without_growth_design_wrapper_and_serves_assets(chat_
         assert "renderMarkdownInto" in js.text
         assert "setupVoiceInput" in js.text
         assert "Вернуть как сказано" in js.text
+        assert "const VOICE_HOLD_START_MS = 120;" in js.text
+        assert 'performance.measure("servgo:voice-startup"' in js.text
+        assert 'ai-chat.js?v=9' in page.text
 
 
 def test_chat_requires_auth_and_csrf_when_configured(chat_env):
@@ -1038,7 +1041,7 @@ def test_standalone_ai_chat_uses_shared_floating_header_design(chat_env):
     with TestClient(app) as client:
         page=client.get("/studio/chat")
         assert page.status_code == 200
-        assert "ai-chat.css?v=8" in page.text
+        assert "ai-chat.css?v=9" in page.text
         css=client.get("/studio/assets/ai-chat.css")
         assert css.status_code == 200
         source=css.text.split("/* ServGo Studio — unified floating controls for standalone AI Chat.", 1)[1]
