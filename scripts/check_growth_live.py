@@ -161,8 +161,10 @@ def main():
                 expect(page.locator('#sg-create-count-row')).to_be_visible()
                 expect(page.locator('#sg-create-vk-image-primary')).to_be_hidden()
                 page.locator('[data-sg-format="whiteboard"]').click()
+                expect(page.locator('#sg-create-topic-label')).to_have_text('2. О чём материал?')
                 expect(page.locator('#sg-create-advanced')).to_be_hidden()
                 page.locator('[data-sg-format="post"]').click()
+                expect(page.locator('#sg-create-topic-label')).to_have_text('3. О чём материал?')
                 expect(page.locator('#sg-create-primary-platform')).to_be_visible()
                 # Use an isolated DOM message; no AI task or real publication.
                 page.evaluate("""() => {
