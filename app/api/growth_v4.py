@@ -105,7 +105,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
       <div id="sg-create-settings" class="sg-create-settings">
         <label class="sg-create-setting" id="sg-create-platform-row" hidden>
           <span>Площадка</span>
-          <select id="sg-create-platform" aria-label="Площадка"></select>
+          <select id="sg-create-platform" name="platform" aria-label="Площадка"></select>
         </label>
         <label class="sg-create-setting" id="sg-create-count-row" hidden>
           <span>Количество экранов Stories</span>
@@ -183,7 +183,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           <div class="sg-create-main">
             {warning}
             <div class="sg-create-label">1. Что создаём?</div>
-            <div class="sg-create-picks">{cards}</div>
+            <div class="sg-create-picks" role="group" aria-label="Формат материала">{cards}</div>
             <div class="sg-create-primary-platform" id="sg-create-primary-platform">
               <div class="sg-create-label">2. Площадка</div>
               <div id="sg-create-platform-slot"></div>
@@ -223,8 +223,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </button>
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
-              <textarea id="dp-input" class="dp-input" rows="1"
-                placeholder="Например: зачем небольшому бизнесу CRM?" enterkeyhint="send"></textarea>
+              <textarea id="dp-input" name="topic" class="dp-input" rows="3"
+                placeholder="Например: зачем небольшому бизнесу CRM?"
+                enterkeyhint="send" aria-describedby="sg-create-context" required></textarea>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
