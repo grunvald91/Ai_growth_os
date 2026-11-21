@@ -1675,6 +1675,24 @@ body[data-growth-design="v4"] .topbar .top-actions :is(
 body[data-growth-design="v4"] .topbar :is(
   .mobile-brand, .cmd-search, .icon-btn, .sg-notifications > summary, .biz-switch
 ):focus-visible { outline: 2px solid var(--s-accent); outline-offset: 3px; }
+/* The legacy route styles are imported into v4. At the 781px handoff some
+   pages drop the sidebar grid item, placing workspace inside the 200px nav
+   column. Explicit grid placement prevents negative-position header buttons. */
+@media(min-width:781px) {
+  body[data-growth-design="v4"] .shell { display: grid !important; }
+  body[data-growth-design="v4"] .shell > .sidebar {
+    display: flex !important;
+    grid-column: 1 !important;
+  }
+  body[data-growth-design="v4"] .shell > .workspace {
+    display: block !important;
+    grid-column: 2 !important;
+    min-width: 0;
+  }
+  body[data-growth-design="v4"] .shell > #rail {
+    grid-column: 3 !important;
+  }
+}
 /* Preserve the original first-content baseline while allowing scrolling behind
    the overlay. This padding belongs to the page, not the topbar. */
 body[data-growth-design="v4"] .workspace > #main { padding-top: 104px !important; }
