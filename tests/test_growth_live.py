@@ -235,7 +235,10 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'aria-label="Продолжить к проверке задания"' in html
     assert html.count('data-sg-suggest') == 1
     assert 'Статья · SEO-завод</' not in html
-    assert 'Перейти в SEO-завод' in html
+    assert 'Нужна SEO-статья? Открыть SEO-завод' in html
+    assert html.index('Нужна SEO-статья?') < html.index('id="sg-create-primary-platform"')
+    assert 'id="sg-create-topic-label"' in html
+    assert "topicLabel.textContent=platformRow.hidden" in js
     js = client.get('/studio/assets/create-studio.js').text
     assert 'platformSlot.appendChild(platformRow)' in js
     assert "chooseFormat('post')" in js
