@@ -453,3 +453,23 @@ def test_worklist_compact_css_has_one_row_filters_and_finger_targets():
     assert "overflow-x:auto" in CSS
     assert "min-height:44px" in CSS
     assert ".sg-work-board .sg-work-item:focus-visible" in CSS
+    from app.api.content_studio_work_ui import JS
+    assert "Boolean(j.needs_decision)" in JS
+    assert "a.status" in JS
+
+
+def test_failed_task_is_in_attention_but_cancelled_task_is_not(owner_studio):
+    client, db, company, _ = owner_studio
+    failed = Task(product_id=company.id, assigned_agent="content_factory",
+                  title="CONTENT: Ошибка", status=TaskStatus.FAILED)
+    cancelled = Task(product_id=company.id, assigned_agent="content_factory",
+                     title="CONTENT: Отменено", status=TaskStatus.CANCELLED)
+    db.add_all([failed, cancelled])
+    db.commit()
+    base = f"/studio/products/{company.id}/work"
+    attention = client.get(base + "?tab=approval").text
+    assert f'/tasks/{failed.id}' in attention
+    assert f'/tasks/{cancelled.id}' not in attention
+    problem = client.get(base + "?tab=problems").text
+    assert f'/tasks/{failed.id}' in problem
+    assert f'/tasks/{cancelled.id}' in problem
