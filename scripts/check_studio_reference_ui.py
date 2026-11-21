@@ -210,6 +210,21 @@ def main():
                     cdp.send('Input.dispatchTouchEvent', {'type':kind,'touchPoints':[] if x is None else [
                         {'x':x,'y':y,'id':1}], 'modifiers':0})
                 page.locator('#dp-feed').evaluate('(el)=>el.scrollTop=0')
+                # Content widgets may hydrate links between point selection and
+                # CDP touchStart. Keep the gesture target stable and noninteractive
+                # inside #main, rather than accidentally swiping on a real link.
+                page.evaluate("""() => {
+                  const target=document.createElement('div');
+                  target.id='sg-daily-swipe-test-surface';
+                  target.setAttribute('aria-hidden','true');
+                  target.style.cssText='position:fixed;left:82px;top:374px;' +
+                    'width:160px;height:55px;z-index:50;' +
+                    'background:transparent;pointer-events:auto;touch-action:pan-y pinch-zoom';
+                  document.querySelector('#main').appendChild(target);
+                }""")
+                assert page.evaluate("""() =>
+                  document.elementFromPoint(90,400)?.id==='sg-daily-swipe-test-surface'
+                """), 'Stable noninteractive swipe surface must receive the touch'
                 # An earlier widget may now occupy the old fixed (100,400) test
                 # point. The real touch gesture intentionally ignores buttons
                 # and links, so choose a noninteractive area inside #main rather
@@ -240,11 +255,35 @@ def main():
                     document.body.dataset.sgTouchEvents = '1';
                   }, {capture:true,once:true});
                 }""")
+                page.evaluate("""() => {
+                  window.__sgSwipeTrace=[];
+                  for (const type of ['touchstart','touchmove','touchend','touchcancel']) {
+                    document.addEventListener(type, event => {
+                      window.__sgSwipeTrace.push({
+                        type, cancelable:event.cancelable,
+                        target:event.target?.tagName,
+                        x:event.touches[0]?.clientX,y:event.touches[0]?.clientY,
+                        visualHeight:visualViewport?.height,
+                        className:document.body.className
+                      });
+                    }, {capture:true,passive:true});
+                  }
+                }""")
                 touch('touchStart',start['x'],start['y'])
                 page.wait_for_function("document.body.dataset.sgTouchEvents === '1'")
                 page.evaluate("()=>new Promise(resolve=>requestAnimationFrame(resolve))")
                 touch('touchMove',start['x']+60,start['y'])
-                expect(page.locator('body')).to_have_class(__import__('re').compile('sg-daily-dragging'))
+                if not page.locator('body').evaluate("el=>el.classList.contains('sg-daily-dragging')"):
+                    raise AssertionError(('daily-swipe-not-locked', start,
+                        page.evaluate("window.__sgSwipeTrace"),
+                        page.evaluate("""({x,y}) => {
+                          const target=document.elementFromPoint(x,y);
+                          return {target:target?.outerHTML?.slice(0,350),
+                            touchAction:target&&getComputedStyle(target).touchAction,
+                            mainTouch:getComputedStyle(document.querySelector('#main')).touchAction,
+                            visualHeight:visualViewport?.height,
+                            yScroll:window.scrollY};
+                        }""", start)))
                 first = page.locator('#sgDailyDrawer').bounding_box()['x']
                 touch('touchMove',start['x']+130,start['y'])
                 second = page.locator('#sgDailyDrawer').bounding_box()['x']
@@ -258,6 +297,7 @@ def main():
                 touch('touchMove',140,300)
                 touch('touchCancel')
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','false')
+                page.evaluate("document.getElementById('sg-daily-swipe-test-surface')?.remove()")
                 page.screenshot(path=str(captures / 'daily-dark-390.png'))
                 touch('touchStart',320,500); touch('touchMove',40,500); touch('touchEnd')
                 expect(page.locator('#sgDailyDrawer')).to_have_attribute('aria-hidden','true')

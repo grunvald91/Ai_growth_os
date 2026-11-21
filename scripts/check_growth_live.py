@@ -69,27 +69,65 @@ def main():
                 page.goto(base)
                 page.get_by_text('Новый дизайн →', exact=True).click()
                 expect(page.locator('.topbar')).to_be_visible()
-                # Desktop/mobile review: tiny header anchor, separate controls,
-                # no horizontal overflow or collisions across both themes.
+                # Responsive floating-header smoke on real Studio routes:
+                # mobile, tablet, desktop, both themes, no full-width strip.
+                screenshot_dir=Path('/tmp/servgo-growth-voice-ui')
+                screenshot_dir.mkdir(parents=True,exist_ok=True)
                 for width in (320, 360, 390, 768, 781, 1024, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('', '/create', '/work', '/seo', '/materials'):
                         page.goto(base+suffix)
-                        assert page.evaluate("""() => {
-                          const header=document.querySelector('.workspace > .topbar');
-                          const rect=header.getBoundingClientRect();
-                          const left=header.querySelector('.crumbs').getBoundingClientRect();
-                          const right=header.querySelector('.top-actions').getBoundingClientRect();
-                          const main=document.querySelector('#main');
-                          const style=getComputedStyle(header);
-                          return rect.height<=2 &&
-                                 style.backgroundColor==='rgba(0, 0, 0, 0)' &&
-                                 style.pointerEvents==='none' &&
-                                 left.left>=0 && right.right<=innerWidth+1 &&
-                                 left.right<=right.left+1 &&
-                                 parseFloat(getComputedStyle(main).paddingTop)>=62 &&
-                                 document.documentElement.scrollWidth<=innerWidth;
-                        }"""), (width,suffix,'floating-header-geometry')
+                        for theme in ('light', 'dark'):
+                            page.evaluate('(mode)=>window.ServGoTheme.setPreference(mode)',theme)
+                            correct=page.evaluate("""() => {
+                              const header=document.querySelector('.workspace > .topbar');
+                              const rect=header.getBoundingClientRect();
+                              const left=header.querySelector('.crumbs').getBoundingClientRect();
+                              const right=header.querySelector('.top-actions').getBoundingClientRect();
+                              const main=document.querySelector('#main');
+                              const control=header.querySelector('.biz-switch');
+                              const style=getComputedStyle(header);
+                              const surface=getComputedStyle(control);
+                              const create=document.querySelector('.sg-create-screen');
+                              return rect.height<=2 &&
+                                     style.backgroundColor==='rgba(0, 0, 0, 0)' &&
+                                     style.pointerEvents==='none' &&
+                                     left.left>=0 && right.right<=innerWidth+1 &&
+                                     left.right<=right.left+1 &&
+                                     (parseFloat(getComputedStyle(main).paddingTop)>=62 ||
+                                     parseFloat(getComputedStyle(main).marginTop)>=62) &&
+                                     surface.backgroundColor!=='rgba(0, 0, 0, 0)' &&
+                                     surface.opacity==='1' &&
+                                     (!create || create.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
+                                     document.documentElement.scrollWidth<=innerWidth;
+                            }""")
+                            if not correct:
+                                page.screenshot(path=str(screenshot_dir/f'floating-header-error-{theme}-{width}.png'),animations='disabled')
+                                diagnostic=page.evaluate("""() => {
+                                  const h=document.querySelector('.workspace > .topbar'),
+                                    l=h.querySelector('.crumbs').getBoundingClientRect(),
+                                    r=h.querySelector('.top-actions').getBoundingClientRect(),
+                                    m=document.querySelector('#main'),
+                                    c=h.querySelector('.biz-switch'),
+                                    create=document.querySelector('.sg-create-screen');
+                                  return {headerHeight:h.getBoundingClientRect().height,
+                                    background:getComputedStyle(h).backgroundColor,
+                                    pointerEvents:getComputedStyle(h).pointerEvents,
+                                    crumbLeft:l.left,crumbRight:l.right,
+                                    actionsLeft:r.left,actionsRight:r.right,
+                                    viewport:innerWidth,paddingTop:getComputedStyle(m).paddingTop,
+                                    marginTop:getComputedStyle(m).marginTop,
+                                    controlBackground:getComputedStyle(c).backgroundColor,
+                                    controlOpacity:getComputedStyle(c).opacity,
+                                    createTop:create?.getBoundingClientRect().top,
+                                    minBottom:Math.min(l.bottom,r.bottom),
+                                    documentWidth:document.documentElement.scrollWidth};
+                                }""")
+                                raise AssertionError((width,suffix,theme,'floating-header-geometry',diagnostic))
+                            if width in (320,390,781,1440) and suffix in ('','/create'):
+                                shot=suffix.removeprefix('/') or 'home'
+                                page.screenshot(path=str(screenshot_dir/f'floating-header-{shot}-{theme}-{width}.png'),animations='disabled')
+                page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 for width in (320, 390, 768, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('','/create','/work','/materials','/review','/channels',
@@ -564,13 +602,13 @@ def main():
                     page.screenshot(path=f'/tmp/v4-history-{width}-{height}.png',animations='disabled')
                     metrics=page.evaluate("""()=>{
                       const rect=s=>document.querySelector(s).getBoundingClientRect();
-                      const feed=rect('#dp-feed'),form=rect('#dp-form'),dock=rect('.command-dock'),nav=rect('#mobileNav'),top=rect('.topbar');
+                      const feed=rect('#dp-feed'),form=rect('#dp-form'),dock=rect('.command-dock'),nav=rect('#mobileNav'),top=rect('.topbar'),crumbs=rect('.topbar .crumbs'),actions=rect('.topbar .top-actions');
                       const el=document.querySelector('#dp-feed');
                       return {feedTop:feed.top,feedBottom:feed.bottom,formTop:form.top,dockBottom:dock.bottom,navTop:nav.height?nav.top:innerHeight,
-                        mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
+                        mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,floatingBottom:Math.max(crumbs.bottom,actions.bottom),overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
                     }""")
                     assert metrics['scrollable'] and not metrics['overflow'],metrics
-                    assert metrics['feedTop']-metrics['headerBottom']<75,metrics
+                    assert -1<=metrics['feedTop']-metrics['floatingBottom']<=32,metrics
                     # The transparent floating composer intentionally overlaps
                     # the scroll region; the dedicated voice UI smoke checks
                     # that the latest message stays readable above it.
