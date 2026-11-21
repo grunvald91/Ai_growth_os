@@ -1389,7 +1389,9 @@
     micOpening = true;
     // Start opening the device before updating the UI: do not make browser
     // microphone acquisition wait for layout, glow or live-caption work.
-    var microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true });
+    var microphoneRequest;
+    try { microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (error) { microphoneRequest = Promise.reject(error); }
     if (voiceHoldEnabled) {
       setVoiceState('connecting');
       showLive('Подключаю микрофон…', '', true);
