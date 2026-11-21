@@ -8,12 +8,16 @@ on:
       - 'app/content/creative_images.py'
       - 'app/content/vk_post_image.py'
       - 'app/content/vk_image_critic.py'
+      - 'app/content/vk_photo_upload.py'
+      - 'app/social_vk.py'
+      - 'app/api/vk_publishing.py'
       - 'app/api/content_studio.py'
       - 'app/api/creative_image_gallery.py'
       - 'app/dispatcher/**'
       - 'tests/test_vk_post_image.py'
       - 'tests/test_vk_image_critic.py'
       - 'tests/test_vk_post_image_e2e.py'
+      - 'tests/test_vk_photo_upload.py'
       - '.github/workflows/vk-post-image-e2e.yml'
   workflow_dispatch:
 
@@ -45,6 +49,7 @@ jobs:
           tests/test_vk_post_image_e2e.py
           tests/test_vk_image_critic.py
           tests/test_vk_post_image.py
+          tests/test_vk_photo_upload.py
           tests/test_quick_post.py
       - name: Verify image and critique Python syntax
-        run: python -m compileall -q app/content/vk_post_image.py app/content/vk_image_critic.py
+        run: python -m compileall -q app/content/vk_post_image.py app/content/vk_image_critic.py app/content/vk_photo_upload.py
