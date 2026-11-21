@@ -1626,3 +1626,77 @@ body.home-page[data-growth-design="v4"] .dp-home .command-topicbar .dp-new {
   background:transparent!important;
   box-shadow:none!important;
 }
+
+/* Floating Studio header: no full-width opaque strip.
+   80% opacity applies only to control backgrounds, never labels or icons. */
+body[data-growth-design="v4"] {
+  --sg-floating-header-fill: color-mix(in srgb, var(--s-surface) 80%, transparent);
+  --sg-floating-header-edge: color-mix(in srgb, var(--s-line-2) 70%, transparent);
+  --sg-floating-header-shadow: 0 4px 18px rgba(13, 27, 42, .07);
+}
+body[data-growth-design="v4"] .workspace > .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 70;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body[data-growth-design="v4"] .topbar .crumbs {
+  box-sizing: border-box;
+  min-height: 44px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 14px;
+  background: var(--sg-floating-header-fill);
+  border: 1px solid var(--sg-floating-header-edge);
+  border-radius: 14px;
+  box-shadow: var(--sg-floating-header-shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+body[data-growth-design="v4"] .topbar .top-actions {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+body[data-growth-design="v4"] .topbar .top-actions :is(
+  .cmd-search, .icon-btn, .sg-notifications > summary, .biz-switch, .chip
+) {
+  background: var(--sg-floating-header-fill) !important;
+  border: 1px solid var(--sg-floating-header-edge);
+  border-radius: 14px;
+  box-shadow: var(--sg-floating-header-shadow);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+body[data-growth-design="v4"] .topbar :is(
+  .mobile-brand, .cmd-search, .icon-btn, .sg-notifications > summary, .biz-switch
+):focus-visible {
+  outline: 2px solid var(--s-accent);
+  outline-offset: 3px;
+}
+@media(max-width:780px) {
+  /* A phone shows a separate floating logo, never a wide breadcrumb strip. */
+  body[data-growth-design="v4"] .topbar .crumbs {
+    width: auto;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  body[data-growth-design="v4"] .topbar .crumbs .mobile-brand {
+    background: var(--sg-floating-header-fill) !important;
+    border: 1px solid var(--sg-floating-header-edge);
+    border-radius: 14px;
+    box-shadow: var(--sg-floating-header-shadow);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+}

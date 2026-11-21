@@ -1350,7 +1350,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=13' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=14-floating-header' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
@@ -1504,5 +1504,29 @@ def test_owner_home_chat_canvas_overrides_later_air_surface_styles():
     assert 'outline:none;' in active
     assert 'outline:1px solid var(--s-accent);' not in active
     assert (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8").count(
-        "growth-servgo-air.css?v=13"
+        "growth-servgo-air.css?v=14-floating-header"
     ) == 1
+
+
+def test_v4_header_uses_transparent_shell_and_separate_opaque_controls(live):
+    """Every Studio route shares the floating header, including mobile pages."""
+    client, _, product = live
+    base = f"/studio/products/{product.id}"
+    asset = "/studio/assets/growth-servgo-air.css?v=14-floating-header"
+    for suffix in ("", "/create", "/work", "/materials", "/seo", "/calendar"):
+        response = client.get(base + suffix + "?design=v4")
+        assert response.status_code == 200, suffix
+        assert 'data-growth-design="v4"' in response.text, suffix
+        assert 'class="topbar"' in response.text, suffix
+        assert asset in response.text, suffix
+    css = client.get("/studio/assets/growth-servgo-air.css").text
+    floating = css.split("/* Floating Studio header: no full-width opaque strip.", 1)[1]
+    assert "--sg-floating-header-fill: color-mix(in srgb, var(--s-surface) 80%, transparent)" in floating
+    header = floating.split('.workspace > .topbar {', 1)[1].split('}', 1)[0]
+    assert 'background: transparent !important' in header
+    assert 'border: 0 !important' in header
+    assert 'box-shadow: none !important' in header
+    assert '.sg-notifications > summary, .biz-switch, .chip' in floating
+    assert 'background: var(--sg-floating-header-fill) !important' in floating
+    assert '.topbar .crumbs .mobile-brand' in floating
+    assert '@media(max-width:780px)' in floating
