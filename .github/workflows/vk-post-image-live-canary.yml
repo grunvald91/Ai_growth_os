@@ -1,0 +1,65 @@
+name: VK image real provider canary (single-use)
+
+# Only the owner-controlled ready_for_review action invokes a live request.
+# No push, scheduled, automatic retry or manual workflow_dispatch trigger.
+on:
+  pull_request:
+    types: [ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vk-image-live-canary-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  real-provider-proof:
+    if: >-
+      ${{ github.repository == 'grunvald91/Ai_growth_os' &&
+          github.event.pull_request.number == 383 &&
+          github.event.pull_request.user.login == 'grunvald91' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'feature/vk-post-image-draft-20261120' &&
+          github.run_attempt == 1 }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install isolated test dependencies
+        run: python -m pip install -e '.[test]'
+      - name: Check offline provider contracts before any paid call
+        env:
+          XAI_API_KEY: ''
+        run: >-
+          python -m pytest -q tests/test_vk_post_image_e2e.py
+          tests/test_vk_image_critic.py
+          tests/test_vk_post_image.py
+      - name: One live image call and one live visual review call
+        env:
+          # Same trusted ClaudeHub credential as the existing Grok Code workflow.
+          # Never echo; only the runner receives the masked secret.
+          XAI_API_KEY: ${{ secrets.API }}
+          VK_LIVE_CANARY_DIR: ${{ runner.temp }}/vk-live-canary
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          PYTHONPATH=. python scripts/operations/vk_post_image_live_canary.py
+      - name: Attach synthetic image and scrubbed verdict
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vk-live-canary-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/vk-live-canary/result.json
+            ${{ runner.temp }}/vk-live-canary/vk-image-canary.png
+          if-no-files-found: ignore
+          retention-days: 3
