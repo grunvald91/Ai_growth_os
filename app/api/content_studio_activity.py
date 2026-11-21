@@ -643,13 +643,32 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
     next_action = (f'<p><a class="btn secondary" href="{base}/seo">Открыть SEO-завод</a></p>'
                    if seo_proposal else "")
     stage_sig = "|".join(str(run.id) + ":" + run.status for run in runs[-20:])
+    # Prioritize the output when it exists, and avoid a long process log
+    # pushing the useful material down the screen.
+    if key == "completed" and count:
+        stages_html = (
+            '<details class="sg-work-steps sg-work-steps-collapsible">'
+            '<summary>Этапы создания</summary><ol>'
+            + "".join(steps) + '</ol></details>'
+        )
+    else:
+        stages_html = (
+            '<div class="sg-work-steps"><h3>Этапы создания</h3><ol>'
+            + "".join(steps) + '</ol></div>'
+        )
+    results_html = (
+        '<div class="sg-work-results"><h3>Результаты</h3>'
+        + ("".join(rendered) or empty_result) + '</div>'
+    )
+    output_first = key in {"completed", "waiting_approval"} and bool(count)
+    sections = (
+        results_html + stages_html if output_first
+        else stages_html + results_html
+    )
     return (
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
-        f'<div class="sg-work-steps"><h3>Этапы создания</h3><ol>{"".join(steps)}</ol></div>'
-        f'<div class="sg-work-results"><h3>Результаты</h3>'
-        + ("".join(rendered) or empty_result)
-        + '</div>' + refresh + fail + next_action
+        + fail + sections + refresh + next_action
         + f'<p><a class="sg-mini-link" href="{base}/work">← Все задания</a></p></section>'
     )
