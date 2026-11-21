@@ -232,7 +232,7 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert '2. Площадка' in html
     assert '3. О чём материал?' in html
     assert html.index('id="sg-create-platform-slot"') < html.index('id="dp-input"')
-    assert 'aria-label="Проверить параметры задания"' in html
+    assert 'aria-label="Проверить задание"' in html
     assert html.count('data-sg-suggest') == 1
     assert 'Статья · SEO-завод</' not in html
     assert 'Нужна SEO-статья? Открыть SEO-завод' in html
@@ -246,6 +246,13 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert "sg:dispatcher:response" in js
     assert 'id="sg-create-extra-settings-slot"' in html
     assert 'id="sg-create-review-summary"' in html
+    assert 'id="sg-create-voice-hint"' in html
+    assert 'rows="2"' in html
+    assert html.index('id="dp-input"') < html.index('class="sg-create-suggest-row"') < html.index('id="sg-create-extra-settings-slot"')
+    assert 'Для голосового ввода удерживайте поле темы' not in html
+    assert '🎙 Удерживайте поле — голосом' in html
+    assert "context.textContent=key==='whiteboard'" in js
+    assert "summary.textContent=line;" in js
     assert 'id="sg-create-format-options-slot"' in html
     assert 'name="vk_image_enabled"' in html
     assert "extrasSlot.appendChild(advanced)" in js
@@ -257,6 +264,11 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert '.sg-create-dispatch .command-dock' in css
     assert 'container-type:inline-size' in css
     assert 'touch-action:pan-x' in css
+    assert 'Screenshot-led Create editor refinement' in css
+    assert '#dp-input:focus-visible' in css
+    assert '.sg-create-suggest-row' in css
+    assert 'min-height:100px!important' in css
+    assert 'background:transparent!important' in css
     assert 'name="topic"' in html
     assert 'name="platform" form="dp-form"' in html
     assert 'name="audience" form="dp-form"' in html
