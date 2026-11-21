@@ -1260,6 +1260,10 @@ body[data-growth-design="v4"] .sg-create-work-link{
    set a generic composer fill, but Create has its own dark card. */
 body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar{
   background:var(--s-surface)!important;color:var(--s-text);
+  /* Avoid the inherited background transition flashing white when the theme
+     changes. Focus ring and border feedback can still animate. */
+  transition-property:border-color,box-shadow!important;
+  transition-duration:.16s,.16s!important;
 }
 body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar #dp-input{
   background:transparent!important;
