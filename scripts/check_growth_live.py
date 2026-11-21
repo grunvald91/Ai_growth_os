@@ -69,27 +69,41 @@ def main():
                 page.goto(base)
                 page.get_by_text('Новый дизайн →', exact=True).click()
                 expect(page.locator('.topbar')).to_be_visible()
-                # Desktop/mobile review: tiny header anchor, separate controls,
-                # no horizontal overflow or collisions across both themes.
+                # Responsive floating-header smoke on real Studio routes:
+                # mobile, tablet, desktop, both themes, no full-width strip.
+                screenshot_dir=Path('/tmp/servgo-growth-voice-ui')
+                screenshot_dir.mkdir(parents=True,exist_ok=True)
                 for width in (320, 360, 390, 768, 781, 1024, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('', '/create', '/work', '/seo', '/materials'):
                         page.goto(base+suffix)
-                        assert page.evaluate("""() => {
-                          const header=document.querySelector('.workspace > .topbar');
-                          const rect=header.getBoundingClientRect();
-                          const left=header.querySelector('.crumbs').getBoundingClientRect();
-                          const right=header.querySelector('.top-actions').getBoundingClientRect();
-                          const main=document.querySelector('#main');
-                          const style=getComputedStyle(header);
-                          return rect.height<=2 &&
-                                 style.backgroundColor==='rgba(0, 0, 0, 0)' &&
-                                 style.pointerEvents==='none' &&
-                                 left.left>=0 && right.right<=innerWidth+1 &&
-                                 left.right<=right.left+1 &&
-                                 parseFloat(getComputedStyle(main).paddingTop)>=62 &&
-                                 document.documentElement.scrollWidth<=innerWidth;
-                        }"""), (width,suffix,'floating-header-geometry')
+                        for theme in ('light', 'dark'):
+                            page.evaluate('(mode)=>window.ServGoTheme.setPreference(mode)',theme)
+                            assert page.evaluate("""() => {
+                              const header=document.querySelector('.workspace > .topbar');
+                              const rect=header.getBoundingClientRect();
+                              const left=header.querySelector('.crumbs').getBoundingClientRect();
+                              const right=header.querySelector('.top-actions').getBoundingClientRect();
+                              const main=document.querySelector('#main');
+                              const control=header.querySelector('.biz-switch');
+                              const style=getComputedStyle(header);
+                              const surface=getComputedStyle(control);
+                              const create=document.querySelector('.sg-create-screen');
+                              return rect.height<=2 &&
+                                     style.backgroundColor==='rgba(0, 0, 0, 0)' &&
+                                     style.pointerEvents==='none' &&
+                                     left.left>=0 && right.right<=innerWidth+1 &&
+                                     left.right<=right.left+1 &&
+                                     parseFloat(getComputedStyle(main).paddingTop)>=62 &&
+                                     surface.backgroundColor!=='rgba(0, 0, 0, 0)' &&
+                                     surface.opacity==='1' &&
+                                     (!create || create.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
+                                     document.documentElement.scrollWidth<=innerWidth;
+                            }"""), (width,suffix,theme,'floating-header-geometry')
+                            if width in (320,390,781,1440) and suffix in ('','/create'):
+                                shot=suffix.removeprefix('/') or 'home'
+                                page.screenshot(path=str(screenshot_dir/f'floating-header-{shot}-{theme}-{width}.png'),animations='disabled')
+                page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 for width in (320, 390, 768, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('','/create','/work','/materials','/review','/channels',
