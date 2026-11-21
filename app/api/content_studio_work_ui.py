@@ -284,6 +284,13 @@ JS = r"""
  let shown=[];
  const readAll=widget.querySelector('[data-sg-read-all]');
  let ongoing=false;
+ function localizeWorkTimes(root){
+   const formatter=new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short'});
+   root.querySelectorAll('time[datetime]').forEach(el=>{
+     const value=new Date(el.getAttribute('datetime'));
+     if(Number.isFinite(value.getTime()))el.textContent='Создано '+formatter.format(value);
+   });
+ }
  const anchor=(item)=>{
    const a=document.createElement('a');
    a.className='sg-notify-entry '+(item.kind==='error'?'sg-notify-error':'');
@@ -302,6 +309,7 @@ JS = r"""
    if(!previous||!next)return;
    const oldY=window.scrollY;
    previous.replaceChildren(...Array.from(next.childNodes));
+   localizeWorkTimes(previous);
    const oldPages=workBoard.querySelector('.sg-work-pagination');
    const newPages=fresh.querySelector('.sg-work-pagination');
    if(oldPages&&newPages)oldPages.replaceWith(newPages);
@@ -327,7 +335,12 @@ JS = r"""
        'application/vnd.servgo.tasks+html'))return;
    const documentHtml=new DOMParser().parseFromString(await response.text(),'text/html');
    const fresh=documentHtml.querySelector('[data-sg-work-board]');
-   if(!fresh || fresh.dataset.sgListSignature===workBoard.dataset.sgListSignature)return;
+   if(!fresh)return;
+   if(fresh.dataset.sgListSignature===workBoard.dataset.sgListSignature){
+     pendingBoard=null;
+     if(updateButton)updateButton.hidden=true;
+     return;
+   }
    const list=workBoard.querySelector('.sg-work-list');
    const focusInList=Boolean(list?.contains(document.activeElement));
    const readingList=window.scrollY>240&&list?.getBoundingClientRect().top<120;
@@ -351,7 +364,9 @@ JS = r"""
    try{
      // The fragment endpoint includes the selected page, query, date range
      // and exact status counts. It must not rely on the recent 45-job feed.
-     if(workBoard)await refreshBoard();
+     if(workBoard){
+       try{await refreshBoard();}catch(_){/* list refresh failure must not block notifications */}
+     }
      const res=await fetch(endpoint,{cache:'no-store',credentials:'same-origin',
        headers:{'Accept':'application/json'}});
      if(!res.ok||!(res.headers.get('content-type')||'').includes('application/json'))return;
@@ -399,6 +414,7 @@ JS = r"""
      if(res.ok){lastSignature=null;await poll();}
    }finally{readAll.disabled=false;}
  });
+ if(workBoard)localizeWorkTimes(workBoard);
  poll();
  window.setInterval(poll,20000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
