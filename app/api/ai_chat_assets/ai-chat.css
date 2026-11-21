@@ -2092,3 +2092,74 @@ textarea {
 @media (max-width: 360px) {
   .ai-specialist-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+
+/* ServGo Studio — unified floating controls for standalone AI Chat.
+   The header itself is a 1px transparent anchor, never an opaque strip.
+   Messages scroll underneath the 80%-opaque individual controls. */
+.ai-topbar {
+  position:relative;
+  flex:0 0 1px;
+  height:1px;
+  min-height:1px;
+  padding:0 18px;
+  align-items:flex-start;
+  overflow:visible;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+  pointer-events:none;
+  z-index:20;
+}
+.ai-topbar-left,
+.ai-topbar-right {
+  margin-top:12px;
+  pointer-events:auto;
+  min-width:0;
+}
+.ai-topbar-left {
+  flex:1 1 auto;
+}
+.ai-topbar-right {
+  flex:0 1 auto;
+}
+.ai-topbar .ai-model-dropdown { min-width:0; max-width:100%; }
+.ai-topbar .ai-model-trigger {
+  min-height:42px;
+  max-width:100%;
+}
+.ai-topbar .ai-chat-title {
+  max-width:220px;
+  padding:8px 10px;
+}
+.ai-topbar :is(.ai-open-sidebar-btn,.ai-model-trigger,.ai-chat-title,
+  .ai-mode-pill,.ai-company-badge,.ai-company-select,.ai-specialist-badge) {
+  background:color-mix(in srgb,var(--s-surface) 80%,transparent) !important;
+  border:1px solid color-mix(in srgb,var(--s-line-2) 70%,transparent);
+  border-radius:14px;
+  box-shadow:0 4px 18px rgba(13,27,42,.07);
+  -webkit-backdrop-filter:blur(12px);
+  backdrop-filter:blur(12px);
+}
+.ai-topbar :is(.ai-open-sidebar-btn,.ai-model-trigger,.ai-company-select):focus-visible {
+  outline:2px solid var(--s-accent);
+  outline-offset:3px;
+}
+.ai-chat-scroll {
+  padding-top:84px;
+  scroll-padding-top:62px;
+}
+@media (min-width:861px) and (max-width:1150px) {
+  .ai-topbar .ai-chat-title { display:none; }
+  .ai-topbar .ai-model-trigger { max-width:min(260px,100%); }
+}
+@media (max-width:860px) {
+  .ai-topbar { padding-inline:10px; }
+  .ai-topbar-left,.ai-topbar-right { margin-top:10px; }
+  .ai-topbar .ai-open-sidebar-btn { min-width:42px; min-height:42px; }
+  .ai-topbar .ai-model-trigger { min-height:42px; }
+  .ai-chat-scroll {
+    padding-top:73px;
+    scroll-padding-top:58px;
+  }
+}

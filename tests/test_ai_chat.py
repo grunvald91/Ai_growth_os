@@ -1031,3 +1031,22 @@ def test_ai_chat_role_picker_midwidth_keeps_two_columns(chat_env):
         assert "@media (min-width: 1160px)" in css.text
         assert "@media (max-width: 360px)" in css.text
         assert "min-width: 780px" not in css.text
+
+
+def test_standalone_ai_chat_uses_shared_floating_header_design(chat_env):
+    """The independent AI Chat cannot retain the opaque header strip of old Studio."""
+    with TestClient(app) as client:
+        page=client.get("/studio/chat")
+        assert page.status_code == 200
+        assert "ai-chat.css?v=8" in page.text
+        css=client.get("/studio/assets/ai-chat.css")
+        assert css.status_code == 200
+        source=css.text.split("/* ServGo Studio — unified floating controls for standalone AI Chat.", 1)[1]
+        assert "height:1px;" in source
+        assert "background:transparent !important;" in source
+        assert "pointer-events:none;" in source
+        assert "color-mix(in srgb,var(--s-surface) 80%,transparent)" in source
+        assert ".ai-chat-scroll" in source
+        assert "padding-top:84px;" in source
+        assert "padding-top:73px;" in source
+        assert "scroll-padding-top:58px;" in source

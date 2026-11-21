@@ -5,6 +5,9 @@ on:
       - 'app/api/growth_v4.py'
       - 'app/api/whiteboard.py'
       - 'app/api/assets/growth-servgo-air.css'
+      - 'app/api/ai_chat.py'
+      - 'app/api/ai_chat_assets/**'
+      - 'scripts/check_ai_chat_floating_header.py'
       - 'app/api/assets/growth-live.*'
       - 'app/api/assets/growth-daily.*'
       - 'scripts/check_growth_live.py'
@@ -31,6 +34,8 @@ jobs:
         run: python scripts/check_growth_voice_ui.py
       - name: Check real Studio routes and simple-video creation/result
         run: python scripts/check_growth_live.py
+      - name: Check independent AI Chat floating header in Chromium
+        run: python scripts/check_ai_chat_floating_header.py
       - name: Check Studio reference and touch briefing
         run: python scripts/check_studio_reference_ui.py
       - name: Save browser diagnostics
