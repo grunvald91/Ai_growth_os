@@ -75,6 +75,8 @@
     platformRow.hidden=!channels[key] || channels[key].length===0;
     const platformShell=document.getElementById('sg-create-primary-platform');
     if(platformShell)platformShell.hidden=platformRow.hidden;
+    const topicLabel=document.getElementById('sg-create-topic-label');
+    if(topicLabel)topicLabel.textContent=platformRow.hidden ? '2. О чём материал?' : '3. О чём материал?';
     countRow.hidden=key!=='story';
     modelRow.hidden=key!=='story' && key!=='static_image';
     aspectRow.hidden=key!=='static_image';
