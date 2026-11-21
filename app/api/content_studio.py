@@ -29,7 +29,7 @@ from app.api.studio_servgo_org_js import JS as STUDIO_SERVGO_ORG_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_article import render_article
 from app.content.render import asset_path
-from app.api.content_studio_activity import (work_items, notice_items, notice_html,
+from app.api.content_studio_activity import (work_items, work_page, notice_items, notice_html,
     activity_html, activity_overview, task_detail_html, RESULT_KINDS)
 from app.api.content_studio_ui import (
     create_content_html, review_html, channels_html, speed_html, REVIEW_KINDS_BY_FILTER,
@@ -2474,15 +2474,26 @@ def studio_speed_page(product_id: UUID, days: int = 7, db: Session = Depends(get
 
 
 @router.get("/studio/products/{product_id}/work", response_class=HTMLResponse)
-def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(get_db)):
+def studio_work_page(product_id: UUID, tab: str = "all", q: str = "",
+                     period: str = "all", page: int = 1, partial: bool = False,
+                     db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
-    tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
-    html_body = activity_html(product.id, work_items(db, product.id), tab=tab)
-    result = HTMLResponse(studio_page_shell(
-        product, active="work", title="Задания",
-        subtitle="Что выполняется, что готово и где требуется ваше решение.",
-        body=html_body,
-    ))
+    data = work_page(db, product.id, tab=tab, query=q, period=period, page=page)
+    html_body = activity_html(
+        product.id, data["items"], tab=data["tab"],
+        q=data["q"], period=data["period"], page=data["page"],
+        total=data["total"], page_size=data["page_size"], counts=data["counts"],
+    )
+    if partial:
+        # Growth v4 middleware wraps HTML documents; a dedicated fragment media
+        # type keeps this authenticated read-only response free of page chrome.
+        result = Response(content=html_body, media_type="application/vnd.servgo.tasks+html")
+    else:
+        result = HTMLResponse(studio_page_shell(
+            product, active="work", title="Задания",
+            subtitle="Что выполняется, что готово и где требуется ваше решение.",
+            body=html_body,
+        ))
     result.headers["Cache-Control"] = "private, no-store"
     return result
 
