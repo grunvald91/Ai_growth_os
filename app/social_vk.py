@@ -448,6 +448,37 @@ async def active_token(settings, channel):
     return result["access_token"]
 
 
+async def photo_token_for_connected_group(db, settings, channel, group, adapter, wall_token):
+    """Prefer a separately linked classic user token for photo uploads.
+
+    Community tokens may support wall.post but not photos.getWallUploadServer.
+    VK ID (vk2.a) is not a proven replacement for legacy VK API user tokens.
+    Only use another credential bound to the SAME tenant and SAME community;
+    verify that the user can administer the group. Never send that user token
+    to the upload URL or use it for the final wall.post call.
+    """
+    if not channel.is_community_token:
+        return wall_token
+    account = db.scalar(select(CommentChannel).where(
+        CommentChannel.product_id == channel.product_id,
+        CommentChannel.platform == "vk",
+        CommentChannel.account_id == group,
+        CommentChannel.status == "connected",
+    ).limit(1))
+    if account is None:
+        return wall_token
+    try:
+        user_token = await active_token(settings, account)
+        if (not isinstance(user_token, str) or not user_token
+                or user_token.startswith("vk2.a.")):
+            return wall_token
+        await adapter.manager(group, user_token)
+        return user_token
+    except (ValueError, OSError, RuntimeError):
+        # Not a compatible verified user token; leave group-key behavior intact.
+        return wall_token
+
+
 def connected(db, product_id):
     # Dedicated publisher token takes precedence over legacy comment-token connection.
     row = db.scalar(select(Artifact).where(
@@ -718,7 +749,14 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
                 await adapter.manager(group, token)
             attachment = None
             if photo_path is not None:
-                attachment = await upload_wall_photo(adapter, token, group, photo_path)
+                with session_factory() as db:
+                    photo_token = await photo_token_for_connected_group(
+                        db, settings, ch, group, adapter, token,
+                    )
+                attachment = await upload_wall_photo(
+                    adapter, photo_token, group, photo_path,
+                    expected_sha256=data.get("image_sha256"),
+                )
             options = {"attachments": attachment} if attachment is not None else {}
             wall_post_started = True
             response = await adapter.call("wall.post", token, owner_id=-int(group),
