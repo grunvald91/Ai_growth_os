@@ -15,6 +15,8 @@
   if(vkImageSlot && vkImageRow)vkImageSlot.appendChild(vkImageRow);
   const vkRatioRow=document.getElementById('sg-create-vk-ratio-row');
   const vkReviewTip=document.getElementById('sg-create-vk-review-tip');
+  // The image generation/critic cost note must accompany the visible VK option.
+  if(vkImageSlot && vkReviewTip)vkImageSlot.appendChild(vkReviewTip);
   const aspectRow=document.getElementById('sg-create-aspect-row');
   const storyRatio=document.getElementById('sg-create-story-ratio');
   // The destination platform belongs next to the selected format, not in advanced settings.
