@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.content.creative_images import image_folder
 from app.content.vk_image_critic import (
     REVIEW_POLICY, VKImageIssue, VKImageReview, VKImageVisionReviewer,
-    critic_profile, review_vk_post_image, verified_vk_image_approval,
+    critic_profile, critic_prompt, review_vk_post_image, verified_vk_image_approval,
 )
 from app.core.config import Settings
 from app.models.domain import Artifact, Product, Task
@@ -196,3 +196,27 @@ def test_ready_flag_without_persisted_review_is_rejected(db, tmp_path):
     from app.api.content_studio import material_detail_page
     page = material_detail_page(db, product, post, root=tmp_path)
     assert "Публикацию нужно проверить" in page
+
+
+def test_invented_readable_contacts_are_critical_but_decorative_glyphs_are_not():
+    """A screenshot must never silently invent the customer's contact details."""
+    guidance = critic_prompt(
+        company_name="Мастерская", title="Пропущенные звонки",
+        body="Мастер занят, пока клиент ожидает ответа на своё обращение."
+    )
+    assert "phone number, email address, website URL" in guidance
+    assert "a CRITICAL misleading claim" in guidance
+    contact = VKImageIssue(
+        category="misleading", severity="critical", confidence="high",
+        evidence="На экране телефона показан читаемый номер, отсутствующий в тексте."
+    )
+    cosmetic = VKImageIssue(
+        category="text", severity="minor", confidence="high",
+        evidence="На экране телефона неразборчивые декоративные пиктограммы."
+    )
+    uncertain = VKImageIssue(
+        category="misleading", severity="critical", confidence="uncertain",
+        evidence="Есть сомнение, что на экране изображён телефонный номер."
+    )
+    assert VKImageReview(summary="Номер отсутствует в исходном посте.", issues=[contact]).blocked
+    assert not VKImageReview(summary="Декоративные знаки не мешают.", issues=[cosmetic, uncertain]).blocked
