@@ -191,7 +191,7 @@ CSS = r"""
 .sg-work-board .sg-work-item-foot{margin-top:11px;font-size:12px;
   color:var(--s-text-muted,var(--muted,#587085))}
 .sg-work-board .sg-work-open{color:var(--s-accent,var(--blue,#2F5BEB));font-weight:650;
-  white-space:nowrap}
+  white-space:nowrap;margin-left:auto}
 .sg-work-board .sg-work-status{margin:0;max-width:60%;flex-shrink:0}
 @media(max-width:660px){
   .sg-work-board .sg-work-toolbar p{font-size:12px}
