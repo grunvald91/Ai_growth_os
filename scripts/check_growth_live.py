@@ -160,7 +160,7 @@ def main():
                                   }
                                   feed.scrollTop=0;
                                 }""")
-                                assert page.evaluate("""() => {
+                                underlay=page.evaluate("""() => {
                                   const feed=document.querySelector('#dp-feed');
                                   const box=feed.getBoundingClientRect();
                                   const controls=document.querySelector('.topbar .top-actions').getBoundingClientRect();
@@ -168,12 +168,24 @@ def main():
                                   const initial=first.top;
                                   feed.scrollTop=70;
                                   const scrolled=feed.querySelector('.dp-msg').getBoundingClientRect();
-                                  return box.top<5 && box.top<controls.bottom &&
+                                  const output={
+                                    feedTop:box.top,controlsBottom:controls.bottom,
+                                    initial,scrollTop:feed.scrollTop,
+                                    scrolledTop:scrolled.top,firstBottom:scrolled.bottom,
+                                    fill: getComputedStyle(feed).paddingTop,
+                                    mainTop:document.querySelector('#main').getBoundingClientRect().top,
+                                    bodyClass:document.body.className,
+                                    rootClass:document.querySelector('.dp-home').className,
+                                    headerBg:getComputedStyle(document.querySelector('.topbar')).backgroundColor
+                                  };
+                                  output.passes=box.top<5 && box.top<controls.bottom &&
                                     feed.scrollTop>=65 && initial>=controls.bottom-1 &&
                                     scrolled.top<controls.bottom-20 &&
                                     scrolled.top>=box.top-5 &&
-                                    getComputedStyle(document.querySelector('.topbar')).backgroundColor==='rgba(0, 0, 0, 0)';
-                                }"""), (width,theme,'chat-text-must-scroll-behind-floating-controls')
+                                    output.headerBg==='rgba(0, 0, 0, 0)';
+                                  return output;
+                                }""")
+                                assert underlay['passes'], (width,theme,'chat-text-must-scroll-behind-floating-controls',underlay)
                             if width in (320,390,781,1440) and suffix in ('','/create'):
                                 shot=suffix.removeprefix('/') or 'home'
                                 page.screenshot(path=str(screenshot_dir/f'floating-header-{shot}-{theme}-{width}.png'),animations='disabled')
