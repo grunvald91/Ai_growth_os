@@ -1129,14 +1129,23 @@
     return {text:createCommand(text), creation:hints};
   }
 
+  function markCreateTopicInvalid(invalid) {
+    if (!root.classList.contains('sg-create-dispatch')) return;
+    input.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+    input.setAttribute('aria-describedby', invalid
+      ? 'sg-create-context dp-voice-note' : 'sg-create-context');
+  }
   function sendText() {
     var text = input.value.trim();
     if (!text || busy) return;
     var request = creationRequest(text);
     if (request.validation_error) {
+      markCreateTopicInvalid(true);
       showNote(request.validation_error, true);
+      input.focus();
       return; // Keep the original editable draft in the composer.
     }
+    markCreateTopicInvalid(false);
     showNote('');
     input.value = '';
     grow();
@@ -1149,7 +1158,14 @@
   }
 
   form.addEventListener('submit', function (event) { event.preventDefault(); sendText(); });
-  input.addEventListener('input', grow);
+  input.addEventListener('input', function () {
+    grow();
+    if (root.classList.contains('sg-create-dispatch') &&
+        input.getAttribute('aria-invalid') === 'true') {
+      markCreateTopicInvalid(false);
+      showNote('');
+    }
+  });
   input.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && !event.shiftKey) {
       // Safari may report the IME confirmation Enter after compositionend.
