@@ -34,15 +34,18 @@ def test_classic_mobile_more_dismisses_outside_instead_of_backdrop_only():
     assert "if(event.key!=='Escape')return" in js
 
 
-def test_create_inline_panels_and_conversation_close_outside_without_focus_theft():
+def test_create_inline_help_closes_outside_but_embedded_history_stays_open():
     js = (ASSETS / "create-studio.js").read_text(encoding="utf-8")
     markup = create_workspace_v4("fixture-company", "")
     assert "panel.hidden=true" in js
     assert "topics.hidden=true" in js
     assert "!panel.contains(event.target)" in js
     assert "!topics.contains(event.target)" in js
-    assert "!history.contains(event.target)" in js
-    assert "showHistory(false,false)" in js
+    # Only temporary help panels dismiss on outside pointer: the embedded
+    # confirmation history must not disappear when adjusting the form.
+    assert "!history.contains(event.target)" not in js
+    assert "Inline history is not a popover" in js
+    assert "showHistory(open,focusHandle=true)" in js
     assert "if(focusHandle)(open ? historyClose : historyOpen).focus" in js
     assert 'id="sg-create-history"' in markup
     assert 'id="sg-create-info-panel"' in markup
