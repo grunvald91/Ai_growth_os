@@ -2200,7 +2200,9 @@
       micOpening = true;
       // Begin the asynchronous microphone request immediately, before UI
       // updates, without requesting access during a simple short tap.
-      const microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true });
+      let microphoneRequest;
+      try { microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true }); }
+      catch (error) { microphoneRequest = Promise.reject(error); }
       setVoiceState("connecting");
       showLive("Подключаю микрофон…", "", true);
 
