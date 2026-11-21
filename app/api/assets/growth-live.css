@@ -1265,7 +1265,20 @@ body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar
   background:transparent!important;
   color:var(--text)!important;
   caret-color:var(--text);
+  font-size:1rem!important; /* avoid iOS focus zoom */
 }
 body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar #dp-input::placeholder{
   color:var(--muted)!important;opacity:1!important;
+}
+
+/* Mobile input controls respect device text sizing and iOS focus behavior. */
+body[data-growth-design="v4"] .sg-create-screen :is(
+  .sg-create-primary-platform select,
+  .sg-create-vk-image-primary select,
+  .sg-create-format-options select,
+  .sg-create-extra-settings-slot input,
+  .sg-create-extra-settings-slot textarea
+){
+  font-size:1rem!important;
+  line-height:1.45;
 }
