@@ -219,16 +219,54 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
                 animator_calls = animator_data.get("calls")
             except (TypeError, ValueError):
                 pass
-        # 'completed' means the worker finished its job, not that a material
-        # was approved or that a video file exists.
+        # A completed worker may still have an artifact waiting for an owner.
+        # Keep publication state separate from task completion.
+        pending_artifacts = any(
+            getattr(art.status, "value", str(art.status)) == "awaiting_approval"
+            for art in items
+        )
+        draft_plan = False
+        for art in items:
+            if art.kind != "editorial_plan":
+                continue
+            try:
+                draft_plan = json.loads(art.content or "{}").get("approval_state") == "draft"
+            except (ValueError, TypeError, AttributeError):
+                pass
+            if draft_plan:
+                break
+        needs_decision = key == "waiting_approval" or pending_artifacts or draft_plan
+        recent_runs = by_runs.get(task.id, [])
+        active_run = next((run for run in reversed(recent_runs)
+                           if run.status == "running"), None)
+        stage_name = STAGE_NAMES.get(active_run.agent_name, "Работа ИИ-команды") if active_run else None
+        kind_name = {
+            "content_factory": "Материал", "content_creative": "Креатив",
+            "content_editor": "Редактирование", "content_renderer": "Видео",
+            "editorial_planner": "Контент-план",
+            "whiteboard_renderer": "Видео",
+        }.get(task.assigned_agent, "Задание")
+        if by_request.get(task.id):
+            try:
+                request_data = json.loads(by_request[task.id].content or "{}")
+            except (ValueError, TypeError):
+                request_data = {}
+            if isinstance(request_data, dict) and request_data.get("mode") == "post":
+                kind_name = "Пост"
+            elif isinstance(request_data, dict) and request_data.get("mode") == "article":
+                kind_name = "Статья"
+        # 'completed' means worker finished, not approved or published.
         output.append({
             "id": str(task.id),
             "agent": task.assigned_agent,
             "title": task_title(task, by_request.get(task.id)),
             "state": key,
-            "label": title,
-            "tone": kind,
+            "label": "Нужно решение" if needs_decision else title,
+            "tone": "review" if needs_decision else kind,
             "description": explanation,
+            "needs_decision": needs_decision,
+            "kind_label": kind_name,
+            "current_stage": stage_name,
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
                 "title": readable_artifact_title(art),
@@ -390,57 +428,102 @@ def work_url(product_id: UUID, item: dict) -> str:
 
 
 def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
+    """Compact, content-first listing; navigation remains native links."""
     base = f"/studio/products/{product_id}"
-    tabs = (("all", "Все"), ("active", "В работе"), ("approval", "Нужно решение"),
-            ("ready", "Готово"), ("problems", "Ошибки"))
-    selector = '<nav class="sg-work-tabs" aria-label="Состояния заданий">' + "".join(
-        f'<a href="{base}/work?tab={name}" class="{"active" if name==tab else ""}">'
-        f'{label}</a>' for name, label in tabs
+    tabs = (
+        ("approval", "Внимание"), ("active", "В работе"),
+        ("ready", "Готово"), ("all", "Все"), ("problems", "Ошибки"),
+    )
+    selector = '<nav class="sg-work-tabs" aria-label="Фильтр заданий">' + "".join(
+        f'<a href="{base}/work?tab={name}"'
+        f' class="{"active" if name == tab else ""}"'
+        f'{" aria-current=page" if name == tab else ""}>{label}</a>'
+        for name, label in tabs
     ) + '</nav>'
-    visible = [i for i in items if (
+    visible = [item for item in items if (
         tab == "all" or
-        (tab == "active" and i["state"] in {"queued", "running"}) or
-        (tab == "approval" and i["state"] == "waiting_approval") or
-        (tab == "ready" and i["state"] == "completed") or
-        (tab == "problems" and i["state"] in {"failed", "cancelled"})
+        (tab == "active" and item["state"] in {"queued", "running"}) or
+        (tab == "approval" and (item.get("needs_decision") or item["state"] == "waiting_approval")) or
+        (tab == "ready" and item["state"] == "completed") or
+        (tab == "problems" and item["state"] in {"failed", "cancelled"})
     )]
+    # Stable sort retains creation order within priority groups.
+    if tab == "all":
+        def order(item):
+            if item.get("needs_decision") or item["state"] == "waiting_approval":
+                return 0
+            if item["state"] in {"queued", "running"}:
+                return 1
+            if item["state"] in {"failed", "cancelled"}:
+                return 2
+            return 3
+        visible.sort(key=order)
+
     cards = []
     for item in visible:
-        artifact_count = len(item["artifacts"])
-        label = item["label"]
-        if item["state"] == "completed" and artifact_count:
-            label = "Материалы готовы"
+        artifacts = item.get("artifacts") or []
+        count = len(artifacts)
+        state = item["state"]
+        summary = item.get("current_stage") if state == "running" else None
         if item.get("agent") == "whiteboard_renderer":
-            stage = ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"])
-            calls = item.get("animator_calls")
-            summary = stage + (f" · API-вызовов: {calls}" if isinstance(calls, int) else "")
-        else:
+            stage = ANIMATOR_PHASES.get(str(item.get("animator_stage")))
+            if stage:
+                summary = stage
+        if item.get("needs_decision") and state == "completed":
+            summary = "Материал подготовлен — требуется решение"
+        if not summary:
             summary = (
-                f'{artifact_count} материалов. Откройте результат и проверьте перед публикацией.'
-                if artifact_count else item["description"]
+                f"Подготовлено материалов: {count}. Публикация отдельно."
+                if state == "completed" and count else
+                item.get("description") or "Подробности доступны в задании."
             )
+        created = ""
+        iso = item.get("created_at")
+        if iso:
+            try:
+                value = datetime.fromisoformat(iso)
+                # Date only: do not pretend the timestamp uses the visitor timezone.
+                created = value.strftime("%d.%m.%Y")
+            except (TypeError, ValueError):
+                pass
+        meta = (f'<time datetime="{safe(iso)}">Создано {safe(created)}</time>'
+                if created else "<span>Открыть задание</span>")
         primary = (
-            f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
-            f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
-            f'<p>{safe(summary)}</p></div>'
-            f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(label)}</span>'
-            '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
+            f'<a class="sg-work-item sg-work-{safe(item["tone"])}"'
+            f' href="{work_url(product_id, item)}">'
+            '<span class="sg-work-item-head">'
+            f'<span class="sg-work-kind">{safe(item.get("kind_label") or "Задание")}</span>'
+            f'<span class="sg-work-status sg-work-{safe(item["tone"])}">'
+            f'{safe(item["label"])}</span></span>'
+            f'<span class="sg-work-item-main"><b>{safe(item["title"])}</b>'
+            f'<span class="sg-work-summary">{safe(summary)}</span></span>'
+            f'<span class="sg-work-item-foot">{meta}'
+            '<span class="sg-work-open">Открыть <span aria-hidden="true">→</span></span>'
+            '</span></a>'
         )
+        # Existing SDK wrapper remains; the list view is one destination, so
+        # do not duplicate its text in a second disclosure.
         cards.append(resource_widget(
-            kind="task", primary_html=primary,
-            description=item["description"],
-            note=(f"Результатов: {artifact_count}. Каждый материал проверяется отдельно."
-                  if artifact_count else "Подробные этапы и действия доступны на странице задания."),
-            detail_label="Сведения о задании",
+            kind="task", primary_html=primary, description="",
+            detail_label=None,
         ))
-    empty = ('<section class="sg-work-empty"><h3>Пока здесь пусто</h3>'
-             '<p>Все созданные задания будут отображаться здесь, даже если вы закроете страницу.</p>'
-             f'<a class="btn primary" href="{base}/create">Создать материал →</a></section>')
+    messages = {
+        "all": "Здесь появятся созданные задания.",
+        "active": "Сейчас нет заданий в работе.",
+        "approval": "Нет заданий, требующих решения.",
+        "ready": "Готовых заданий пока нет.",
+        "problems": "Ошибок в показанных заданиях нет.",
+    }
+    empty = ('<div class="sg-work-empty" role="status">'
+             f'<p>{safe(messages.get(tab, messages["all"]))}</p>'
+             + (f'<a class="btn primary" href="{base}/create">Создать материал</a>'
+                if tab == "all" and not items else '')
+             + '</div>')
     return (
-        '<section class="sg-surface"><div class="sg-section-head"><div>'
-        '<h2>Создание материалов</h2>'
-        '<p>Состояние берётся из реальных заданий. Не нужно запоминать, что и где запускалось.</p>'
-        '</div><a class="btn primary" href="' + base + '/create">＋ Создать</a></div>'
+        '<section class="sg-surface sg-work-board" aria-label="Список заданий">'
+        '<div class="sg-work-toolbar">'
+        '<p>Текущие задания и недавняя история. Незавершённые задания сохраняются в списке.</p>'
+        f'<a class="btn primary" href="{base}/create">＋ Создать</a></div>'
         + selector + '<div class="sg-work-list">'
         + ("".join(cards) or empty) + '</div></section>'
     )
