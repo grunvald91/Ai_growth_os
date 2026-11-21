@@ -195,7 +195,25 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </div>
             <div class="sg-create-vk-image-primary" id="sg-create-vk-image-primary" hidden>
               <div class="sg-create-label">Изображение к посту ВКонтакте</div>
+              <div class="sg-create-vk-image-choice" role="radiogroup" aria-label="Нужно ли изображение">
+                <label><input type="radio" name="vk_image_enabled" value="yes" checked>
+                  С изображением</label>
+                <label><input type="radio" name="vk_image_enabled" value="no">
+                  Только текст</label>
+              </div>
+              <label class="sg-create-vk-model-choice" id="sg-create-vk-model-choice-row">
+                Модель изображения
+                <select id="sg-create-vk-model-choice" aria-label="Модель изображения к посту">
+                  <option value="auto">Автоматически</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">ChatGPT Image</option>
+                </select>
+              </label>
               <div id="sg-create-vk-image-slot"></div>
+            </div>
+            <div id="sg-create-format-options" class="sg-create-format-options" hidden>
+              <div class="sg-create-label">Параметры материала</div>
+              <div id="sg-create-format-options-slot"></div>
             </div>
             <label class="sg-create-label sg-create-topic-label" id="sg-create-topic-label" for="dp-input">3. О чём материал?</label>
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
@@ -244,8 +262,10 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
                 <rect x="9" y="2.5" width="6" height="12" rx="3"/>
                 <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
               </svg></button>
+              <div id="sg-create-extra-settings-slot" class="sg-create-extra-settings-slot"></div>
+              <div class="sg-create-review-summary" id="sg-create-review-summary" role="note"></div>
               <button class="dp-send command-go" id="dp-send" type="submit"
-                aria-label="Продолжить к проверке задания">Продолжить <span aria-hidden="true">→</span></button>
+                aria-label="Проверить параметры задания">Проверить задание <span aria-hidden="true">→</span></button>
             </form>
             <div class="sg-create-suggest-row">
               <button type="button" data-sg-suggest>✦ Предложить тему</button>
@@ -257,10 +277,13 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </section>
           </div>
           <aside class="sg-create-aside" aria-label="Дополнительные возможности">
+            <div class="sg-create-result-guide">
+              <strong>Что дальше?</strong>
+              <p>После проверки параметров подтвердите запуск. Материал появится в заданиях, а публикация выполняется отдельно.</p>
+            </div>
             <details class="sg-create-advanced" id="sg-create-advanced">
-          <summary>Дополнительные настройки</summary>
-          <p class="sg-create-tip">Необязательные параметры: аудитория, визуальный формат
-          и требования к материалу. Основную тему укажите в форме слева или выше.</p>
+          <summary>Дополнительные пожелания</summary>
+          <p class="sg-create-tip">Если важно, укажите аудиторию и требования к материалу. Можно оставить поля пустыми.</p>
           {advanced}
         </details>
         <details class="sg-create-timing" id="sg-create-timing">
