@@ -275,6 +275,9 @@ JS = r"""
  const detail=document.querySelector('[data-sg-task]');
  const showWork=document.querySelector('[data-sg-work-overview]');
  const workList=document.querySelector('.sg-work-list');
+ const workBoard=document.querySelector('[data-sg-work-board]');
+ const updateButton=workBoard?.querySelector('[data-sg-work-update]');
+ let pendingBoard=null;
  let lastSignature=null;
  let shown=[];
  const readAll=widget.querySelector('[data-sg-read-all]');
@@ -289,10 +292,64 @@ JS = r"""
    else a.href=widget.querySelector('.sg-notify-all')?.getAttribute('href')||'/studio';
    return a;
  };
+ // Refresh only the server-rendered task cards. Never reload the whole page
+ // while someone is reading a long card, scrolling, or using the search field.
+ function applyBoard(fresh){
+   const previous=workBoard?.querySelector('.sg-work-list');
+   const next=fresh?.querySelector('.sg-work-list');
+   if(!previous||!next)return;
+   const oldY=window.scrollY;
+   previous.replaceChildren(...Array.from(next.childNodes));
+   const oldPages=workBoard.querySelector('.sg-work-pagination');
+   const newPages=fresh.querySelector('.sg-work-pagination');
+   if(oldPages&&newPages)oldPages.replaceWith(newPages);
+   else if(oldPages)oldPages.remove();
+   else if(newPages)previous.after(newPages);
+   const oldCounts=workBoard.querySelectorAll('.sg-work-tab-count');
+   const newCounts=fresh.querySelectorAll('.sg-work-tab-count');
+   if(oldCounts.length===newCounts.length){
+     oldCounts.forEach((node,i)=>{node.textContent=newCounts[i].textContent;});
+   }
+   workBoard.dataset.sgListSignature=fresh.dataset.sgListSignature;
+   pendingBoard=null;
+   if(updateButton)updateButton.hidden=true;
+   // Keep the reading position stable if row counts or heights changed.
+   window.scrollTo({top:oldY,behavior:'instant'});
+ }
+ async function refreshBoard(){
+   const url=workBoard?.dataset.sgRefreshUrl;
+   if(!url)return;
+   const response=await fetch(url,{cache:'no-store',credentials:'same-origin',
+     headers:{'Accept':'application/vnd.servgo.tasks+html'}});
+   if(!response.ok || !(response.headers.get('content-type')||'').includes(
+       'application/vnd.servgo.tasks+html'))return;
+   const documentHtml=new DOMParser().parseFromString(await response.text(),'text/html');
+   const fresh=documentHtml.querySelector('[data-sg-work-board]');
+   if(!fresh || fresh.dataset.sgListSignature===workBoard.dataset.sgListSignature)return;
+   const list=workBoard.querySelector('.sg-work-list');
+   const focusInList=Boolean(list?.contains(document.activeElement));
+   const readingList=window.scrollY>240&&list?.getBoundingClientRect().top<120;
+   if(focusInList||readingList){
+     pendingBoard=fresh;
+     if(updateButton)updateButton.hidden=false;
+     return;
+   }
+   applyBoard(fresh);
+ }
+ if(updateButton)updateButton.addEventListener('click',()=>{
+   if(pendingBoard)applyBoard(pendingBoard);
+ });
+ document.addEventListener('scroll',()=>{
+   if(pendingBoard && window.scrollY<=120 &&
+       !workList?.contains(document.activeElement))applyBoard(pendingBoard);
+ },{passive:true});
  async function poll(){
    if(document.hidden||ongoing)return;
    ongoing=true;
    try{
+     // The fragment endpoint includes the selected page, query, date range
+     // and exact status counts. It must not rely on the recent 45-job feed.
+     if(workBoard)await refreshBoard();
      const res=await fetch(endpoint,{cache:'no-store',credentials:'same-origin',
        headers:{'Accept':'application/json'}});
      if(!res.ok||!(res.headers.get('content-type')||'').includes('application/json'))return;
@@ -318,10 +375,9 @@ JS = r"""
             j.stage_signature!==detail.dataset.sgStage));
        if(changed&&document.visibilityState==='visible')location.reload();
      }
-     if(workList||showWork){
-       const active=jobs.filter(j=>j.state==='queued'||j.state==='running');
+     if(showWork&&!workBoard){
        const statuses=jobs.map(j=>j.id+':'+j.state+':'+Boolean(j.needs_decision)+':'+j.result_count+':'+(j.artifacts||[]).map(a=>a.id+':'+a.status).join(',')).join('|');
-       const store=workList||showWork;
+       const store=showWork;
        if(store.hasAttribute('data-sg-signature')&&store.dataset.sgSignature!==statuses&&
           document.activeElement?.tagName!=='INPUT' &&
           document.activeElement?.tagName!=='TEXTAREA' ){
