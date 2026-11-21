@@ -233,7 +233,7 @@ def main():
                       summary:getComputedStyle(document.querySelector('#sg-create-review-summary')).backgroundColor
                     })""")
                     assert select_colors['platform']==select_colors['model']==select_colors['ratio'], select_colors
-                    assert select_colors['summary']==select_colors['platform'], select_colors
+                    assert select_colors['summary'] in ('rgba(0, 0, 0, 0)','transparent'), select_colors
                     page.locator('#sg-create-platform').select_option('telegram')
                 page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
