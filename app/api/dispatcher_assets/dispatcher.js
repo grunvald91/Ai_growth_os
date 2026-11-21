@@ -1109,9 +1109,10 @@
 
   function creationRequest(text) {
     var hints = creationHints();
-    if (hints && hints.format && !isExplicitInstruction(text)) {
-      // Do not silently fall back to the LLM dispatcher for invalid topics:
-      // a selected material type remains an explicit Create intention.
+    if (hints && hints.format) {
+      // Create is a form, not a free-form command box. Once a material type is
+      // chosen, all text (including a topic starting with "Создай") is its
+      // subject. General dispatcher commands belong in the separate AI chat.
       var min = hints.format === 'whiteboard' ? 8 : 3;
       var length = Array.from(text).length;
       if (length < min) {
