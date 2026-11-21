@@ -42,6 +42,7 @@ jobs:
             /tmp/servgo-growth-voice-ui/
             /tmp/studio-reference-ui/
             /tmp/v4-simple-video-create-*.png
+            /tmp/growth-v4-create-layout-*.png
             /tmp/v4-simple-video-topic-*.png
             /tmp/v4-simple-video-result-*.png
             /tmp/v4-video-approval-*.png

@@ -16,7 +16,7 @@ from app.api.content_studio_auth import require_studio_auth, require_studio_csrf
 from app.api.content_studio import _owner_product, _studio_form, esc, studio_page_shell
 from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, WhiteboardRequest
 from app.content.whiteboard.science import requires_science_review
-from app.content.whiteboard.topics import suggest_company_video_topics
+from app.content.whiteboard.topics import suggest_company_video_topics, suggest_company_create_topics
 from app.content.whiteboard.selector_ui import topic_picker_html
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
@@ -608,6 +608,33 @@ def history_html(states, product_id):
 @router.get('/studio/products/{product_id}/whiteboard/topics.json')
 def studio_topic_suggestions(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
     return suggest_company_video_topics(settings.products_root, _owner_product(db, product_id))
+
+
+@router.get('/studio/products/{product_id}/create/topics.json')
+def studio_create_topic_suggestions(
+    product_id: UUID,
+    format: Literal["post", "story", "static_image", "short_video", "whiteboard", "package"] = "post",
+    db: Session = Depends(get_db),
+    settings=Depends(get_settings),
+):
+    """Suggestions share tenant authorization with the existing Studio topics."""
+    return suggest_company_create_topics(
+        settings.products_root, _owner_product(db, product_id), format
+    )
+
+
+@router.get('/studio/products/{product_id}/create/platforms.json')
+def studio_create_platforms(product_id: UUID, db: Session = Depends(get_db)):
+    """Return saved connection records only, not unverified live API availability."""
+    from app.social_vk import connected as vk_connection
+    from app.content.telegram_publishing import connected_channels
+    product = _owner_product(db, product_id)
+    return {
+        "vk": {"state": "configured" if vk_connection(db, product.id) else "not_configured"},
+        "telegram": {
+            "state": "configured" if connected_channels(db, product.id) else "not_configured"
+        },
+    }
 
 
 @router.get('/studio/products/{product_id}/whiteboard/quote.json')

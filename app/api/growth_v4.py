@@ -67,27 +67,29 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     base = f"/studio/products/{pid}"
     formats = [
         ("post", "Пост", "Стратег и редактор создают текст для одной площадки."),
-        ("article", "Статья · SEO-завод", "Статьи создаются в отдельном SEO-заводе. Эта карточка открывает SEO-раздел; нижняя строка «Создать» используется для остальных форматов."),
         ("story", "Stories", "Сценарий и готовые изображения каждого экрана. Доступны PNG и ZIP."),
         ("static_image", "Изображение", "Готовая картинка PNG с возможностью скачать файл."),
         ("short_video", "Видеосценарий", "Сценарий, кадры и озвучка, без готового MP4."),
         ("whiteboard", "Простое видео", "Анимированный MP4 с озвучкой и субтитрами; платный запуск подтверждается отдельно."),
         ("package", "Полный пакет", "Статья, адаптации и сценарии. Готовый MP4 пока в этот пакет не включён."),
     ]
+    summaries = {
+        "post": "Текст для публикации",
+        "story": "Экраны и изображения",
+        "static_image": "Готовая картинка PNG",
+        "short_video": "Сценарий без MP4",
+        "whiteboard": "Готовый ролик MP4",
+        "package": "Комплект материалов",
+    }
     cards = ''.join(
-        '<div class="sg-create-pick">'
-        + (f'<a class="sg-create-format-link" href="{base}/seo">{html.escape(label)}</a>'
-           if key == "article" else
-           f'<button type="button" class="sg-create-format" data-sg-format="{key}" '
-           f'aria-pressed="false">{html.escape(label)}</button>')
-        + f'<button type="button" class="sg-create-info" data-sg-info="{html.escape(label)}" '
-          f'data-sg-description="{html.escape(description, quote=True)}" '
-          f'aria-label="О формате {html.escape(label)}">i</button></div>'
+        f'<button type="button" class="sg-create-format" data-sg-format="{key}" '
+        f'aria-pressed="false" data-sg-description="{html.escape(description,quote=True)}">'
+        f'<span>{html.escape(label)}</span>'
+        f'<small>{html.escape(summaries[key])}</small></button>'
         for key, label, description in formats
     )
     tools = [
         ("Контент-план", base + "/plan", "Темы и сроки публикаций."),
-        ("SEO-завод", base + "/seo", "Поисковые запросы, статьи и блог."),
         ("Исследование рынка", base + "/market-research", "Организации и конкуренты по данным Яндекс Карт."),
         ("Кампании", base + "/campaigns", "Цели, аудитории, каналы и результаты."),
         ("Разведка", f"/intelligence?product_id={pid}", "Конкуренты и маркетинговые гипотезы."),
@@ -104,18 +106,18 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
       <div id="sg-create-settings" class="sg-create-settings">
         <label class="sg-create-setting" id="sg-create-platform-row" hidden>
           <span>Площадка</span>
-          <select id="sg-create-platform" aria-label="Площадка"></select>
+          <select id="sg-create-platform" name="platform" form="dp-form" aria-label="Площадка"></select>
         </label>
         <label class="sg-create-setting" id="sg-create-count-row" hidden>
           <span>Количество экранов Stories</span>
-          <select id="sg-create-count" aria-label="Количество экранов">
+          <select id="sg-create-count" name="frame_count" form="dp-form" aria-label="Количество экранов">
             <option value="">Автоматически (3–10)</option>
             ''' + ''.join(f'<option value="{n}">{n}</option>' for n in range(3, 11)) + '''
           </select>
         </label>
         <label class="sg-create-setting" id="sg-create-aspect-row" hidden>
           <span>Пропорции изображения</span>
-          <select id="sg-create-aspect" aria-label="Пропорции изображения">
+          <select id="sg-create-aspect" name="aspect_ratio" form="dp-form" aria-label="Пропорции изображения">
             <option value="">Автоматически по площадке</option>
             <option value="1:1">1:1 · квадрат</option>
             <option value="4:5">4:5 · вертикальный пост</option>
@@ -125,7 +127,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </label>
         <label class="sg-create-setting" id="sg-create-vk-image-row" hidden>
           <span>Картинка для поста ВКонтакте</span>
-          <select id="sg-create-vk-image-model" aria-label="Генерация изображения к посту VK">
+          <select id="sg-create-vk-image-model" name="vk_image_model" form="dp-form" aria-label="Генерация изображения к посту VK">
             <option value="auto">С картинкой · генерация + критик</option>
             <option value="none">Только текст · без изображения</option>
             <option value="gemini">С картинкой · Gemini</option>
@@ -139,7 +141,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </p>
         <label class="sg-create-setting" id="sg-create-vk-ratio-row" hidden>
           <span>Формат картинки для ВКонтакте</span>
-          <select id="sg-create-vk-image-ratio" aria-label="Формат иллюстрации VK">
+          <select id="sg-create-vk-image-ratio" name="vk_image_ratio" form="dp-form" aria-label="Формат иллюстрации VK">
             <option value="4:5">4:5 · вертикаль 1080×1350 (рекомендуем)</option>
             <option value="1:1">1:1 · квадрат 1080×1080</option>
           </select>
@@ -147,7 +149,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         <p id="sg-create-story-ratio" class="sg-create-tip" hidden>Stories · вертикальные 9:16</p>
         <label class="sg-create-setting" id="sg-create-model-row" hidden>
           <span>Генерация изображений</span>
-          <select id="sg-create-image-model" aria-label="Модель изображений">
+          <select id="sg-create-image-model" name="image_model" form="dp-form" aria-label="Модель изображений">
             <option value="auto">Автоматически · одна модель</option>
             <option value="gemini">Gemini</option>
             <option value="openai">ChatGPT Image</option>
@@ -155,11 +157,11 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         </label>
         <label class="sg-create-setting">
           <span>Аудитория <small>· необязательно</small></span>
-          <input id="sg-create-audience" maxlength="300" placeholder="Для кого готовим материал?">
+          <input id="sg-create-audience" name="audience" form="dp-form" maxlength="300" placeholder="Для кого готовим материал?">
         </label>
         <label class="sg-create-setting">
           <span>Дополнительные требования <small>· необязательно</small></span>
-          <textarea id="sg-create-brief" maxlength="3500" rows="2"
+          <textarea id="sg-create-brief" name="editorial_brief" form="dp-form" maxlength="3500" rows="2"
             placeholder="Тон, важные условия, что нельзя обещать…"></textarea>
         </label>
         <p class="sg-create-tip">Параметры попадут в карточку диспетчера.
@@ -170,34 +172,59 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     <section class="sg-create-screen">
       <div class="sg-create-scroll">
         <header class="sg-create-intro">
-          <h1>Создать</h1>
-          <p><b>Ваша ИИ-команда готовит материалы для бизнеса.</b> Используем профиль
-          компании, доступные исследования аудитории и проверяем результат перед публикацией.</p>
+          <h1>Создать материал</h1>
+          <p>Выберите формат, площадку и тему. Подготовку и проверку выполнит ИИ-команда.</p>
           <div class="sg-create-intro-links">
             <button type="button" data-sg-about>Как это работает <span aria-hidden="true">ⓘ</span></button>
-            <button type="button" data-sg-suggest>✦ Предложить тему</button>
           </div>
         </header>
         <div class="sg-create-info-panel" id="sg-create-info-panel" role="note" hidden></div>
         <div class="sg-create-suggestions" id="sg-create-suggestions" hidden></div>
-        <div class="sg-create-label">Что создаём?</div>
-        <div class="sg-create-picks">{cards}</div>
-        <details class="sg-create-advanced" id="sg-create-advanced">
-          <summary>Сценарий и подробности</summary>
-          <p class="sg-create-tip">Нужны особые требования, аудитория или площадка?
-          Укажите их здесь либо просто опишите задачу в строке ниже.</p>
-          {warning}{advanced}
-        </details>
-        <details class="sg-create-timing" id="sg-create-timing">
-          <summary>Сколько занимает создание?</summary>
-          <p>Зависит от формата, выбранной модели и количества материалов.
-          После подтверждения следите за фактическим статусом на странице задания;
-          точное время заранее не гарантируется.</p>
-        </details>
-        <details class="sg-create-extra">
-          <summary>Другие инструменты</summary>
-          <div class="sg-create-tools">{tool_rows}</div>
-        </details>
+        <div class="sg-create-layout">
+          <div class="sg-create-main">
+            {warning}
+            <div class="sg-create-label">1. Что создаём?</div>
+            <div class="sg-create-picks" role="group" aria-label="Формат материала">{cards}</div>
+            <div class="sg-create-format-actions">
+              <details class="sg-create-format-more">
+                <summary>Что входит?</summary>
+                <p class="sg-create-format-help" id="sg-create-format-help"></p>
+              </details>
+              <div class="sg-create-seo-link sg-create-seo-link-main">
+                <a href="{base}/seo" aria-label="Нужна SEO-статья? Открыть SEO-завод">SEO-статья →</a>
+              </div>
+            </div>
+            <div class="sg-create-primary-platform" id="sg-create-primary-platform">
+              <div class="sg-create-label">2. Площадка</div>
+              <div id="sg-create-platform-slot"></div>
+              <div class="sg-create-platform-state" id="sg-create-platform-state">
+                <span id="sg-create-platform-status">Для создания черновика подключение не требуется.</span>
+                <a href="{base}/channels">Настроить публикацию</a>
+              </div>
+            </div>
+            <div class="sg-create-vk-image-primary" id="sg-create-vk-image-primary" hidden>
+              <div class="sg-create-label">Изображение к посту ВКонтакте</div>
+              <div class="sg-create-vk-image-choice" role="radiogroup" aria-label="Нужно ли изображение">
+                <label><input type="radio" name="vk_image_enabled" value="yes" checked>
+                  С изображением</label>
+                <label><input type="radio" name="vk_image_enabled" value="no">
+                  Только текст</label>
+              </div>
+              <label class="sg-create-vk-model-choice" id="sg-create-vk-model-choice-row">
+                Модель изображения
+                <select id="sg-create-vk-model-choice" aria-label="Модель изображения к посту">
+                  <option value="auto">Автоматически</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">ChatGPT Image</option>
+                </select>
+              </label>
+              <div id="sg-create-vk-image-slot"></div>
+            </div>
+            <div id="sg-create-format-options" class="sg-create-format-options" hidden>
+              <div class="sg-create-label">Параметры материала</div>
+              <div id="sg-create-format-options-slot"></div>
+            </div>
+            <label class="sg-create-label sg-create-topic-label" id="sg-create-topic-label" for="dp-input">3. О чём материал?</label>
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
         <section class="dp-home sg-create-dispatch" data-create-format=""
           data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
@@ -232,8 +259,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </button>
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
-              <textarea id="dp-input" class="dp-input" rows="1"
-                placeholder="Нажмите — текст · удерживайте — голос" enterkeyhint="send"></textarea>
+              <textarea id="dp-input" name="topic" class="dp-input" rows="3"
+                placeholder="Например: зачем небольшому бизнесу CRM?"
+                enterkeyhint="send" aria-describedby="sg-create-context" required></textarea>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
@@ -243,13 +271,43 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
                 <rect x="9" y="2.5" width="6" height="12" rx="3"/>
                 <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
               </svg></button>
+              <div id="sg-create-extra-settings-slot" class="sg-create-extra-settings-slot"></div>
+              <div class="sg-create-review-summary" id="sg-create-review-summary" role="note"></div>
               <button class="dp-send command-go" id="dp-send" type="submit"
-                aria-label="Отправить запрос"><span aria-hidden="true">↑</span></button>
+                aria-label="Проверить параметры задания">Проверить задание <span aria-hidden="true">→</span></button>
             </form>
+            <div class="sg-create-suggest-row">
+              <button type="button" data-sg-suggest>✦ Предложить тему</button>
+              <span>Для голосового ввода удерживайте поле темы</span>
+            </div>
             <div class="command-tools"><div class="command-hints" id="dp-chips"
               aria-label="Подсказки"></div></div>
           </div>
         </section>
+          </div>
+          <aside class="sg-create-aside" aria-label="Дополнительные возможности">
+            <div class="sg-create-result-guide">
+              <strong>Что дальше?</strong>
+              <p>После проверки параметров подтвердите запуск. Материал появится в заданиях, а публикация выполняется отдельно.</p>
+              <a class="sg-create-work-link" href="{base}/work">Открыть задания →</a>
+            </div>
+            <details class="sg-create-advanced" id="sg-create-advanced">
+          <summary>Дополнительные пожелания</summary>
+          <p class="sg-create-tip">Если важно, укажите аудиторию и требования к материалу. Можно оставить поля пустыми.</p>
+          {advanced}
+        </details>
+        <details class="sg-create-timing" id="sg-create-timing">
+          <summary>Сколько занимает создание?</summary>
+          <p>Зависит от формата, выбранной модели и количества материалов.
+          После подтверждения следите за фактическим статусом на странице задания;
+          точное время заранее не гарантируется.</p>
+        </details>
+        <details class="sg-create-extra">
+          <summary>Другие инструменты</summary>
+          <div class="sg-create-tools">{tool_rows}</div>
+        </details>
+          </aside>
+        </div>
       </div>
     </section>
     <script type="application/json" id="dp-state">{{"messages":[],"hints":[]}}</script>
@@ -493,10 +551,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-topic-validation-v3-20261120', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>create-journey-polish-v3-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=create-topic-validation-v3-20261120"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-topic-validation-v3-20261120"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=create-journey-polish-v3-20261121"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-journey-polish-v3-20261121"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -540,7 +598,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=21">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=27-create-instant-theme">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=13">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'

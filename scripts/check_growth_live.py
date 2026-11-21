@@ -69,7 +69,7 @@ def main():
                 page.goto(base)
                 page.get_by_text('Новый дизайн →', exact=True).click()
                 expect(page.locator('.topbar')).to_be_visible()
-                for width in (390, 1440):
+                for width in (320, 390, 768, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('','/create','/work','/materials','/review','/channels',
                                    '/calendar','/analytics','/whiteboard','/seo','/campaigns','/profile','/accounts','/plan','/comments','/speed'):
@@ -120,6 +120,114 @@ def main():
                 page.emulate_media(reduced_motion='no-preference')
                 page.goto(base+'/create')
                 page.set_viewport_size({'width':390,'height':844})
+                # The Create editor is task-first, including on a narrow screen.
+                for width in (320, 390, 768, 1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    expect(page.locator('[data-sg-format="post"]')).to_have_attribute('aria-pressed', 'true')
+                    expect(page.locator('#sg-create-platform')).to_be_visible()
+                    expect(page.locator('#dp-input')).to_be_visible()
+                    expect(page.locator('#dp-send')).to_be_visible()
+                    geometry = page.evaluate("""() => {
+                      const rect = selector => {
+                        const r=document.querySelector(selector).getBoundingClientRect();
+                        return {top:r.top,left:r.left,right:r.right,bottom:r.bottom};
+                      };
+                      return {format:rect('.sg-create-picks'),platform:rect('#sg-create-primary-platform'),
+                        input:rect('#dp-input'),send:rect('#dp-send'),
+                        main:rect('.sg-create-main'),aside:rect('.sg-create-aside'),
+                        composerPosition:getComputedStyle(document.querySelector('.command-dock')).position,
+                        availableWidth:document.querySelector('.sg-create-scroll').clientWidth,
+                        pageOverflow:document.documentElement.scrollWidth>innerWidth};
+                    }""")
+                    assert geometry['format']['bottom'] < geometry['platform']['top'], geometry
+                    assert geometry['platform']['bottom'] < geometry['input']['top'], geometry
+                    assert geometry['input']['bottom'] <= geometry['send']['bottom'], geometry
+                    assert geometry['composerPosition']=='static', geometry
+                    assert not geometry['pageOverflow'], geometry
+                    if width >= 1080:
+                        assert page.locator('#rail').evaluate(
+                            "e=>getComputedStyle(e).display") == 'none'
+                    if geometry['availableWidth'] > 850 and width > 850:
+                        assert geometry['aside']['left'] >= geometry['main']['right'], geometry
+                    else:
+                        assert geometry['aside']['top'] >= geometry['main']['bottom'], geometry
+                    page.screenshot(path=f'/tmp/growth-v4-create-layout-{width}.png',full_page=True)
+                for width in (390, 1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    page.evaluate("()=>window.ServGoTheme.setPreference('dark')")
+                    expect(page.locator('body')).to_have_class(__import__('re').compile('dark'))
+                    colors=page.evaluate("""() => {
+                      const main=getComputedStyle(document.querySelector('.sg-create-main'));
+                      const bar=getComputedStyle(document.querySelector('.sg-create-dispatch .command-bar'));
+                      const input=getComputedStyle(document.querySelector('#dp-input'));
+                      const placeholder=getComputedStyle(document.querySelector('#dp-input'),'::placeholder');
+                      return {mainBg:main.backgroundColor,barBg:bar.backgroundColor,
+                        inputBg:input.backgroundColor,mainText:getComputedStyle(document.querySelector('.sg-create-label')).color,
+                        inputText:input.color,placeholderText:placeholder.color,
+                        inputSize:parseFloat(input.fontSize),
+                        selectSize:parseFloat(getComputedStyle(document.querySelector('#sg-create-platform')).fontSize),
+                        barSurface:bar.getPropertyValue('--s-surface').trim(),
+                        mainSurface:main.getPropertyValue('--s-surface').trim(),
+                        barCard:bar.getPropertyValue('--card').trim(),
+                        bodyClass:document.body.className,
+                        bodyTheme:document.documentElement.dataset.theme,
+                        inlineStyle:document.querySelector('.sg-create-dispatch .command-bar').getAttribute('style'),
+                        themeAncestors:(() => {
+                          let el=document.querySelector('.sg-create-dispatch .command-bar');
+                          const themes=[];
+                          while(el) {
+                            if(el.hasAttribute && el.hasAttribute('data-theme'))
+                              themes.push([el.tagName,el.getAttribute('data-theme')]);
+                            el=el.parentElement;
+                          }
+                          return themes;
+                        })(),
+                        barSelectorMatches:!!document.querySelector('body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar')};
+                    }""")
+                    assert colors['barBg']==colors['mainBg'], colors
+                    assert colors['inputBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
+                    assert colors['inputText']==colors['mainText'], colors
+                    assert colors['placeholderText']!=colors['mainBg'], colors
+                    assert colors['inputSize']>=16 and colors['selectSize']>=16, colors
+                    page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
+                    page.locator('#sg-create-platform').select_option('vk')
+                    expect(page.locator('#sg-create-vk-image-primary')).to_be_visible()
+                    select_colors=page.evaluate("""() => ({
+                      platform:getComputedStyle(document.querySelector('#sg-create-platform')).backgroundColor,
+                      model:getComputedStyle(document.querySelector('#sg-create-vk-model-choice')).backgroundColor,
+                      ratio:getComputedStyle(document.querySelector('#sg-create-vk-image-ratio')).backgroundColor,
+                      summary:getComputedStyle(document.querySelector('#sg-create-review-summary')).backgroundColor
+                    })""")
+                    assert select_colors['platform']==select_colors['model']==select_colors['ratio'], select_colors
+                    assert select_colors['summary']==select_colors['platform'], select_colors
+                    page.locator('#sg-create-platform').select_option('telegram')
+                page.evaluate("()=>window.ServGoTheme.setPreference('light')")
+                page.set_viewport_size({'width':390,'height':844})
+                # Format-specific controls must be next to the relevant action.
+                page.locator('#sg-create-platform').select_option('vk')
+                expect(page.locator('#sg-create-vk-image-primary')).to_be_visible()
+                expect(page.locator('#sg-create-vk-image-model')).to_have_value('auto')
+                expect(page.locator('.sg-create-vk-image-choice')).to_be_visible()
+                page.locator('[name="vk_image_enabled"][value="no"]').check()
+                expect(page.locator('#sg-create-vk-image-model')).to_have_value('none')
+                expect(page.locator('#sg-create-vk-review-tip')).to_be_hidden()
+                page.locator('[name="vk_image_enabled"][value="yes"]').check()
+                expect(page.locator('#sg-create-vk-image-model')).to_have_value('auto')
+                expect(page.locator('#sg-create-vk-review-tip')).to_be_visible()
+                expect(page.locator('#sg-create-format-help')).to_contain_text('площадки')
+                page.locator('[data-sg-format="story"]').click()
+                expect(page.locator('#sg-create-count-row')).to_be_visible()
+                expect(page.locator('#sg-create-model-row')).to_be_visible()
+                expect(page.locator('#sg-create-extra-settings-slot')).to_be_visible()
+                page.locator('#sg-create-advanced summary').click()
+                expect(page.locator('#sg-create-audience')).to_be_visible()
+                expect(page.locator('#sg-create-vk-image-primary')).to_be_hidden()
+                page.locator('[data-sg-format="whiteboard"]').click()
+                expect(page.locator('#sg-create-topic-label')).to_have_text('2. О чём материал?')
+                expect(page.locator('#sg-create-advanced')).to_be_hidden()
+                page.locator('[data-sg-format="post"]').click()
+                expect(page.locator('#sg-create-topic-label')).to_have_text('3. О чём материал?')
+                expect(page.locator('#sg-create-primary-platform')).to_be_visible()
                 # Use an isolated DOM message; no AI task or real publication.
                 page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed');
@@ -130,11 +238,34 @@ def main():
                   document.querySelector('.sg-create-dispatch').classList.add('has-feed');
                 }""")
                 expect(page.locator('#sg-create-history')).to_be_visible()
+                page.locator('[data-sg-format="post"]').click()
+                expect(page.locator('#sg-create-history')).to_be_visible()
+                page.locator('#dp-input').focus()
+                expect(page.locator('#sg-create-history')).to_be_visible()
                 page.locator('#sg-create-history-close').click()
                 expect(page.locator('#sg-create-history')).to_be_hidden()
                 expect(page.locator('#sg-create-history-open')).to_be_visible()
                 page.locator('#sg-create-history-open').click()
                 expect(page.locator('#sg-create-history')).to_be_visible()
+                # The server response event must reveal and focus the latest
+                # confirmation, rather than a stale earlier card. No API writes.
+                page.evaluate("""() => {
+                  const root=document.querySelector('.sg-create-dispatch');
+                  const msg=document.createElement('div');
+                  msg.className='dp-msg bot';
+                  const confirm=document.createElement('div');
+                  confirm.className='dp-confirm';
+                  const actions=document.createElement('div');
+                  actions.className='dp-confirm-actions';
+                  confirm.append(actions);
+                  msg.append(confirm);
+                  document.getElementById('dp-feed').appendChild(msg);
+                  root.dispatchEvent(new CustomEvent('sg:dispatcher:response', {
+                    detail:{source:'create',hasConfirmation:true}
+                  }));
+                }""")
+                expect(page.locator('.dp-confirm:last-child')).to_be_focused(timeout=3500)
+                assert page.locator('.dp-confirm:last-child').is_visible()
                 # Pointer-swipe tests the same logic used by real touch devices.
                 page.evaluate("""() => {
                   const handle=document.querySelector('#sg-create-history-close');

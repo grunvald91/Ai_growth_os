@@ -823,7 +823,19 @@
     no.disabled = yes.disabled = true;
     post('/confirm', { confirmation_id: block.confirmation_id, accept: accept,
       via: 'button', revision: block.revision || 0 })
-      .then(applyResult)
+      .then(function (data) {
+        applyResult(data);
+        if (root.classList.contains('sg-create-dispatch')) {
+          root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
+            {detail:{source:'confirm',confirmed:accept}}));
+        }
+        if (!accept && root.classList.contains('sg-create-dispatch') &&
+            block.editable && !input.value.trim()) {
+          // A declined confirmation should not destroy the previous topic.
+          input.value = block.editable.topic || '';
+          grow();
+        }
+      })
       .catch(function (error) { no.disabled = yes.disabled = false; notify(error.message); });
   }
 
@@ -962,7 +974,8 @@
     root.classList.toggle('busy', value);
     var pending = feed.querySelector('.dp-typing');
     if (value && !pending) {
-      var dots = el('div', 'dp-msg bot dp-typing', 'Думаю…');
+      var dots = el('div', 'dp-msg bot dp-typing',
+        root.classList.contains('sg-create-dispatch') ? 'Готовлю параметры задания…' : 'Думаю…');
       dots.setAttribute('role', 'status');
       feed.appendChild(dots);
     }
@@ -980,6 +993,10 @@
     feed.appendChild(note);
     syncConversationLayout();
     toBottom();
+    if (root.classList.contains('sg-create-dispatch')) {
+      root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
+        {detail:{source:'error'}}));
+    }
   }
 
   function applyResult(data) {
@@ -1010,6 +1027,11 @@
     post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
+      if (root.classList.contains('sg-create-dispatch')) {
+        root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
+          {detail:{source:'create',hasConfirmation:Array.from(feed.querySelectorAll('.dp-confirm'))
+            .some(card=>card.querySelector('.dp-confirm-actions'))}}));
+      }
       if (onSettled) onSettled(true);
       if (voiceRequest) showNote('');
     }).catch(function (error) {
@@ -1109,9 +1131,10 @@
 
   function creationRequest(text) {
     var hints = creationHints();
-    if (hints && hints.format && !isExplicitInstruction(text)) {
-      // Do not silently fall back to the LLM dispatcher for invalid topics:
-      // a selected material type remains an explicit Create intention.
+    if (hints && hints.format) {
+      // Create is a form, not a free-form command box. Once a material type is
+      // chosen, all text (including a topic starting with "Создай") is its
+      // subject. General dispatcher commands belong in the separate AI chat.
       var min = hints.format === 'whiteboard' ? 8 : 3;
       var length = Array.from(text).length;
       if (length < min) {
@@ -1129,14 +1152,23 @@
     return {text:createCommand(text), creation:hints};
   }
 
+  function markCreateTopicInvalid(invalid) {
+    if (!root.classList.contains('sg-create-dispatch')) return;
+    input.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+    input.setAttribute('aria-describedby', invalid
+      ? 'sg-create-context dp-voice-note' : 'sg-create-context');
+  }
   function sendText() {
     var text = input.value.trim();
     if (!text || busy) return;
     var request = creationRequest(text);
     if (request.validation_error) {
+      markCreateTopicInvalid(true);
       showNote(request.validation_error, true);
+      input.focus();
       return; // Keep the original editable draft in the composer.
     }
+    markCreateTopicInvalid(false);
     showNote('');
     input.value = '';
     grow();
@@ -1149,9 +1181,22 @@
   }
 
   form.addEventListener('submit', function (event) { event.preventDefault(); sendText(); });
-  input.addEventListener('input', grow);
+  input.addEventListener('input', function () {
+    grow();
+    if (root.classList.contains('sg-create-dispatch') &&
+        input.getAttribute('aria-invalid') === 'true') {
+      markCreateTopicInvalid(false);
+      showNote('');
+    }
+  });
   input.addEventListener('keydown', function (event) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); sendText(); }
+    if (event.key === 'Enter' && !event.shiftKey) {
+      // Safari may report the IME confirmation Enter after compositionend.
+      // keyCode 229 complements isComposing so unfinished text is not submitted.
+      event.preventDefault();
+      if (event.isComposing || event.keyCode === 229) return;
+      sendText();
+    }
   });
   newButton.addEventListener('click', function () {
     if (busy) return;
@@ -1570,6 +1615,9 @@
       }, { passive: false });
     }
     form.addEventListener('pointerdown', function (event) {
+      // Create embeds settings and a summary inside this form. A touch on an
+      // accordion, label or select must never arm the voice recorder.
+      if (event.target !== input && event.target !== voiceHitbox) return;
       if (event.button !== 0 || event.target.closest('button') ||
           form.classList.contains('voice-text-editing') || activeHold || recorder ||
           micOpening || voiceWorking || busy || voiceDispatchPending) return;

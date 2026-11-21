@@ -205,9 +205,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
-    assert '/studio/assets/create-studio.js?v=create-topic-validation-v3-20261120' in page.text
+    assert '/studio/assets/create-studio.js?v=create-journey-polish-v3-20261121' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-topic-validation-v3-20261120' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-journey-polish-v3-20261121' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -217,6 +217,62 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert "root.classList.contains('sg-create-dispatch')" in js.text
     assert "pending[pending.length - 1]" in js.text
 
+
+
+
+def test_create_v4_layout_follows_visible_task_flow(live):
+    client, _, product = live
+    page = client.get(f'/studio/products/{product.id}/create?design=v4')
+    assert page.status_code == 200
+    html = page.text
+    assert 'class="sg-create-layout"' in html
+    assert 'class="sg-create-main"' in html
+    assert 'class="sg-create-aside"' in html
+    assert '1. Что создаём?' in html
+    assert '2. Площадка' in html
+    assert '3. О чём материал?' in html
+    assert html.index('id="sg-create-platform-slot"') < html.index('id="dp-input"')
+    assert 'aria-label="Проверить параметры задания"' in html
+    assert html.count('data-sg-suggest') == 1
+    assert 'Статья · SEO-завод</' not in html
+    assert 'Нужна SEO-статья? Открыть SEO-завод' in html
+    assert html.index('Нужна SEO-статья?') < html.index('id="sg-create-primary-platform"')
+    assert 'id="sg-create-topic-label"' in html
+    js = client.get('/studio/assets/create-studio.js').text
+    assert "topicLabel.textContent=platformRow.hidden" in js
+    assert 'platformSlot.appendChild(platformRow)' in js
+    assert "chooseFormat('post')" in js
+    assert "target.scrollIntoView" in js
+    assert "sg:dispatcher:response" in js
+    assert 'id="sg-create-extra-settings-slot"' in html
+    assert 'id="sg-create-review-summary"' in html
+    assert 'id="sg-create-format-options-slot"' in html
+    assert 'name="vk_image_enabled"' in html
+    assert "extrasSlot.appendChild(advanced)" in js
+    assert "formatOptionsSlot.appendChild(row)" in js
+    assert "swipeDirection*velocity>.65" in js
+    assert "translate3d(0," in js
+    css = client.get('/studio/assets/growth-live.css').text
+    assert '.sg-create-layout' in css
+    assert '.sg-create-dispatch .command-dock' in css
+    assert 'container-type:inline-size' in css
+    assert 'touch-action:pan-x' in css
+    assert 'name="topic"' in html
+    assert 'name="platform" form="dp-form"' in html
+    assert 'name="audience" form="dp-form"' in html
+    assert 'name="image_model" form="dp-form"' in html
+    assert 'id="sg-create-vk-image-primary"' in html
+    assert 'id="sg-create-vk-image-slot"' in html
+    assert 'id="sg-create-format-help"' in html
+    assert 'data-sg-description="' in html
+    assert 'create-journey-polish-v3-20261121' in html
+    assert 'growth-live.css?v=27-create-instant-theme' in html
+    assert "vkImageSlot.appendChild(vkImageRow)" in js
+    assert "event.target instanceof Node && !history.contains(event.target)" not in js
+    dispatcher = client.get('/studio/assets/dispatcher.js').text
+    assert "event.isComposing || event.keyCode === 229" in dispatcher
+    assert "function markCreateTopicInvalid(invalid)" in dispatcher
+    assert "sg-create-context dp-voice-note" in dispatcher
 
 
 def test_create_has_only_dispatcher_submit_and_reusable_details(live):
@@ -278,9 +334,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=21' in page.text
+    assert '/studio/assets/growth-live.css?v=27-create-instant-theme' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-topic-validation-v3-20261120' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-journey-polish-v3-20261121' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text

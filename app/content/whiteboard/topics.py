@@ -59,3 +59,33 @@ def suggest_company_video_topics(products_root, product) -> dict:
                 "message": "Для предложений нужны хотя бы одна услуга, ниша или запрос клиента."}
     return {"topics": proposals[:8], "profile_ready": True,
             "message": "Предложения составлены по заполненным полям профиля компании."}
+
+
+CREATE_TOPIC_PREFIXES = {
+    "post": "",
+    "story": "Серия Stories: ",
+    "static_image": "Визуальная памятка: ",
+    "short_video": "Видеосценарий: ",
+    "whiteboard": "Объясняющее видео: ",
+    "package": "Комплект материалов: ",
+}
+
+
+def suggest_company_create_topics(products_root, product, material_format: str) -> dict:
+    """Profile-grounded suggestions tailored to the selected Create format.
+
+    No model calls and no unverified claims. The existing company profile
+    remains the only topic source; an unsupported format is rejected.
+    """
+    if material_format not in CREATE_TOPIC_PREFIXES:
+        raise ValueError("Неизвестный формат материала")
+    proposals = suggest_company_video_topics(products_root, product)
+    prefix = CREATE_TOPIC_PREFIXES[material_format]
+    return {
+        **proposals,
+        "format": material_format,
+        "topics": [
+            {**item, "topic": (prefix + item["topic"])[:300]}
+            for item in proposals["topics"]
+        ],
+    }
