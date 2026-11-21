@@ -136,6 +136,7 @@ def main():
                         input:rect('#dp-input'),send:rect('#dp-send'),
                         main:rect('.sg-create-main'),aside:rect('.sg-create-aside'),
                         composerPosition:getComputedStyle(document.querySelector('.command-dock')).position,
+                        availableWidth:document.querySelector('.sg-create-scroll').clientWidth,
                         pageOverflow:document.documentElement.scrollWidth>innerWidth};
                     }""")
                     assert geometry['format']['bottom'] < geometry['platform']['top'], geometry
@@ -143,7 +144,7 @@ def main():
                     assert geometry['input']['bottom'] <= geometry['send']['bottom'], geometry
                     assert geometry['composerPosition']=='static', geometry
                     assert not geometry['pageOverflow'], geometry
-                    if width == 1440:
+                    if geometry['availableWidth'] > 850 and width > 850:
                         assert geometry['aside']['left'] >= geometry['main']['right'], geometry
                     else:
                         assert geometry['aside']['top'] >= geometry['main']['bottom'], geometry
