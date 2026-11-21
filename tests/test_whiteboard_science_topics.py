@@ -95,6 +95,37 @@ def test_topic_picker_and_quote_are_authenticated_and_company_scoped(environment
     assert 'id="wb-topic-dialog"' in html
 
 
+
+def test_create_topic_suggestions_are_format_aware_and_tenant_scoped(environment):
+    from app.content.whiteboard.topics import suggest_company_create_topics
+    _, settings, product_id, other_id = environment
+    _write_profile(settings, "whiteboard-jobs")
+    browser = client()
+    for material_format in ("post", "story", "static_image",
+                            "short_video", "whiteboard", "package"):
+        response = browser.get(f"/studio/products/{product_id}/create/topics.json",
+                               params={"format": material_format})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["format"] == material_format
+        assert data["topics"] and all(8 <= len(row["topic"]) <= 300 for row in data["topics"])
+        assert all(row["basis"] for row in data["topics"])
+        assert all("стрижка" in row["topic"] or "салон" in row["topic"]
+                   or "как выбрать" in row["topic"] for row in data["topics"])
+    none = browser.get(f"/studio/products/{other_id}/create/topics.json",
+                       params={"format": "post"})
+    assert none.status_code == 200
+    assert none.json()["topics"] == []
+    assert browser.get(f"/studio/products/{product_id}/create/topics.json",
+                       params={"format": "invalid"}).status_code == 422
+    own = suggest_company_create_topics(settings.products_root,
+        Product(name="Салон", slug="whiteboard-jobs"), "post")
+    assert own["topics"] and "Стрижка" not in str(own["topics"])  # No invented capitalization
+    with pytest.raises(ValueError, match="Неизвестный формат"):
+        suggest_company_create_topics(settings.products_root,
+            Product(name="Салон", slug="whiteboard-jobs"), "invalid")
+
+
 def test_picker_paid_start_rejects_unlisted_topic_without_creating_job(environment):
     _, settings, product_id, _ = environment
     _write_profile(settings, "whiteboard-jobs")
