@@ -443,14 +443,14 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     visible = [item for item in items if (
         tab == "all" or
         (tab == "active" and item["state"] in {"queued", "running"}) or
-        (tab == "approval" and (item.get("needs_decision") or item["state"] == "waiting_approval")) or
+        (tab == "approval" and (item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"})) or
         (tab == "ready" and item["state"] == "completed") or
         (tab == "problems" and item["state"] in {"failed", "cancelled"})
     )]
     # Stable sort retains creation order within priority groups.
     if tab == "all":
         def order(item):
-            if item.get("needs_decision") or item["state"] == "waiting_approval":
+            if item.get("needs_decision") or item["state"] in {"waiting_approval", "failed"}:
                 return 0
             if item["state"] in {"queued", "running"}:
                 return 1
@@ -487,7 +487,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
             except (TypeError, ValueError):
                 pass
         meta = (f'<time datetime="{safe(iso)}">Создано {safe(created)}</time>'
-                if created else "<span>Открыть задание</span>")
+                if created else "")
         primary = (
             f'<a class="sg-work-item sg-work-{safe(item["tone"])}"'
             f' href="{work_url(product_id, item)}">'
@@ -510,7 +510,7 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all") -> str:
     messages = {
         "all": "Здесь появятся созданные задания.",
         "active": "Сейчас нет заданий в работе.",
-        "approval": "Нет заданий, требующих решения.",
+        "approval": "Нет заданий, требующих решения или исправления.",
         "ready": "Готовых заданий пока нет.",
         "problems": "Ошибок в показанных заданиях нет.",
     }
