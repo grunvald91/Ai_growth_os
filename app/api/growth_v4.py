@@ -262,6 +262,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               <textarea id="dp-input" name="topic" class="dp-input" rows="2"
                 placeholder="Например: зачем бизнесу CRM?"
                 enterkeyhint="send" aria-describedby="sg-create-context sg-create-voice-hint" required></textarea>
+              <span id="sg-create-voice-hint" class="sg-create-input-voice-hint">Удерживайте поле — голосом</span>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
@@ -273,7 +274,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               </svg></button>
               <div class="sg-create-suggest-row">
                 <button type="button" data-sg-suggest>✦ Предложить тему</button>
-                <span id="sg-create-voice-hint">🎙 Удерживайте поле — голосом</span>
               </div>
               <div id="sg-create-extra-settings-slot" class="sg-create-extra-settings-slot"></div>
               <div class="sg-create-review-summary" id="sg-create-review-summary" role="note"></div>
