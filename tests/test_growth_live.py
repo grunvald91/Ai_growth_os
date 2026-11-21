@@ -250,7 +250,11 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'rows="2"' in html
     assert html.index('id="dp-input"') < html.index('class="sg-create-suggest-row"') < html.index('id="sg-create-extra-settings-slot"')
     assert 'Для голосового ввода удерживайте поле темы' not in html
-    assert '🎙 Удерживайте поле — голосом' in html
+    assert 'Удерживайте поле — голосом' in html
+    assert html.count('id="sg-create-voice-hint"') == 1
+    assert html.index('id="dp-input"') < html.index('id="sg-create-voice-hint"') < html.index('id="dp-voice-hitbox"')
+    assert html.index('id="sg-create-voice-hint"') < html.index('class="sg-create-suggest-row"')
+    assert 'aria-describedby="sg-create-context sg-create-voice-hint"' in html
     assert "context.textContent=key==='whiteboard'" in js
     assert "summary.textContent=line;" in js
     assert 'id="sg-create-format-options-slot"' in html
@@ -265,6 +269,9 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'container-type:inline-size' in css
     assert 'touch-action:pan-x' in css
     assert 'Screenshot-led Create editor refinement' in css
+    assert 'Voice guidance belongs inside the empty topic field' in css
+    assert '#dp-input:not(:placeholder-shown)' in css
+    assert 'pointer-events:none' in css
     assert '#dp-input:focus-visible' in css
     assert '.sg-create-suggest-row' in css
     assert 'min-height:100px!important' in css
