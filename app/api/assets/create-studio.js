@@ -169,30 +169,48 @@
       }
     });
     function attachGrip(button,open,swipeDirection){
-      let startY=null;
-      let activePointer=null;
+      let gesture=null;
       let suppressClickUntil=0;
+      function resetPosition(){
+        const reduceMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        button.style.transition=reduceMotion?'none':'transform 160ms ease-out, opacity 160ms ease-out';
+        button.style.transform='';
+        button.style.opacity='';
+      }
       button.addEventListener('pointerdown',event=>{
-        if(event.pointerType==='touch' || event.pointerType==='pen'){
-          startY=event.clientY;
-          activePointer=event.pointerId;
-          // Keep receiving pointerup even when the finger ends outside the handle.
-          try{button.setPointerCapture(event.pointerId);}catch(_){/* synthetic event */}
-        }
+        if((event.pointerType!=='touch' && event.pointerType!=='pen') || event.button!==0)return;
+        gesture={id:event.pointerId,startY:event.clientY,lastY:event.clientY,
+          lastTime:event.timeStamp,velocity:0,moved:false};
+        button.style.transition='none';
+        // Track only the handle, never intercept scrolling in the result or editor.
+        try{button.setPointerCapture(event.pointerId);}catch(_){/* synthetic event */}
+      });
+      button.addEventListener('pointermove',event=>{
+        if(!gesture || event.pointerId!==gesture.id)return;
+        const elapsed=Math.max(1,event.timeStamp-gesture.lastTime);
+        gesture.velocity=(event.clientY-gesture.lastY)/elapsed;
+        gesture.lastY=event.clientY;
+        gesture.lastTime=event.timeStamp;
+        const delta=event.clientY-gesture.startY;
+        if(Math.abs(delta)>6)gesture.moved=true;
+        // The handle follows the pointer directly; opposing movement resists.
+        const tracked=swipeDirection*delta<0?delta*.2:delta;
+        button.style.transform='translate3d(0,'+Math.max(-120,Math.min(120,tracked))+'px,0)';
       });
       button.addEventListener('pointerup',event=>{
-        if(startY===null || event.pointerId!==activePointer)return;
-        const movement=event.clientY-startY;
-        startY=null;
-        activePointer=null;
-        if(swipeDirection*movement>24){
-          suppressClickUntil=performance.now()+350;
-          showHistory(open);
-        }
+        if(!gesture || event.pointerId!==gesture.id)return;
+        const displacement=event.clientY-gesture.startY;
+        const velocity=gesture.velocity;
+        const dragged=gesture.moved || Math.abs(displacement)>6;
+        const shouldToggle=swipeDirection*displacement>24 ||
+          (swipeDirection*displacement>8 && swipeDirection*velocity>.65);
+        gesture=null;
+        resetPosition();
+        if(dragged)suppressClickUntil=performance.now()+350;
+        if(shouldToggle)showHistory(open);
       });
-      button.addEventListener('pointercancel',()=>{startY=null;activePointer=null;});
+      button.addEventListener('pointercancel',()=>{gesture=null;resetPosition();});
       button.addEventListener('click',()=>{
-        // Touch devices can synthesize a click immediately after the swipe.
         if(performance.now()<suppressClickUntil)return;
         showHistory(open);
       });
