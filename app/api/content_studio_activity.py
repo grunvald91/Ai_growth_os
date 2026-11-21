@@ -293,10 +293,16 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
 
 WORK_PAGE_SIZE = 20
 WORK_PERIODS = {"all": None, "7": 7, "30": 30, "90": 90}
+WORK_TYPES = {
+    "all": "Все виды", "post": "Посты", "article": "Статьи",
+    "creative": "Креативы", "video": "Видео",
+    "plan": "Контент-планы", "edit": "Доработки",
+}
 
 
 def work_page(db: Session, product_id: UUID, *, tab: str = "all",
-              query: str = "", period: str = "all", page: int = 1,
+              query: str = "", period: str = "all", kind: str = "all",
+              page: int = 1,
               page_size: int = WORK_PAGE_SIZE) -> dict:
     """Tenant-scoped SQL filtering/counting before pagination.
 
@@ -306,12 +312,36 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
     tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
     period = period if period in WORK_PERIODS else "all"
     q = " ".join(str(query or "").split())[:120]
+    kind = kind if kind in WORK_TYPES else "all"
     page = max(1, min(int(page), 100_000))
     page_size = max(1, min(int(page_size), 60))
     base = [Task.product_id == product_id, Task.assigned_agent.in_(WORK_AGENTS)]
     if WORK_PERIODS[period] is not None:
         base.append(Task.created_at >=
                     datetime.now(timezone.utc) - timedelta(days=WORK_PERIODS[period]))
+    if kind != "all":
+        types = {
+            "creative": ("content_creative",),
+            "video": ("content_renderer", "whiteboard_renderer"),
+            "plan": ("editorial_planner",),
+            "edit": ("content_editor",),
+        }
+        if kind in types:
+            base.append(Task.assigned_agent.in_(types[kind]))
+        else:
+            req_mode = exists(select(Artifact.id).where(
+                Artifact.product_id == product_id,
+                Artifact.task_id == Task.id,
+                Artifact.kind == "content_request",
+                or_(
+                    Artifact.content.like(f'%"mode": "{kind}"%'),
+                    Artifact.content.like(f'%"mode":"{kind}"%'),
+                ),
+            ))
+            base.append(Task.assigned_agent == "content_factory")
+            base.append(or_(req_mode,
+                            Task.title.ilike("POST:%") if kind == "post"
+                            else Task.title.ilike("ARTICLE:%")))
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
@@ -386,6 +416,7 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
         "items": _work_items_for_tasks(db, product_id, tasks),
         "total": total, "counts": counts, "page": page,
         "page_size": page_size, "q": q, "tab": tab, "period": period,
+        "kind": kind,
     }
 
 
@@ -534,8 +565,8 @@ def work_url(product_id: UUID, item: dict) -> str:
 
 
 def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
-                  q: str = "", period: str = "all", page: int = 1,
-                  total: int | None = None, page_size: int = WORK_PAGE_SIZE,
+                  q: str = "", period: str = "all", kind: str = "all",
+                  page: int = 1, total: int | None = None, page_size: int = WORK_PAGE_SIZE,
                   counts: dict | None = None) -> str:
     """Native navigation + compact responsive cards; supports server-side pages.
 
@@ -555,6 +586,8 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
             params["q"] = q
         if period != "all":
             params["period"] = period
+        if kind != "all":
+            params["kind"] = kind
         if next_page > 1:
             params["page"] = str(next_page)
         if partial:
@@ -644,14 +677,14 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
         "problems": "Ошибок в показанных заданиях нет.",
     }
     empty_message = (
-        "По этому запросу задания не найдены. Измените поиск или период."
-        if q or period != "all" else messages.get(tab, messages["all"])
+        "По выбранным условиям задания не найдены. Измените поиск или фильтры."
+        if q or period != "all" or kind != "all" else messages.get(tab, messages["all"])
     )
     empty = (
         '<div class="sg-work-empty" role="status">'
         f'<p>{safe(empty_message)}</p>'
         + (f'<a class="btn primary" href="{base}/create">Создать материал</a>'
-           if tab == "all" and not q and period == "all" and not items else '')
+           if tab == "all" and not q and period == "all" and kind == "all" and not items else '')
         + '</div>'
     )
     search_form = (
@@ -668,6 +701,13 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
                 ("all", "За всё время"), ("7", "7 дней"),
                 ("30", "30 дней"), ("90", "90 дней"),
             )
+        )
+        + '</select>'
+        + '<label class="sg-work-search-label" for="sg-work-kind">Вид задания</label>'
+        + '<select id="sg-work-kind" name="kind" aria-label="Вид задания">'
+        + "".join(
+            f'<option value="{value}"{" selected" if kind == value else ""}>{label}</option>'
+            for value, label in WORK_TYPES.items()
         )
         + '</select><button class="btn" type="submit">Найти</button></form>'
     )
