@@ -854,6 +854,15 @@ body[data-growth-design="v4"] .sg-create-aside{
   min-width:0;background:var(--card);border:1px solid var(--line);
   border-radius:18px;padding:22px;
 }
+/* Content-dependent density: a narrow desktop pane must not force 3 columns. */
+body[data-growth-design="v4"] .sg-create-main{container-type:inline-size;}
+@container (max-width: 520px){
+  .sg-create-main .sg-create-picks{grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@container (max-width: 260px){
+  .sg-create-main .sg-create-picks{grid-template-columns:minmax(0,1fr);}
+}
+
 body[data-growth-design="v4"] .sg-create-label{
   display:block;font-size:15px;font-weight:700;line-height:1.35;color:var(--text);
   margin:0 0 11px;
@@ -931,6 +940,16 @@ body[data-growth-design="v4"] .sg-create-suggest-row button{
 body[data-growth-design="v4"] .sg-create-suggest-row span{
   color:var(--muted);font-size:12px;
 }
+/* Do not rely on a narrow visible handle for touch input. */
+body[data-growth-design="v4"] :is(.sg-create-history-open,.sg-create-history-close){
+  touch-action:pan-x;min-height:44px;
+}
+@media(hover:hover) and (pointer:fine){
+  body[data-growth-design="v4"] .sg-create-format:hover:not([aria-pressed="true"]){
+    border-color:var(--blue);
+  }
+}
+
 body[data-growth-design="v4"] .sg-create-dispatch .command-topicbar{margin:0;}
 body[data-growth-design="v4"] .sg-create-dispatch:not(.has-feed) .command-topicbar{display:none;}
 body[data-growth-design="v4"] .sg-create-dispatch.has-feed .command-topicbar{
