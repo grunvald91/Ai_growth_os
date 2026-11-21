@@ -11,6 +11,8 @@
   const countRow=document.getElementById('sg-create-count-row');
   const modelRow=document.getElementById('sg-create-model-row');
   const vkImageRow=document.getElementById('sg-create-vk-image-row');
+  const vkImageSlot=document.getElementById('sg-create-vk-image-slot');
+  if(vkImageSlot && vkImageRow)vkImageSlot.appendChild(vkImageRow);
   const vkRatioRow=document.getElementById('sg-create-vk-ratio-row');
   const vkReviewTip=document.getElementById('sg-create-vk-review-tip');
   const aspectRow=document.getElementById('sg-create-aspect-row');
@@ -56,6 +58,8 @@
   function syncVkImage(){
     const show=root.getAttribute('data-create-format')==='post' && platform.value==='vk';
     if(vkImageRow) vkImageRow.hidden=!show;
+    const vkImageShell=document.getElementById('sg-create-vk-image-primary');
+    if(vkImageShell)vkImageShell.hidden=!show;
     if(vkRatioRow) vkRatioRow.hidden=!show;
     if(vkReviewTip) vkReviewTip.hidden=!show;
   }
@@ -88,6 +92,8 @@
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
     const context=document.getElementById('sg-create-context');
+    const formatHelp=document.getElementById('sg-create-format-help');
+    if(formatHelp)formatHelp.textContent=selected.dataset.sgDescription || '';
     context.textContent=key==='whiteboard'
       ? 'Выбрано: Простое видео (обычно около 30 секунд). Укажите тему ниже. Платные операции запускаются только после подтверждения.'
       : 'Выбрано: '+names[key]+'. Укажите тему и нажмите «Продолжить». Перед созданием появится подтверждение.';
@@ -159,15 +165,7 @@
       historyOpen.setAttribute('aria-expanded',String(open));
       if(focusHandle)(open ? historyClose : historyOpen).focus({preventScroll:true});
     }
-    // Outside taps dismiss the floating conversation without stealing focus
-    // from the format chooser, textarea, voice recorder or other target.
-    document.addEventListener('pointerdown',event=>{
-      if(root.classList.contains('has-feed') &&
-         !root.classList.contains('sg-history-collapsed') &&
-         event.target instanceof Node && !history.contains(event.target)){
-        showHistory(false,false);
-      }
-    });
+    // Inline history is not a popover: clicking a form field must not collapse it.
     function attachGrip(button,open,swipeDirection){
       let gesture=null;
       let suppressClickUntil=0;
