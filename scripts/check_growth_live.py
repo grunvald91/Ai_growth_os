@@ -165,7 +165,17 @@ def main():
                         inputBg:input.backgroundColor,mainText:getComputedStyle(document.querySelector('.sg-create-label')).color,
                         inputText:input.color,placeholderText:placeholder.color,
                         inputSize:parseFloat(input.fontSize),
-                        selectSize:parseFloat(getComputedStyle(document.querySelector('#sg-create-platform')).fontSize)};
+                        selectSize:parseFloat(getComputedStyle(document.querySelector('#sg-create-platform')).fontSize),
+                        barSurface:bar.getPropertyValue('--s-surface').trim(),
+                        mainSurface:main.getPropertyValue('--s-surface').trim(),
+                        barCard:bar.getPropertyValue('--card').trim(),
+                        bodyClass:document.body.className,
+                        bodyTheme:document.documentElement.dataset.theme,
+                        inlineStyle:document.querySelector('.sg-create-dispatch .command-bar').getAttribute('style'),
+                        themeAncestors:[...function* (el) {
+                          while(el){ if(el.hasAttribute && el.hasAttribute('data-theme'))yield [el.tagName,el.getAttribute('data-theme')];el=el.parentElement;}
+                        }(document.querySelector('.sg-create-dispatch .command-bar'))],
+                        barSelectorMatches:!!document.querySelector('body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar')};
                     }""")
                     assert colors['barBg']==colors['mainBg'], colors
                     assert colors['inputBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
