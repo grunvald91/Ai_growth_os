@@ -152,6 +152,12 @@ def main():
                     else:
                         assert geometry['aside']['top'] >= geometry['main']['bottom'], geometry
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-{width}.png',full_page=True)
+                for width in (390, 1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    page.evaluate("()=>window.ServGoTheme.setPreference('dark')")
+                    expect(page.locator('body')).to_have_class(__import__('re').compile('dark'))
+                    page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
+                page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
                 # Format-specific controls must be next to the relevant action.
                 page.locator('#sg-create-platform').select_option('vk')
