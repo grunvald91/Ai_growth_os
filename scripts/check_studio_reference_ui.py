@@ -240,11 +240,35 @@ def main():
                     document.body.dataset.sgTouchEvents = '1';
                   }, {capture:true,once:true});
                 }""")
+                page.evaluate("""() => {
+                  window.__sgSwipeTrace=[];
+                  for (const type of ['touchstart','touchmove','touchend','touchcancel']) {
+                    document.addEventListener(type, event => {
+                      window.__sgSwipeTrace.push({
+                        type, cancelable:event.cancelable,
+                        target:event.target?.tagName,
+                        x:event.touches[0]?.clientX,y:event.touches[0]?.clientY,
+                        visualHeight:visualViewport?.height,
+                        className:document.body.className
+                      });
+                    }, {capture:true,passive:true});
+                  }
+                }""")
                 touch('touchStart',start['x'],start['y'])
                 page.wait_for_function("document.body.dataset.sgTouchEvents === '1'")
                 page.evaluate("()=>new Promise(resolve=>requestAnimationFrame(resolve))")
                 touch('touchMove',start['x']+60,start['y'])
-                expect(page.locator('body')).to_have_class(__import__('re').compile('sg-daily-dragging'))
+                if not page.locator('body').evaluate("el=>el.classList.contains('sg-daily-dragging')"):
+                    raise AssertionError(('daily-swipe-not-locked', start,
+                        page.evaluate("window.__sgSwipeTrace"),
+                        page.evaluate("""({x,y}) => {
+                          const target=document.elementFromPoint(x,y);
+                          return {target:target?.outerHTML?.slice(0,350),
+                            touchAction:target&&getComputedStyle(target).touchAction,
+                            mainTouch:getComputedStyle(document.querySelector('#main')).touchAction,
+                            visualHeight:visualViewport?.height,
+                            yScroll:window.scrollY};
+                        }""", start)))
                 first = page.locator('#sgDailyDrawer').bounding_box()['x']
                 touch('touchMove',start['x']+130,start['y'])
                 second = page.locator('#sgDailyDrawer').bounding_box()['x']
