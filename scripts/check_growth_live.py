@@ -178,9 +178,11 @@ def main():
                     select_colors=page.evaluate("""() => ({
                       platform:getComputedStyle(document.querySelector('#sg-create-platform')).backgroundColor,
                       model:getComputedStyle(document.querySelector('#sg-create-vk-model-choice')).backgroundColor,
-                      ratio:getComputedStyle(document.querySelector('#sg-create-vk-image-ratio')).backgroundColor
+                      ratio:getComputedStyle(document.querySelector('#sg-create-vk-image-ratio')).backgroundColor,
+                      summary:getComputedStyle(document.querySelector('#sg-create-review-summary')).backgroundColor
                     })""")
                     assert select_colors['platform']==select_colors['model']==select_colors['ratio'], select_colors
+                    assert select_colors['summary']==select_colors['platform'], select_colors
                     page.locator('#sg-create-platform').select_option('telegram')
                 page.evaluate("()=>window.ServGoTheme.setPreference('light')")
                 page.set_viewport_size({'width':390,'height':844})
