@@ -232,7 +232,7 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert '2. Площадка' in html
     assert '3. О чём материал?' in html
     assert html.index('id="sg-create-platform-slot"') < html.index('id="dp-input"')
-    assert 'aria-label="Продолжить к проверке задания"' in html
+    assert 'aria-label="Проверить параметры задания"' in html
     assert html.count('data-sg-suggest') == 1
     assert 'Статья · SEO-завод</' not in html
     assert 'Нужна SEO-статья? Открыть SEO-завод' in html
@@ -242,7 +242,14 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert "topicLabel.textContent=platformRow.hidden" in js
     assert 'platformSlot.appendChild(platformRow)' in js
     assert "chooseFormat('post')" in js
-    assert "history.scrollIntoView" in js
+    assert "target.scrollIntoView" in js
+    assert "sg:dispatcher:response" in js
+    assert 'id="sg-create-extra-settings-slot"' in html
+    assert 'id="sg-create-review-summary"' in html
+    assert 'id="sg-create-format-options-slot"' in html
+    assert 'name="vk_image_enabled"' in html
+    assert "extrasSlot.appendChild(advanced)" in js
+    assert "formatOptionsSlot.appendChild(row)" in js
     assert "swipeDirection*velocity>.65" in js
     assert "translate3d(0," in js
     css = client.get('/studio/assets/growth-live.css').text
