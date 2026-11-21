@@ -284,6 +284,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <div class="sg-create-result-guide">
               <strong>Что дальше?</strong>
               <p>После проверки параметров подтвердите запуск. Материал появится в заданиях, а публикация выполняется отдельно.</p>
+              <a class="sg-create-work-link" href="{base}/work">Открыть задания →</a>
             </div>
             <details class="sg-create-advanced" id="sg-create-advanced">
           <summary>Дополнительные пожелания</summary>
