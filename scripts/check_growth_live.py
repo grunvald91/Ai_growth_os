@@ -79,7 +79,7 @@ def main():
                         page.goto(base+suffix)
                         for theme in ('light', 'dark'):
                             page.evaluate('(mode)=>window.ServGoTheme.setPreference(mode)',theme)
-                            assert page.evaluate("""() => {
+                            correct=page.evaluate("""() => {
                               const header=document.querySelector('.workspace > .topbar');
                               const rect=header.getBoundingClientRect();
                               const left=header.querySelector('.crumbs').getBoundingClientRect();
@@ -100,7 +100,30 @@ def main():
                                      surface.opacity==='1' &&
                                      (!create || create.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
                                      document.documentElement.scrollWidth<=innerWidth;
-                            }"""), (width,suffix,theme,'floating-header-geometry')
+                            }""")
+                            if not correct:
+                                page.screenshot(path=str(screenshot_dir/f'floating-header-error-{theme}-{width}.png'),animations='disabled')
+                                diagnostic=page.evaluate("""() => {
+                                  const h=document.querySelector('.workspace > .topbar'),
+                                    l=h.querySelector('.crumbs').getBoundingClientRect(),
+                                    r=h.querySelector('.top-actions').getBoundingClientRect(),
+                                    m=document.querySelector('#main'),
+                                    c=h.querySelector('.biz-switch'),
+                                    create=document.querySelector('.sg-create-screen');
+                                  return {headerHeight:h.getBoundingClientRect().height,
+                                    background:getComputedStyle(h).backgroundColor,
+                                    pointerEvents:getComputedStyle(h).pointerEvents,
+                                    crumbLeft:l.left,crumbRight:l.right,
+                                    actionsLeft:r.left,actionsRight:r.right,
+                                    viewport:innerWidth,paddingTop:getComputedStyle(m).paddingTop,
+                                    marginTop:getComputedStyle(m).marginTop,
+                                    controlBackground:getComputedStyle(c).backgroundColor,
+                                    controlOpacity:getComputedStyle(c).opacity,
+                                    createTop:create?.getBoundingClientRect().top,
+                                    minBottom:Math.min(l.bottom,r.bottom),
+                                    documentWidth:document.documentElement.scrollWidth};
+                                }""")
+                                raise AssertionError((width,suffix,theme,'floating-header-geometry',diagnostic))
                             if width in (320,390,781,1440) and suffix in ('','/create'):
                                 shot=suffix.removeprefix('/') or 'home'
                                 page.screenshot(path=str(screenshot_dir/f'floating-header-{shot}-{theme}-{width}.png'),animations='disabled')
