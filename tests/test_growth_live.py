@@ -1350,7 +1350,7 @@ def test_mobile_seo_dashboard_prioritizes_status_and_hides_process_details(live)
     assert 'Запусков пока нет.' in page.text
     assert 'Подключить SEO-завод' in page.text
     assert 'после отдельного серверного выпуска' not in page.text
-    assert '/studio/assets/growth-servgo-air.css?v=15-floating-header-review' in page.text
+    assert '/studio/assets/growth-servgo-air.css?v=16-floating-canvas-gap' in page.text
 
 
 def test_notification_bell_is_real_svg_centered_on_every_v4_screen(live):
@@ -1504,7 +1504,7 @@ def test_owner_home_chat_canvas_overrides_later_air_surface_styles():
     assert 'outline:none;' in active
     assert 'outline:1px solid var(--s-accent);' not in active
     assert (ASSETS.parent / "growth_v4.py").read_text(encoding="utf-8").count(
-        "growth-servgo-air.css?v=15-floating-header-review"
+        "growth-servgo-air.css?v=16-floating-canvas-gap"
     ) == 1
 
 
@@ -1512,7 +1512,7 @@ def test_v4_header_uses_transparent_shell_and_separate_opaque_controls(live):
     """Every Studio route shares the floating header, including mobile pages."""
     client, _, product = live
     base = f"/studio/products/{product.id}"
-    asset = "/studio/assets/growth-servgo-air.css?v=15-floating-header-review"
+    asset = "/studio/assets/growth-servgo-air.css?v=16-floating-canvas-gap"
     for suffix in ("", "/create", "/work", "/materials", "/seo", "/calendar"):
         response = client.get(base + suffix + "?design=v4")
         assert response.status_code == 200, suffix
@@ -1534,5 +1534,8 @@ def test_v4_header_uses_transparent_shell_and_separate_opaque_controls(live):
     assert 'pointer-events: none;' in floating
     assert 'padding-top: 104px !important;' in floating
     assert 'padding-top: calc(85px + env(safe-area-inset-top, 0px)) !important;' in floating
-    assert 'height: calc(100dvh - 1px - 65px) !important;' in floating
+    assert 'height: calc(100dvh - 64px - 65px - env(safe-area-inset-top, 0px)) !important;' in floating
+    assert 'margin-top: 75px !important;' in floating
+    assert 'padding-top: 0 !important;' in floating
+    assert 'body.home-page.sg-keyboard-open[data-growth-design="v4"]' in floating
     assert 'body.home-page.sg-keyboard-open[data-growth-design="v4"]' in floating

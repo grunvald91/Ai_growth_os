@@ -94,7 +94,8 @@ def main():
                                      style.pointerEvents==='none' &&
                                      left.left>=0 && right.right<=innerWidth+1 &&
                                      left.right<=right.left+1 &&
-                                     parseFloat(getComputedStyle(main).paddingTop)>=62 &&
+                                     (parseFloat(getComputedStyle(main).paddingTop)>=62 ||
+                                     parseFloat(getComputedStyle(main).marginTop)>=62) &&
                                      surface.backgroundColor!=='rgba(0, 0, 0, 0)' &&
                                      surface.opacity==='1' &&
                                      (!create || create.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
