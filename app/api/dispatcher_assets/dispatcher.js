@@ -823,7 +823,19 @@
     no.disabled = yes.disabled = true;
     post('/confirm', { confirmation_id: block.confirmation_id, accept: accept,
       via: 'button', revision: block.revision || 0 })
-      .then(applyResult)
+      .then(function (data) {
+        applyResult(data);
+        if (root.classList.contains('sg-create-dispatch')) {
+          root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
+            {detail:{source:'confirm',confirmed:accept}}));
+        }
+        if (!accept && root.classList.contains('sg-create-dispatch') &&
+            block.editable && !input.value.trim()) {
+          // A declined confirmation should not destroy the previous topic.
+          input.value = block.editable.topic || '';
+          grow();
+        }
+      })
       .catch(function (error) { no.disabled = yes.disabled = false; notify(error.message); });
   }
 
@@ -1010,6 +1022,11 @@
     post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
       applyResult(data);
+      if (root.classList.contains('sg-create-dispatch')) {
+        root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
+          {detail:{source:'create',hasConfirmation:Array.from(feed.querySelectorAll('.dp-confirm'))
+            .some(card=>card.querySelector('.dp-confirm-actions'))}}));
+      }
       if (onSettled) onSettled(true);
       if (voiceRequest) showNote('');
     }).catch(function (error) {
