@@ -67,22 +67,24 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     base = f"/studio/products/{pid}"
     formats = [
         ("post", "Пост", "Стратег и редактор создают текст для одной площадки."),
-        ("article", "Статья · SEO-завод", "Статьи создаются в отдельном SEO-заводе. Эта карточка открывает SEO-раздел; нижняя строка «Создать» используется для остальных форматов."),
         ("story", "Stories", "Сценарий и готовые изображения каждого экрана. Доступны PNG и ZIP."),
         ("static_image", "Изображение", "Готовая картинка PNG с возможностью скачать файл."),
         ("short_video", "Видеосценарий", "Сценарий, кадры и озвучка, без готового MP4."),
         ("whiteboard", "Простое видео", "Анимированный MP4 с озвучкой и субтитрами; платный запуск подтверждается отдельно."),
         ("package", "Полный пакет", "Статья, адаптации и сценарии. Готовый MP4 пока в этот пакет не включён."),
     ]
+    summaries = {
+        "post": "Текст для публикации",
+        "story": "Экраны и изображения",
+        "static_image": "Готовая картинка PNG",
+        "short_video": "Сценарий без MP4",
+        "whiteboard": "Готовый ролик MP4",
+        "package": "Комплект материалов",
+    }
     cards = ''.join(
-        '<div class="sg-create-pick">'
-        + (f'<a class="sg-create-format-link" href="{base}/seo">{html.escape(label)}</a>'
-           if key == "article" else
-           f'<button type="button" class="sg-create-format" data-sg-format="{key}" '
-           f'aria-pressed="false">{html.escape(label)}</button>')
-        + f'<button type="button" class="sg-create-info" data-sg-info="{html.escape(label)}" '
-          f'data-sg-description="{html.escape(description, quote=True)}" '
-          f'aria-label="О формате {html.escape(label)}">i</button></div>'
+        f'<button type="button" class="sg-create-format" data-sg-format="{key}" '
+        f'aria-pressed="false"><span>{html.escape(label)}</span>'
+        f'<small>{html.escape(summaries[key])}</small></button>'
         for key, label, description in formats
     )
     tools = [
@@ -170,34 +172,23 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
     <section class="sg-create-screen">
       <div class="sg-create-scroll">
         <header class="sg-create-intro">
-          <h1>Создать</h1>
-          <p><b>Ваша ИИ-команда готовит материалы для бизнеса.</b> Используем профиль
-          компании, доступные исследования аудитории и проверяем результат перед публикацией.</p>
+          <h1>Создать материал</h1>
+          <p>Выберите формат, площадку и тему. Подготовку и проверку выполнит ИИ-команда.</p>
           <div class="sg-create-intro-links">
             <button type="button" data-sg-about>Как это работает <span aria-hidden="true">ⓘ</span></button>
-            <button type="button" data-sg-suggest>✦ Предложить тему</button>
           </div>
         </header>
         <div class="sg-create-info-panel" id="sg-create-info-panel" role="note" hidden></div>
         <div class="sg-create-suggestions" id="sg-create-suggestions" hidden></div>
-        <div class="sg-create-label">Что создаём?</div>
-        <div class="sg-create-picks">{cards}</div>
-        <details class="sg-create-advanced" id="sg-create-advanced">
-          <summary>Сценарий и подробности</summary>
-          <p class="sg-create-tip">Нужны особые требования, аудитория или площадка?
-          Укажите их здесь либо просто опишите задачу в строке ниже.</p>
-          {warning}{advanced}
-        </details>
-        <details class="sg-create-timing" id="sg-create-timing">
-          <summary>Сколько занимает создание?</summary>
-          <p>Зависит от формата, выбранной модели и количества материалов.
-          После подтверждения следите за фактическим статусом на странице задания;
-          точное время заранее не гарантируется.</p>
-        </details>
-        <details class="sg-create-extra">
-          <summary>Другие инструменты</summary>
-          <div class="sg-create-tools">{tool_rows}</div>
-        </details>
+        <div class="sg-create-layout">
+          <div class="sg-create-main">
+            <div class="sg-create-label">1. Что создаём?</div>
+            <div class="sg-create-picks">{cards}</div>
+            <div class="sg-create-primary-platform" id="sg-create-primary-platform">
+              <div class="sg-create-label">2. Площадка</div>
+              <div id="sg-create-platform-slot"></div>
+            </div>
+            <label class="sg-create-label sg-create-topic-label" for="dp-input">3. О чём материал?</label>
         <div class="sg-create-context" id="sg-create-context" aria-live="polite"></div>
         <section class="dp-home sg-create-dispatch" data-create-format=""
           data-api="{base}/dispatch" data-voice-url="/studio/voice/dictate"
@@ -233,7 +224,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
               <textarea id="dp-input" class="dp-input" rows="1"
-                placeholder="Нажмите — текст · удерживайте — голос" enterkeyhint="send"></textarea>
+                placeholder="Например: зачем небольшому бизнесу CRM?" enterkeyhint="send"></textarea>
               <span class="voice-hold-hitbox" id="dp-voice-hitbox" aria-hidden="true"></span>
               <span class="voice-composer-status" id="dp-voice-status" role="status" hidden></span>
               <button class="command-mode-mic" id="dp-mode-mic" type="button" hidden
@@ -244,12 +235,40 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
                 <path d="M5.5 10.5v1.5a6.5 6.5 0 0 0 13 0v-1.5M12 18.5V22M8.5 22h7"/>
               </svg></button>
               <button class="dp-send command-go" id="dp-send" type="submit"
-                aria-label="Отправить запрос"><span aria-hidden="true">↑</span></button>
+                aria-label="Продолжить к проверке задания">Продолжить <span aria-hidden="true">→</span></button>
             </form>
+            <div class="sg-create-suggest-row">
+              <button type="button" data-sg-suggest>✦ Предложить тему</button>
+              <span>Для голосового ввода удерживайте поле темы</span>
+            </div>
             <div class="command-tools"><div class="command-hints" id="dp-chips"
               aria-label="Подсказки"></div></div>
           </div>
         </section>
+          </div>
+          <aside class="sg-create-aside" aria-label="Дополнительные возможности">
+            <details class="sg-create-advanced" id="sg-create-advanced">
+          <summary>Дополнительные настройки</summary>
+          <p class="sg-create-tip">Нужны особые требования, аудитория или площадка?
+          Укажите их здесь либо просто опишите задачу в строке ниже.</p>
+          {warning}{advanced}
+        </details>
+        <details class="sg-create-timing" id="sg-create-timing">
+          <summary>Сколько занимает создание?</summary>
+          <p>Зависит от формата, выбранной модели и количества материалов.
+          После подтверждения следите за фактическим статусом на странице задания;
+          точное время заранее не гарантируется.</p>
+        </details>
+        <details class="sg-create-extra">
+          <summary>Другие инструменты</summary>
+          <div class="sg-create-tools">{tool_rows}</div>
+        </details>
+            <div class="sg-create-seo-link">
+              <span>Нужна SEO-статья?</span>
+              <a href="{base}/seo">Перейти в SEO-завод →</a>
+            </div>
+          </aside>
+        </div>
       </div>
     </section>
     <script type="application/json" id="dp-state">{{"messages":[],"hints":[]}}</script>
