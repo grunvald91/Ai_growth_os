@@ -598,7 +598,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=25-create-contrast">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=26-create-dark-tokens">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=13">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
