@@ -214,10 +214,14 @@ def main():
                         })(),
                         barSelectorMatches:!!document.querySelector('body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar')};
                     }""")
-                    assert colors['barBg']==colors['mainBg'], colors
-                    assert colors['inputBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
+                    # Create uses a transparent form container and a
+                    # separate semantic surface for its compact textarea.
+                    assert colors['barBg'] in ('rgba(0, 0, 0, 0)','transparent'), colors
+                    assert colors['inputBg'] != colors['mainBg'], colors
+                    assert colors['inputBg'] not in ('rgb(255, 255, 255)','rgba(0, 0, 0, 0)'), colors
                     assert colors['inputText']==colors['mainText'], colors
                     assert colors['placeholderText']!=colors['mainBg'], colors
+                    assert colors['placeholderText']!=colors['inputBg'], colors
                     assert colors['inputSize']>=16 and colors['selectSize']>=16, colors
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-dark-{width}.png',full_page=True)
                     page.locator('#sg-create-platform').select_option('vk')
