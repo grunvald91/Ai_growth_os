@@ -69,6 +69,27 @@ def main():
                 page.goto(base)
                 page.get_by_text('Новый дизайн →', exact=True).click()
                 expect(page.locator('.topbar')).to_be_visible()
+                # Desktop/mobile review: tiny header anchor, separate controls,
+                # no horizontal overflow or collisions across both themes.
+                for width in (320, 360, 390, 768, 781, 1024, 1440):
+                    page.set_viewport_size({'width':width,'height':844})
+                    for suffix in ('', '/create', '/work', '/seo', '/materials'):
+                        page.goto(base+suffix)
+                        assert page.evaluate("""() => {
+                          const header=document.querySelector('.workspace > .topbar');
+                          const rect=header.getBoundingClientRect();
+                          const left=header.querySelector('.crumbs').getBoundingClientRect();
+                          const right=header.querySelector('.top-actions').getBoundingClientRect();
+                          const main=document.querySelector('#main');
+                          const style=getComputedStyle(header);
+                          return rect.height<=2 &&
+                                 style.backgroundColor==='rgba(0, 0, 0, 0)' &&
+                                 style.pointerEvents==='none' &&
+                                 left.left>=0 && right.right<=innerWidth+1 &&
+                                 left.right<=right.left+1 &&
+                                 parseFloat(getComputedStyle(main).paddingTop)>=62 &&
+                                 document.documentElement.scrollWidth<=innerWidth;
+                        }"""), (width,suffix,'floating-header-geometry')
                 for width in (320, 390, 768, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('','/create','/work','/materials','/review','/channels',
@@ -100,14 +121,14 @@ def main():
                 more = page.locator('#mobileNav details')
                 more.locator('summary').click()
                 expect(page.locator('.v4-more')).to_be_visible()
-                page.locator('.topbar').click(position={'x':8,'y':8})
+                page.mouse.click(6, 140)  # outside floating controls
                 expect(more).not_to_have_attribute('open', '')
                 notice = page.locator('[data-sg-notifications]')
                 notice.locator('summary').click()
                 expect(page.locator('.sg-notify-popover')).to_be_visible()
                 page.locator('.sg-notify-head strong').click()
                 expect(notice).to_have_attribute('open', '')
-                page.locator('.topbar').click(position={'x':8,'y':8})
+                page.mouse.click(6, 140)  # outside floating controls
                 expect(notice).not_to_have_attribute('open', '')
                 notice.locator('summary').click()
                 page.keyboard.press('Escape')

@@ -1628,75 +1628,97 @@ body.home-page[data-growth-design="v4"] .dp-home .command-topicbar .dp-new {
 }
 
 /* Floating Studio header: no full-width opaque strip.
-   80% opacity applies only to control backgrounds, never labels or icons. */
+   80% opacity affects only surfaces, not text/icons. All v4 routes share it. */
 body[data-growth-design="v4"] {
   --sg-floating-header-fill: color-mix(in srgb, var(--s-surface) 80%, transparent);
   --sg-floating-header-edge: color-mix(in srgb, var(--s-line-2) 70%, transparent);
   --sg-floating-header-shadow: 0 4px 18px rgba(13, 27, 42, .07);
 }
+/* Tiny sticky anchor, rather than a 76/64px band: pointer events reach the
+   content except on individual floating buttons and their menus. */
 body[data-growth-design="v4"] .workspace > .topbar {
-  position: sticky;
-  top: 0;
-  z-index: 70;
+  display: block !important;
+  position: sticky; top: 0; z-index: 70;
+  box-sizing: border-box; width: 100%;
+  height: 1px !important; min-height: 1px !important;
+  margin: 0 !important; padding: 0 !important;
+  pointer-events: none; overflow: visible !important;
   background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
+  border: 0 !important; box-shadow: none !important;
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+body[data-growth-design="v4"] .topbar .crumbs,
+body[data-growth-design="v4"] .topbar .top-actions {
+  position: absolute; top: 16px; pointer-events: auto;
 }
 body[data-growth-design="v4"] .topbar .crumbs {
-  box-sizing: border-box;
-  min-height: 44px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 8px 14px;
+  left: clamp(12px, 2vw, 30px);
+  box-sizing: border-box; flex: none; width: max-content; max-width: calc(100% - 290px);
+  min-height: 44px; padding: 8px 14px;
   background: var(--sg-floating-header-fill);
-  border: 1px solid var(--sg-floating-header-edge);
-  border-radius: 14px;
+  border: 1px solid var(--sg-floating-header-edge); border-radius: 14px;
   box-shadow: var(--sg-floating-header-shadow);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
 body[data-growth-design="v4"] .topbar .top-actions {
-  background: transparent;
-  border: 0;
-  box-shadow: none;
+  right: clamp(12px, 2vw, 30px); margin: 0;
+  background: transparent; border: 0; box-shadow: none;
 }
 body[data-growth-design="v4"] .topbar .top-actions :is(
   .cmd-search, .icon-btn, .sg-notifications > summary, .biz-switch, .chip
 ) {
   background: var(--sg-floating-header-fill) !important;
-  border: 1px solid var(--sg-floating-header-edge);
-  border-radius: 14px;
+  border: 1px solid var(--sg-floating-header-edge); border-radius: 14px;
   box-shadow: var(--sg-floating-header-shadow);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
 body[data-growth-design="v4"] .topbar :is(
   .mobile-brand, .cmd-search, .icon-btn, .sg-notifications > summary, .biz-switch
-):focus-visible {
-  outline: 2px solid var(--s-accent);
-  outline-offset: 3px;
+):focus-visible { outline: 2px solid var(--s-accent); outline-offset: 3px; }
+/* Preserve the original first-content baseline while allowing scrolling behind
+   the overlay. This padding belongs to the page, not the topbar. */
+body[data-growth-design="v4"] .workspace > #main { padding-top: 104px !important; }
+body.home-empty[data-growth-design="v4"] .workspace > #main { min-height: calc(100dvh - 1px); }
+@media(max-width:1260px) and (min-width:781px) {
+  body[data-growth-design="v4"] .workspace > #main { padding-top: 99px !important; }
 }
 @media(max-width:780px) {
-  /* A phone shows a separate floating logo, never a wide breadcrumb strip. */
+  body[data-growth-design="v4"] .topbar .crumbs,
+  body[data-growth-design="v4"] .topbar .top-actions {
+    top: calc(10px + env(safe-area-inset-top, 0px));
+  }
   body[data-growth-design="v4"] .topbar .crumbs {
-    width: auto;
-    min-height: 0;
-    padding: 0;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
+    left: 10px; width: auto; max-width: 64px; min-height: 0; padding: 0;
+    overflow: visible; background: transparent; border: 0; border-radius: 0;
+    box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none;
   }
   body[data-growth-design="v4"] .topbar .crumbs .mobile-brand {
     background: var(--sg-floating-header-fill) !important;
-    border: 1px solid var(--sg-floating-header-edge);
-    border-radius: 14px;
+    border: 1px solid var(--sg-floating-header-edge); border-radius: 14px;
     box-shadow: var(--sg-floating-header-shadow);
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  }
+  body[data-growth-design="v4"] .topbar .top-actions { right: 10px; }
+  body[data-growth-design="v4"] .workspace > #main {
+    padding-top: calc(85px + env(safe-area-inset-top, 0px)) !important;
+  }
+}
+/* Full-height canvases had a 76px/64px subtraction. Return that height to
+   the page while retaining the same amount of interactive content space. */
+body[data-growth-design="v4"]:has(.sg-create-screen) .workspace > #main {
+  box-sizing: border-box; height: calc(100dvh - 1px) !important;
+  padding-top: 75px !important;
+}
+body.home-page:not(.home-empty)[data-growth-design="v4"] .workspace > #main {
+  padding-top: 75px !important;
+}
+@media(max-width:780px) {
+  body[data-growth-design="v4"]:has(.sg-create-screen) .workspace > #main {
+    height: calc(100dvh - 1px - 65px) !important;
+    padding-top: calc(63px + env(safe-area-inset-top, 0px)) !important;
+  }
+  body.home-page:not(.home-empty)[data-growth-design="v4"] .workspace > #main,
+  body.home-page.sg-keyboard-open[data-growth-design="v4"] .workspace > #main {
+    padding-top: calc(63px + env(safe-area-inset-top, 0px)) !important;
   }
 }
