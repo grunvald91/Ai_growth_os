@@ -2189,6 +2189,8 @@
       }
     }
 
+    const VOICE_HOLD_START_MS = 120;
+
     function startRecording() {
       if (voiceWorking || recorder || micOpening || state.isSending || !activeHold) return;
       const intent = activeHold;
@@ -2196,10 +2198,13 @@
       showNote("");
       input.blur();
       micOpening = true;
+      // Begin the asynchronous microphone request immediately, before UI
+      // updates, without requesting access during a simple short tap.
+      const microphoneRequest = navigator.mediaDevices.getUserMedia({ audio: true });
       setVoiceState("connecting");
       showLive("Подключаю микрофон…", "", true);
 
-      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+      microphoneRequest.then((stream) => {
         micOpening = false;
         if (!intent || intent !== activeHold || intent.cancelled) {
           stream.getTracks().forEach((track) => track.stop());
@@ -2234,6 +2239,10 @@
           return;
         }
         recordStarted = Date.now();
+        if (intent && typeof intent.pressedAt === "number") {
+          try { performance.measure("servgo:voice-startup", { start: intent.pressedAt, end: performance.now() }); }
+          catch (_) {}
+        }
         if (window.VoiceGlow) window.VoiceGlow.start(stream);
         recordingId += 1;
         lastLive = "";
@@ -2379,7 +2388,15 @@
       if (ev.button !== 0 || activeHold || recorder || micOpening || voiceWorking || state.isSending) return;
       if (!allowWhileEditing && form.classList.contains("voice-text-editing")) return;
       if (ev.pointerType === "touch") ev.preventDefault();
-      activeHold = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, cancelled: false, started: false };
+      activeHold = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, pressedAt: performance.now(), cancelled: false, started: false };
+      form.classList.add("voice-arming");
+      // Schedule before AudioContext creation to avoid blocking the timer.
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        if (!activeHold || activeHold.cancelled) return;
+        activeHold.started = true;
+        startRecording();
+      }, VOICE_HOLD_START_MS);
       if (window.VoiceGlow) {
         window.VoiceGlow.setKnobX(ev.clientX);
         window.VoiceGlow.arm();
@@ -2387,13 +2404,6 @@
       if (ev.pointerType === "touch" && ev.target && ev.target.setPointerCapture) {
         try { ev.target.setPointerCapture(ev.pointerId); } catch {}
       }
-      form.classList.add("voice-arming");
-      holdTimer = setTimeout(() => {
-        holdTimer = null;
-        if (!activeHold || activeHold.cancelled) return;
-        activeHold.started = true;
-        startRecording();
-      }, 220);
     }
 
     if (el.modeMicBtn) {
