@@ -974,7 +974,8 @@
     root.classList.toggle('busy', value);
     var pending = feed.querySelector('.dp-typing');
     if (value && !pending) {
-      var dots = el('div', 'dp-msg bot dp-typing', 'Думаю…');
+      var dots = el('div', 'dp-msg bot dp-typing',
+        root.classList.contains('sg-create-dispatch') ? 'Готовлю параметры задания…' : 'Думаю…');
       dots.setAttribute('role', 'status');
       feed.appendChild(dots);
     }
@@ -992,6 +993,10 @@
     feed.appendChild(note);
     syncConversationLayout();
     toBottom();
+    if (root.classList.contains('sg-create-dispatch')) {
+      root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
+        {detail:{source:'error'}}));
+    }
   }
 
   function applyResult(data) {
