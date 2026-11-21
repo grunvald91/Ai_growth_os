@@ -637,3 +637,38 @@ def test_work_poll_does_not_reload_the_list_page():
     assert "applyBoard(fresh)" in JS
     assert "pendingBoard=fresh" in JS
     assert "if(showWork&&!workBoard)" in JS
+
+
+def test_task_kind_filter_preserves_query_and_count(owner_studio):
+    from app.api.content_studio_activity import work_page
+    client, db, company, _ = owner_studio
+    post = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: Пост", status=TaskStatus.COMPLETED)
+    article = Task(product_id=company.id, assigned_agent="content_factory",
+                   title="CONTENT: Статья", status=TaskStatus.COMPLETED)
+    video = Task(product_id=company.id, assigned_agent="whiteboard_renderer",
+                 title="WHITEBOARD-JOB: video", status=TaskStatus.RUNNING)
+    db.add_all([post, article, video])
+    db.flush()
+    for job, mode in ((post, "post"), (article, "article")):
+        db.add(Artifact(product_id=company.id, task_id=job.id,
+                        kind="content_request", title="Запрос", status="draft",
+                        content=json.dumps({"mode": mode, "topic": "Рост продаж"},
+                                           ensure_ascii=False)))
+    db.commit()
+    post_data = work_page(db, company.id, kind="post")
+    assert post_data["total"] == 1
+    assert post_data["items"][0]["id"] == str(post.id)
+    article_data = work_page(db, company.id, kind="article")
+    assert article_data["total"] == 1
+    assert article_data["items"][0]["id"] == str(article.id)
+    video_data = work_page(db, company.id, kind="video")
+    assert video_data["total"] == 1
+    assert video_data["items"][0]["id"] == str(video.id)
+    page = client.get(f"/studio/products/{company.id}/work",
+                      params={"kind": "post", "q": "Рост"}).text
+    assert f'/tasks/{post.id}' in page
+    assert f'/tasks/{article.id}' not in page
+    assert 'name="kind"' in page
+    assert 'value="post" selected' in page
+    assert "kind=post" in page
