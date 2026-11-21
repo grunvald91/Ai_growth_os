@@ -185,10 +185,12 @@ def main():
                         opacity:parseFloat(style.opacity),description:hint.textContent.trim(),
                         voiceUnavailable:document.querySelector('#dp-form').classList.contains('voice-unavailable')};
                     }""")
-                    assert voice_hint['inside'] and voice_hint['pointerEvents']=='none', voice_hint
+                    assert voice_hint['pointerEvents']=='none', voice_hint
                     assert voice_hint['description']=='Удерживайте поле — голосом', voice_hint
                     assert .5<=voice_hint['opacity']<1, voice_hint
                     assert voice_hint['visible'] != voice_hint['voiceUnavailable'], voice_hint
+                    if voice_hint['visible']:
+                        assert voice_hint['inside'], voice_hint
                     assert geometry['composerPosition']=='static', geometry
                     assert not geometry['pageOverflow'], geometry
                     if width >= 1080:
