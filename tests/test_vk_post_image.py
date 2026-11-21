@@ -34,6 +34,8 @@ def test_vk_post_only_opt_in_and_prompt_no_fake_claims():
     prompt = vk_visual_prompt("Клиника", "Удобная запись", "Как записать клиентов без очереди")
     assert "How" not in prompt
     assert "NO letters" in prompt
+    assert "NO readable incoming-call screen" in prompt
+    assert "phone number, email, URL, price" in prompt
     with Image.open(io.BytesIO(export_vk_png(picture()))) as generated:
         assert generated.format == "PNG"
         assert generated.size == (1080, 1350)
