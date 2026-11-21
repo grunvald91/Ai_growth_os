@@ -2479,8 +2479,8 @@ def studio_work_page(product_id: UUID, tab: str = "all", db: Session = Depends(g
     tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
     html_body = activity_html(product.id, work_items(db, product.id), tab=tab)
     result = HTMLResponse(studio_page_shell(
-        product, active="work", title="В работе",
-        subtitle="Здесь видно, что создаётся, что готово и что требует внимания.",
+        product, active="work", title="Задания",
+        subtitle="Что выполняется, что готово и где требуется ваше решение.",
         body=html_body,
     ))
     result.headers["Cache-Control"] = "private, no-store"
