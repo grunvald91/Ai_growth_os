@@ -55,6 +55,24 @@
   if(suggestRow && extrasSlot)extrasSlot.before(suggestRow);
   if(suggestRow && topics)suggestRow.after(topics);
   const base=root.getAttribute('data-api').replace(/\/dispatch$/, '');
+  const platformStatus=document.getElementById('sg-create-platform-status');
+  let savedConnections=null;
+  function refreshPlatformStatus(){
+    if(!platformStatus)return;
+    const state=savedConnections && savedConnections[platform.value] &&
+      savedConnections[platform.value].state;
+    platformStatus.textContent=state==='configured'
+      ? 'Подключение сохранено. Доступность проверяется при публикации.'
+      : state==='not_configured'
+        ? 'Подключение не настроено. Черновик можно подготовить сейчас.'
+        : 'Черновик можно создать без подключения. Статус публикации не проверен.';
+  }
+  fetch(base+'/create/platforms.json',{credentials:'same-origin',
+    headers:{Accept:'application/json'}}).then(response=>{
+    if(!response.ok)throw new Error('not available');
+    return response.json();
+  }).then(data=>{savedConnections=data;refreshPlatformStatus();})
+    .catch(()=>refreshPlatformStatus());
 
   function info(title,detail){
     panel.replaceChildren();
@@ -117,7 +135,7 @@
   vkImageRadios.forEach(radio=>radio.addEventListener('change',syncVkImage));
   if(vkModelChoice)vkModelChoice.addEventListener('change',syncVkImage);
   if(count)count.addEventListener('change',updateSummary);
-  platform.addEventListener('change',syncVkImage);
+  platform.addEventListener('change',()=>{syncVkImage();refreshPlatformStatus();});
 
   function chooseFormat(key){
     const selected=screen.querySelector('[data-sg-format="'+key+'"]');
@@ -145,6 +163,7 @@
     if(channels[key] && channels[key].some(([value])=>value===previous)) platform.value=previous;
     else platform.value=defaults[key]||'';
     syncVkImage();
+    refreshPlatformStatus();
     const names={post:'Пост',story:'Stories',static_image:'Изображение',
       short_video:'Видеосценарий',whiteboard:'Анимированное видео',package:'Полный пакет'};
     const context=document.getElementById('sg-create-context');
