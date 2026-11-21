@@ -11,8 +11,10 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
+from urllib.parse import urlencode
+import hashlib
 
-from sqlalchemy import select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
@@ -178,6 +180,11 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
     ).order_by(Task.created_at.desc(), Task.id.desc()).limit(limit)))
     tasks = pinned + [row for row in recent if row.id not in {task.id for task in pinned}]
     tasks = tasks[:max(limit, len(pinned))]
+    return _work_items_for_tasks(db, product_id, tasks)
+
+
+def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> list[dict]:
+    """Hydrate only task IDs selected by the caller (avoids paginating in Python)."""
     if not tasks:
         return []
     ids = [task.id for task in tasks]
@@ -282,6 +289,104 @@ def work_items(db: Session, product_id: UUID, limit: int = 60) -> list[dict]:
             "created_at": task.created_at.isoformat() if task.created_at else None,
         })
     return output
+
+
+WORK_PAGE_SIZE = 20
+WORK_PERIODS = {"all": None, "7": 7, "30": 30, "90": 90}
+
+
+def work_page(db: Session, product_id: UUID, *, tab: str = "all",
+              query: str = "", period: str = "all", page: int = 1,
+              page_size: int = WORK_PAGE_SIZE) -> dict:
+    """Tenant-scoped SQL filtering/counting before pagination.
+
+    Active, failed and waiting tasks cannot disappear behind a global recent
+    limit. Only the currently displayed page is hydrated with artifacts/runs.
+    """
+    tab = tab if tab in {"all", "active", "approval", "ready", "problems"} else "all"
+    period = period if period in WORK_PERIODS else "all"
+    q = " ".join(str(query or "").split())[:120]
+    page = max(1, min(int(page), 100_000))
+    page_size = max(1, min(int(page_size), 60))
+    base = [Task.product_id == product_id, Task.assigned_agent.in_(WORK_AGENTS)]
+    if WORK_PERIODS[period] is not None:
+        base.append(Task.created_at >=
+                    datetime.now(timezone.utc) - timedelta(days=WORK_PERIODS[period]))
+    if q:
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        request_match = exists(select(Artifact.id).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id == Task.id,
+            Artifact.kind.in_(("content_request", "creative_request", "edit_request")),
+            Artifact.content.ilike(pattern, escape="\\"),
+        ))
+        base.append(or_(
+            Task.title.ilike(pattern, escape="\\"),
+            Task.description.ilike(pattern, escape="\\"),
+            request_match,
+        ))
+    # The latest draft editorial plan is a real user decision even when the
+    # Artifact status field is not awaiting_approval.
+    plan_candidates = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "editorial_plan",
+    ).order_by(Artifact.created_at.desc()).limit(12)))
+    draft_plans = set()
+    for art in plan_candidates:
+        try:
+            payload = json.loads(art.content or "{}")
+            if (isinstance(payload, dict) and payload.get("approval_state") == "draft"
+                    and art.task_id):
+                draft_plans.add(art.task_id)
+                break
+        except (TypeError, ValueError):
+            continue
+    pending = exists(select(Artifact.id).where(
+        Artifact.product_id == product_id,
+        Artifact.task_id == Task.id,
+        Artifact.kind.in_(RESULT_KINDS),
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ))
+    attention_parts = [Task.status.in_((TaskStatus.WAITING_APPROVAL, TaskStatus.FAILED)), pending]
+    if draft_plans:
+        attention_parts.append(Task.id.in_(draft_plans))
+    attention = or_(*attention_parts)
+    active = Task.status.in_((TaskStatus.QUEUED, TaskStatus.RUNNING))
+    predicates = {
+        "all": None,
+        "approval": attention,
+        "active": active,
+        "ready": Task.status == TaskStatus.COMPLETED,
+        "problems": Task.status.in_((TaskStatus.FAILED, TaskStatus.CANCELLED)),
+    }
+    counts = {
+        name: int(db.scalar(select(func.count(Task.id)).where(
+            *base, *((predicate,) if predicate is not None else ()),
+        )) or 0)
+        for name, predicate in predicates.items()
+    }
+    total = counts[tab]
+    max_page = max(1, (total + page_size - 1) // page_size)
+    page = min(page, max_page)
+    stmt = select(Task).where(
+        *base, *((predicates[tab],) if predicates[tab] is not None else ()),
+    )
+    if tab == "all":
+        priority = case(
+            (attention, 0), (active, 1),
+            (Task.status == TaskStatus.CANCELLED, 2),
+            else_=3,
+        )
+        stmt = stmt.order_by(priority, Task.created_at.desc(), Task.id.desc())
+    else:
+        stmt = stmt.order_by(Task.created_at.desc(), Task.id.desc())
+    tasks = list(db.scalars(stmt.limit(page_size).offset((page - 1) * page_size)))
+    return {
+        "items": _work_items_for_tasks(db, product_id, tasks),
+        "total": total, "counts": counts, "page": page,
+        "page_size": page_size, "q": q, "tab": tab, "period": period,
+    }
 
 
 def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
