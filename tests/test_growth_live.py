@@ -219,6 +219,32 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
 
 
 
+
+def test_create_v4_layout_follows_visible_task_flow(live):
+    client, _, product = live
+    page = client.get(f'/studio/products/{product.id}/create?design=v4')
+    assert page.status_code == 200
+    html = page.text
+    assert 'class="sg-create-layout"' in html
+    assert 'class="sg-create-main"' in html
+    assert 'class="sg-create-aside"' in html
+    assert '1. Что создаём?' in html
+    assert '2. Площадка' in html
+    assert '3. О чём материал?' in html
+    assert html.index('id="sg-create-platform-slot"') < html.index('id="dp-input"')
+    assert 'aria-label="Продолжить к проверке задания"' in html
+    assert html.count('data-sg-suggest') == 1
+    assert 'Статья · SEO-завод</' not in html
+    assert 'Перейти в SEO-завод' in html
+    js = client.get('/studio/assets/create-studio.js').text
+    assert 'platformSlot.appendChild(platformRow)' in js
+    assert "chooseFormat('post')" in js
+    assert "history.scrollIntoView" in js
+    css = client.get('/studio/assets/growth-live.css').text
+    assert '.sg-create-layout' in css
+    assert '.sg-create-dispatch .command-dock' in css
+
+
 def test_create_has_only_dispatcher_submit_and_reusable_details(live):
     client, _, product = live
     base = f'/studio/products/{product.id}'
