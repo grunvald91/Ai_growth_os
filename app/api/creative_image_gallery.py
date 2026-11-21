@@ -37,9 +37,11 @@ def gallery_html(product_id: UUID, task_id: UUID, images: list[Artifact], *,
             label = "Фирменный стиль · " + generator
         else:
             label = "ChatGPT Image" if model.startswith("gpt-") else "Gemini"
+        aspect = ("is-square" if meta.get("ratio") == "1:1" else
+                  "is-vk-portrait" if meta.get("ratio") == "4:5" else "is-portrait")
         tiles.append(
             '<article class="sg-image-tile">'
-            f'<a class="{"is-square" if meta.get("ratio") == "1:1" else "is-portrait"}" href="{uri}" target="_blank" rel="noopener" aria-label="Открыть кадр {number}">'
+            f'<a class="{aspect}" href="{uri}" target="_blank" rel="noopener" aria-label="Открыть кадр {number}">'
             f'<img src="{uri}" loading="lazy" decoding="async" alt="Готовый кадр {number}" /></a>'
             '<div class="sg-image-tile-foot"><div>'
             f'<b>Кадр {number}</b><small>{html.escape(label)}</small>'

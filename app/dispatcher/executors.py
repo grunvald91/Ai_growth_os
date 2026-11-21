@@ -436,23 +436,35 @@ async def describe_create_post(ctx: Context, params: PostParams) -> Confirmation
         title="Подготовить пост?",
         details=[f"Тема: {params.topic}.", f"Площадка: {CHANNEL_LABELS[params.channel]}.",
                  *_context_details(params),
-                 "Готовый текст придёт на проверку; автоматической публикации нет."],
+                 *([f"Изображение: {params.image_ratio}.",
+                    "Один платный вызов генератора и один вызов визуального критика. "
+                    "Серьёзный дефект блокирует изображение; мелкие замечания не задерживают материал."]
+                   if params.image_model != "none" else []),
+                 "Готовые материалы придут на проверку; автоматической публикации нет."],
         params=params.model_dump(exclude_none=True), confirm_label="Создать",
+        paid=params.image_model != "none",
     )
 
 
 async def create_post(ctx: Context, params: PostParams) -> Outcome:
     from app.content.service import queue_content
     try:
+        if params.image_model != "none":
+            from app.content.creative_images import resolve_model
+            from app.content.vk_image_critic import critic_profile
+            resolve_model(ctx.settings, params.image_model)
+            critic_profile(ctx.settings)
         task = queue_content(ctx.db, ctx.product.id, params.topic, format="post", channel=params.channel,
-                             audience=params.audience, editorial_brief=params.editorial_brief)
+                             audience=params.audience, editorial_brief=params.editorial_brief,
+                             image_model=params.image_model, image_ratio=params.image_ratio)
     except (ValueError, LookupError):
         ctx.db.rollback()
         return Outcome("Не получилось поставить пост в работу: проверьте тему и площадку.",
                        "Не получилось поставить пост в работу.", ok=False)
     label = CHANNEL_LABELS[params.channel]
-    text = f"Принял. Пишу пост для {label} на тему «{params.topic}». Сообщу, когда будет готов."
-    return Outcome(text, f"Принял, пишу пост для {label}. Скоро будет готов.",
+    visual = " с иллюстрацией" if params.image_model != "none" else ""
+    text = f"Принял. Готовлю пост{visual} для {label} на тему «{params.topic}». Результат будет в задании."
+    return Outcome(text, f"Принял, готовлю пост{visual} для {label}.",
                    [_task_block(ctx, task, f"Пост для {label}: {params.topic}",
                                 f"/studio/products/{ctx.product.id}/tasks/{task.id}")], task_id=task.id)
 

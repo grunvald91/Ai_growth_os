@@ -79,6 +79,25 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
                 validate_telegram_text(source["body"])
             except ValueError as exc:
                 raise ReviewError(422, str(exc)) from None
+        if source.get("channel") == "vk" and source.get("image_model", "none") != "none":
+            from app.content.vk_image_critic import verified_vk_image_approval
+            from app.content.brand_story_pipeline import verified_gallery_image
+            try:
+                image_id = UUID(str(source["image_artifact_id"]))
+                image = db.scalar(select(Artifact).where(
+                    Artifact.id == image_id,
+                    Artifact.product_id == product_id,
+                    Artifact.task_id == row.task_id,
+                    Artifact.kind == "generated_image",
+                ))
+                if image is None or not verified_vk_image_approval(db, row, image):
+                    raise ValueError("No validated visual critique for this post")
+                verified_gallery_image(db, products_root, product_id, row.task_id, image)
+            except (KeyError, ValueError, TypeError, LookupError, OSError):
+                raise ReviewError(
+                    409, "Визуальный критик не подтвердил изображение. "
+                         "Исправьте серьёзные ошибки или завершите проверку до согласования."
+                ) from None
         pending = db.scalar(select(Task.id).where(
             Task.product_id == product_id, Task.assigned_agent == "content_editor",
             Task.title == "EDIT: " + str(row.id), Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),

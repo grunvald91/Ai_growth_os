@@ -28,6 +28,7 @@ from app.comments.secrets import CommentSecrets
 from app.comments.service import CommentService
 from app.comments.vk import VKAdapter
 from app.content.revisions import source_fingerprint
+from app.content.vk_photo_upload import prepared_image, upload_wall_photo, VKPhotoUploadError
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.services.campaign_lifecycle import closing_campaign_for_material
 
@@ -447,6 +448,37 @@ async def active_token(settings, channel):
     return result["access_token"]
 
 
+async def photo_token_for_connected_group(db, settings, channel, group, adapter, wall_token):
+    """Prefer a separately linked classic user token for photo uploads.
+
+    Community tokens may support wall.post but not photos.getWallUploadServer.
+    VK ID (vk2.a) is not a proven replacement for legacy VK API user tokens.
+    Only use another credential bound to the SAME tenant and SAME community;
+    verify that the user can administer the group. Never send that user token
+    to the upload URL or use it for the final wall.post call.
+    """
+    if not channel.is_community_token:
+        return wall_token
+    account = db.scalar(select(CommentChannel).where(
+        CommentChannel.product_id == channel.product_id,
+        CommentChannel.platform == "vk",
+        CommentChannel.account_id == group,
+        CommentChannel.status == "connected",
+    ).limit(1))
+    if account is None:
+        return wall_token
+    try:
+        user_token = await active_token(settings, account)
+        if (not isinstance(user_token, str) or not user_token
+                or user_token.startswith("vk2.a.")):
+            return wall_token
+        await adapter.manager(group, user_token)
+        return user_token
+    except (ValueError, OSError, RuntimeError):
+        # Not a compatible verified user token; leave group-key behavior intact.
+        return wall_token
+
+
 def connected(db, product_id):
     # Dedicated publisher token takes precedence over legacy comment-token connection.
     row = db.scalar(select(Artifact).where(
@@ -533,7 +565,7 @@ def approved_posts(db, product_id):
     return output
 
 
-def schedule(db, product_id, post_id, when):
+def schedule(db, product_id, post_id, when, *, products_root=None):
     if when.tzinfo is None or when.utcoffset() is None:
         raise ValueError("Для публикации укажите часовой пояс")
     now = datetime.now(timezone.utc)
@@ -571,6 +603,11 @@ def schedule(db, product_id, post_id, when):
         raise ValueError("Некорректный материал") from None
     if value.get("channel") != "vk" or not isinstance(value.get("body"), str):
         raise ValueError("Это не подготовленный пост VK")
+    # Freeze the exact critic-approved file and its digest in the immutable
+    # publication intent; no text-only fallback if image verification fails.
+    image_pair = prepared_image(db, products_root, post)
+    image = image_pair[0] if image_pair else None
+    image_hash = json.loads(image.content)["sha256"] if image else None
     text = value["body"].strip()
     if not text or len(text) > 15000:
         raise ValueError("Для VK требуется текст длиной до 15000 символов")
@@ -597,6 +634,8 @@ def schedule(db, product_id, post_id, when):
             "source_version": post.version, "source_digest": source_fingerprint(post),
             "channel_id": str(channel.id), "group_id": channel.account_id,
             "text": text, "scheduled_at": pub.scheduled_at.isoformat(),
+            "image_artifact_id": str(image.id) if image else None,
+            "image_sha256": image_hash,
         }, ensure_ascii=False)))
     db.commit()
     return pub
@@ -663,6 +702,11 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
                     or source_fingerprint(post) != data.get("source_digest")
                     or closing_campaign_for_material(db, pub.product_id, post.id)):
                 raise ValueError("Материал или доступ изменились после подтверждения")
+            image_pair = prepared_image(db, settings.products_root, post)
+            if (str(image_pair[0].id) if image_pair else None) != data.get("image_artifact_id"):
+                raise ValueError("Согласованное изображение было заменено")
+            if (json.loads(image_pair[0].content)["sha256"] if image_pair else None) != data.get("image_sha256"):
+                raise ValueError("Изображение было изменено после согласования")
         except (ValueError, TypeError, KeyError):
             pub.status = "failed_before_send"
             db.commit()
@@ -687,7 +731,9 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
         group = channel.account_id
         channel_id = channel.id
         text = data["text"]
+        photo_path = image_pair[1] if image_pair else None
         db.commit()
+    wall_post_started = False
     try:
         if sender is None:
             with session_factory() as db:
@@ -701,18 +747,48 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
             adapter = VKAdapter(CommentGateway(), "vk")
             if not ch.is_community_token:
                 await adapter.manager(group, token)
+            attachment = None
+            if photo_path is not None:
+                with session_factory() as db:
+                    photo_token = await photo_token_for_connected_group(
+                        db, settings, ch, group, adapter, token,
+                    )
+                attachment = await upload_wall_photo(
+                    adapter, photo_token, group, photo_path,
+                    expected_sha256=data.get("image_sha256"),
+                )
+            options = {"attachments": attachment} if attachment is not None else {}
+            wall_post_started = True
             response = await adapter.call("wall.post", token, owner_id=-int(group),
-                    from_group=1, message=text, guid=str(publication_id))
+                    from_group=1, message=text, guid=str(publication_id), **options)
             post_id = response.get("post_id") if isinstance(response, dict) else None
         else:
+            # The injected sender is only used by offline tests. A real image
+            # requires the live adapter/upload pipeline, not a fake text sender.
+            if photo_path is not None:
+                raise VKPhotoUploadError("Нельзя отправить изображение без VK-загрузчика")
+            wall_post_started = True
             post_id = await sender(group, text, str(publication_id))
         if not isinstance(post_id, int) or post_id < 1:
             raise ValueError("VK не подтвердил ID опубликованного поста")
-    except Exception:
+    except Exception as exc:
         with session_factory() as db:
             pub = db.get(Publication, publication_id)
             if pub and pub.status == "sending":
-                pub.status = "delivery_unknown"
+                # No wall.post call means there cannot be a VK post to reconcile.
+                # A timed-out wall.post is ambiguous and must never be retried.
+                pub.status = "delivery_unknown" if wall_post_started else "failed_before_send"
+                if photo_path is not None and not wall_post_started:
+                    db.add(Artifact(
+                        product_id=publication_product_id, kind="vk_publish_issue",
+                        title="VK upload " + str(publication_id),
+                        status=ArtifactStatus.APPROVED,
+                        content=json.dumps({
+                            "stage": "photo_upload", "publication_id": str(publication_id),
+                            "reason": str(exc) if isinstance(exc, VKPhotoUploadError)
+                                        else "Не удалось загрузить изображение в VK",
+                        }, ensure_ascii=False),
+                    ))
                 db.commit()
         return 1
     with session_factory() as db:

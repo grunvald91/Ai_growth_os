@@ -9,6 +9,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from uuid import UUID
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select, update
@@ -98,11 +99,15 @@ class QuickPostRequest(StrictModel):
     channel: str
     audience: str | None = Field(default=None, max_length=300)
     editorial_brief: str | None = Field(default=None, max_length=3500)
+    image_model: Literal["none", "auto", "gemini", "openai"] = "none"
+    image_ratio: Literal["4:5", "1:1"] = "4:5"
 
     @model_validator(mode="after")
     def valid_channel(self):
         if self.channel not in CHANNEL_GUIDANCE:
             raise ValueError("Unsupported single-post channel")
+        if self.image_model != "none" and self.channel != "vk":
+            raise ValueError("Post images are currently supported only for VK")
         return self
 
 
@@ -167,6 +172,11 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
     from app.privacy import PrivacyGateway
 
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
+    if request.image_model != "none":
+        from app.content.creative_images import resolve_model
+        from app.content.vk_image_critic import critic_profile
+        resolve_model(settings, request.image_model)
+        critic_profile(settings)  # Image AND vision review must be configured before billing.
     # Resolve the configured provider BEFORE changing task state: missing keys
     # must never strand an already-claimed job in RUNNING.
     llm = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
@@ -362,13 +372,37 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
             "evidence_ids": output.evidence_ids,
             "origin": "quick_post",
             "publication": "manual_until_channel_connected",
+            "image_model": request.image_model,
+            "image_ratio": request.image_ratio,
+            "image_state": "pending" if request.image_model != "none" else "none",
         }
-        ArtifactService(db).create(
+        post_record = ArtifactService(db).create(
             product_id=product.id, task_id=task.id,
             kind="channel_text", title=output.title,
             content=json.dumps(content, ensure_ascii=False),
             status="awaiting_approval",
         )
+        db.commit()  # Text is preserved if the optional paid image call fails.
+        if request.image_model != "none":
+            from app.content.vk_post_image import prepare_vk_post_image
+            try:
+                await prepare_vk_post_image(
+                    db, settings, product=product, task=task, post=post_record,
+                    model_choice=request.image_model, ratio=request.image_ratio)
+                from app.content.vk_image_critic import review_vk_post_image
+                await review_vk_post_image(
+                    db, settings, product=product, task=task, post=post_record)
+            except Exception as exc:
+                db.rollback()
+                # Preserve the finished article and label the missing image for review.
+                persisted = db.get(Artifact, post_record.id)
+                if persisted is not None:
+                    saved = json.loads(persisted.content)
+                    saved["image_state"] = "failed"
+                    saved["image_error_code"] = type(exc).__name__
+                    persisted.content = json.dumps(saved, ensure_ascii=False)
+                    db.commit()
+                raise
         db.get(Task, task.id).status = TaskStatus.COMPLETED
         db.commit()
         return True

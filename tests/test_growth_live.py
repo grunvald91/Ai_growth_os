@@ -198,6 +198,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="dp-voice-status"' in page.text
     assert 'id="sg-create-suggestions"' in page.text
     assert 'id="sg-create-count"' in page.text
+    assert 'id="sg-create-vk-image-model"' in page.text
+    assert 'id="sg-create-vk-image-ratio"' in page.text
+    assert 'value="4:5"' in page.text and 'value="1:1"' in page.text
     assert 'id="sg-create-platform"' in page.text
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
@@ -1306,7 +1309,8 @@ def test_create_includes_aspect_controls_and_story_vertical_hint(live):
     assert "aspectRow.hidden=key!=='static_image'" in create_script
     dispatcher_script = client.get("/studio/assets/dispatcher.js").text
     assert "aspect_ratio:selected==='story' ? '9:16'" in dispatcher_script
-    assert "kind.addEventListener('change',function(){aspect.value='';refreshOptions();});" in dispatcher_script
+    assert "kind.addEventListener('change',function(){" in dispatcher_script
+    assert "platform.addEventListener('change',refreshOptions);" in dispatcher_script
 
 
 def test_create_timing_explains_status_without_unverified_estimates(live):

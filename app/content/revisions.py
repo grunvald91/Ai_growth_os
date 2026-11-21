@@ -375,6 +375,12 @@ async def run_post_edit(db: Session, settings, request: EditRequest, *, task_id:
             "revision_number": int(old.get("revision_number", 1)) + 1,
             "publication": "manual_until_channel_connected",
         }
+        if channel == "vk" and old.get("image_model", "none") != "none":
+            new_value["image_model"] = old["image_model"]
+            new_value["image_ratio"] = old.get("image_ratio", "4:5")
+            new_value["image_state"] = "stale"
+            new_value["quality_warnings"].append(
+                "После изменения текста иллюстрацию нужно обновить перед публикацией")
         revised = ArtifactService(db).create(
             product_id=product.id, task_id=task.id, agent_run_id=run_id,
             kind="channel_text", title=draft.title,

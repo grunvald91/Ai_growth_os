@@ -112,6 +112,24 @@ def create_content_html(product_id, *, created=False, fields=None, error=None,
               <input name="audience" maxlength="300" value="{esc(fields.get('audience', ''))}" placeholder="Например: занятые родители с детьми">
             </label>
             {brand_controls}
+            <fieldset class="sg-field sg-wide" data-vk-post-image-control style="display:none">
+              <legend>Иллюстрация для поста ВКонтакте</legend>
+              <label><input name="vk_generate_image" type="checkbox" value="yes" {"checked" if fields.get('vk_generate_image') == 'yes' else ''}> Создать картинку и проверить критиком (2 платных вызова)</label>
+              <label class="sg-field"><span>Модель изображения</span>
+                <select name="vk_image_model">
+                  <option value="auto" selected>Автоматически · доступная модель</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">ChatGPT Image</option>
+                </select>
+              </label>
+              <label class="sg-field"><span>Формат картинки</span>
+                <select name="vk_image_ratio">
+                  <option value="4:5" {"selected" if fields.get("vk_image_ratio", "4:5") == "4:5" else ""}>Вертикальная 4:5 · 1080×1350 (рекомендуем)</option>
+                  <option value="1:1" {"selected" if fields.get("vk_image_ratio") == "1:1" else ""}>Квадратная 1:1 · 1080×1080</option>
+                </select>
+              </label>
+              <small>После генерации картинку проверит визуальный критик: мелкие недочёты допускаются, серьёзные ошибки блокируют публикацию. Для первой одиночной публикации рекомендуем 4:5. Пока автоматическая загрузка фото во ВКонтакте не подключена — изображение доступно для просмотра и скачивания.</small>
+            </fieldset>
             <label class="sg-field sg-wide"><span>Дополнительные требования <em>· необязательно</em></span>
               <textarea name="editorial_brief" maxlength="3500" rows="3"
                 placeholder="Тон, особенности услуги, что нельзя обещать, нужный призыв">{esc(fields.get('editorial_brief', ''))}</textarea>

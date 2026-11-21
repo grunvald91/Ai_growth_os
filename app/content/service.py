@@ -12,17 +12,23 @@ from app.content.quick_post import QuickPostRequest
 DEFAULT_TOPIC = 'Как организовать онлайн-запись в небольшом сервисном бизнесе: путь клиента и чек-лист владельца'
 
 def queue_content(db, product_id: UUID, topic: str = DEFAULT_TOPIC, *, commit=True, dedupe_key=None,
-                  audience=None, editorial_brief=None, format="package", channel=None):
+                  audience=None, editorial_brief=None, format="package", channel=None,
+                  image_model="none", image_ratio="4:5"):
     """Submit full package (legacy) or a single platform post (two-agent fast path)."""
     product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     if product is None:
         raise LookupError('Компания не найдена')
     if format == "post":
         request = QuickPostRequest(mode="post", product_id=product.id, topic=topic, channel=channel,
-                                   audience=audience, editorial_brief=editorial_brief)
+                                   audience=audience, editorial_brief=editorial_brief,
+                                   image_model=image_model, image_ratio=image_ratio)
         title = f"CONTENT: post:{request.channel}:{request.topic}"
-        description = "Один пост для проверки владельцем. Без автоматической публикации."
+        description = ("Один пост и иллюстрация для проверки владельцем. Без автоматической публикации."
+                       if request.image_model != "none" else
+                       "Один пост для проверки владельцем. Без автоматической публикации.")
     elif format == "package":
+        if image_model != "none":
+            raise ValueError("Изображение на этом этапе поддерживается только для поста VK")
         request = ArticleProductionInput(product_id=product.id, topic=topic, audience=audience,
                                          editorial_brief=editorial_brief,
                                          request_publication=True, produce_ready_assets=True)

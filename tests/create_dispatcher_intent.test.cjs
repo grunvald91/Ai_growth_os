@@ -25,7 +25,9 @@ function setup(format, options = {}) {
     "sg-create-audience": "",
     "sg-create-brief": "",
     "sg-create-image-model": "auto",
-    "sg-create-aspect": ""
+    "sg-create-aspect": "",
+    "sg-create-vk-image-model": "auto",
+    "sg-create-vk-image-ratio": "4:5"
   };
   Object.assign(fieldValues, options);
   const sandbox = {
@@ -192,4 +194,31 @@ test("typed validation retains the composer draft and never sends a request", ()
 test("voice validation preserves recognized text instead of sending invalid selected subject", () => {
   assert.match(source, /var request = creationRequest\(transcript\)/);
   assert.match(source, /if \(request.validation_error\) \{[\s\S]*?insertText\(transcript\);[\s\S]*?return;/);
+});
+
+test("VK post creation sends image model and selected square format", () => {
+  const request = setup("post", {
+    "sg-create-platform": "vk",
+    "sg-create-vk-image-model": "gemini",
+    "sg-create-vk-image-ratio": "1:1"
+  }).creationRequest("Зачем нужна CRM?");
+  assert.equal(request.creation.format, "post");
+  assert.equal(request.creation.platform, "vk");
+  assert.equal(request.creation.image_model, "gemini");
+  assert.equal(request.creation.aspect_ratio, "1:1");
+});
+
+test("other channels and text-only VK never accidentally request paid media", () => {
+  const telegram = setup("post", {
+    "sg-create-platform": "telegram",
+    "sg-create-vk-image-model": "gemini",
+    "sg-create-vk-image-ratio": "1:1"
+  }).creationRequest("Как сделать запись проще");
+  assert.equal(telegram.creation.image_model, null);
+  assert.equal(telegram.creation.aspect_ratio, null);
+  const noImage = setup("post", {
+    "sg-create-platform": "vk",
+    "sg-create-vk-image-model": "none"
+  }).creationRequest("Как сделать запись проще");
+  assert.equal(noImage.creation.image_model, "none");
 });

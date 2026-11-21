@@ -199,6 +199,15 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                 "delivery_unknown": "Требует проверки", "published": "Опубликовано",
                 "cancelled": "Отменено", "failed_before_send": "Не отправлено"}
     history = ""
+    issues = {}
+    for issue in db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id, Artifact.kind == "vk_publish_issue",
+    ).order_by(Artifact.created_at.desc()).limit(60)):
+        try:
+            issue_data = json.loads(issue.content)
+            issues.setdefault(issue_data.get("publication_id"), issue_data.get("reason", ""))
+        except (ValueError, TypeError):
+            continue
     for row in rows:
         buttons = ""
         if row.status == "scheduled":
@@ -218,8 +227,10 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                        '<button class="btn secondary small">Сохранить проверку</button></form>')
         stamp = row.scheduled_at.astimezone(MOSCOW).strftime("%d.%m.%Y %H:%M") if row.scheduled_at else "—"
         reference = (f'<small>{esc(row.external_reference)}</small>' if row.external_reference else "")
+        issue = issues.get(str(row.id), "") if row.status == "failed_before_send" else ""
+        note = f'<small role="status">{esc(issue)}</small>' if issue else ""
         history += (f'<li class="sg-publication-row"><div><b>{esc(statuses.get(row.status, row.status))}</b>'
-                    f'<small>{esc(stamp)} МСК</small>{reference}</div>{buttons}</li>')
+                    f'<small>{esc(stamp)} МСК</small>{reference}{note}</div>{buttons}</li>')
     alert = f'<p role="status" class="sg-notice">{esc(feedback(done))}</p>' if feedback(done) else ""
     if connection_error(error):
         alert += f'<p role="alert" class="sg-notice">{esc(connection_error(error))}</p>'
@@ -304,7 +315,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
   Ключ храните в секрете; никому не отправляйте его в сообщениях или чатах.</p>
  </details>
  </details>
- <p class="sg-footnote">Это подключение для текстовых публикаций. Отправка в стену требует проверки одним постом. Для чтения комментариев может потребоваться отдельный доступ к API; подключение публикаций не означает, что комментарии уже работают.</p>
+ <p class="sg-footnote">Посты без изображения можно отправлять ключом сообщества. Для постов с фото ВКонтакте может потребовать авторизацию пользователя с правами photos и wall: ключ сообщества иногда не допускается к загрузке фото. Если ВК отклонит загрузку, ServGo покажет ошибку и НЕ опубликует один текст без фотографии. Для чтения комментариев может потребоваться отдельный доступ; успешное подключение ещё не доказывает права публикации.</p>
 </section>
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">АВТОПУБЛИКАЦИЯ</span>
@@ -534,7 +545,8 @@ async def vk_callback(request: Request, state: str = "", code: str = "", device_
 
 
 @router.post("/studio/products/{product_id}/vk/schedule")
-async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(get_db)):
+async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(get_db),
+                      settings=Depends(get_settings)):
     _owner_product(db, product_id)
     fields = await _studio_form(request)
     if fields.get("confirmed") != "yes":
@@ -547,7 +559,7 @@ async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(
             when = datetime.fromisoformat(fields.get("when", "")).replace(tzinfo=MOSCOW)
         else:
             raise ValueError("Неизвестный режим публикации")
-        schedule(db, product_id, post_id, when)
+        schedule(db, product_id, post_id, when, products_root=settings.products_root)
     except (ValueError, LookupError, TypeError) as exc:
         db.rollback()
         raise HTTPException(409, str(exc)) from None

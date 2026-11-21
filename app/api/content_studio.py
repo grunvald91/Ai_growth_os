@@ -1708,6 +1708,56 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         text = artifact_text(record, value)
         review_html = ""
         if record.kind == "channel_text":
+            if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
+                state = value.get("image_state")
+                if state in {"ready", "blocked", "review_unavailable", "awaiting_review"} and record.task_id and value.get("image_artifact_id"):
+                    try:
+                        image_id = UUID(str(value["image_artifact_id"]))
+                        image = db.scalar(select(Artifact).where(
+                            Artifact.id == image_id, Artifact.product_id == product.id,
+                            Artifact.task_id == record.task_id,
+                            Artifact.kind == "generated_image"))
+                        if (image is None or
+                                parse_json(image).get("sha256") != value.get("image_sha256")):
+                            raise LookupError("Media version mismatch")
+                        verified_gallery_image(
+                            db, root or get_settings().products_root,
+                            product.id, record.task_id, image)
+                        if state == "ready":
+                            from app.content.vk_image_critic import verified_vk_image_approval
+                            if not verified_vk_image_approval(db, record, image):
+                                raise LookupError("Image has no matching visual approval")
+                    except (LookupError, ValueError, TypeError, OSError):
+                        review_html += ('<p class="sg-warning" role="alert">'
+                                        'Изображение недоступно или повреждено. '
+                                        'Публикацию нужно проверить.</p>')
+                    else:
+                        review_html += gallery_html(product.id, record.task_id, [image])
+                        if state == "ready":
+                            review_html += ('<p class="sg-footnote">'
+                                            'Визуальный критик проверил изображение: критичных ошибок нет.</p>')
+                        elif state == "blocked":
+                            issue_lines = value.get("image_critical_issues") or []
+                            review_html += (
+                                '<section class="sg-surface" role="alert">'
+                                '<h3>Критик заблокировал изображение</h3>'
+                                '<p>Обнаружено серьёзное несоответствие. '
+                                'Текст сохранён, изображение нельзя публиковать.</p>'
+                                + '<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
+                                                   for x in issue_lines[:4]) + '</ul>'
+                                + '</section>')
+                        elif state in {"review_unavailable", "awaiting_review"}:
+                            review_html += (
+                                '<p class="sg-warning" role="alert">'
+                                'Визуальный критик ещё не подтвердил качество. '
+                                'Публикация изображения заблокирована.</p>')
+                elif state in {"stale", "failed", "pending"}:
+                    reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
+                              if state == "stale" else
+                              "Создание изображения остановилось; текст сохранился.")
+                    review_html += (
+                        '<p class="sg-warning" role="status">' + esc(reason) +
+                        ' Публикация с изображением пока недоступна.</p>')
             warnings = value.get("quality_warnings") or []
             warning_list = "".join(f"<li>{esc(note)}</li>" for note in warnings[:6])
             if warning_list:
@@ -2371,8 +2421,19 @@ async def studio_create_submit(product_id: UUID, request: Request, db: Session =
         if chosen == "package":
             task = queue_content(db, product.id, topic, audience=audience, editorial_brief=brief)
         elif chosen == "post":
+            vk_image = fields.get("vk_generate_image") == "yes"
+            image_model = fields.get("vk_image_model", "auto") if vk_image else "none"
+            if vk_image:
+                if fields.get("channel") != "vk":
+                    raise ValueError("На этом этапе изображение доступно только для постов ВКонтакте")
+                from app.content.creative_images import resolve_model
+                resolve_model(settings, image_model)
+                from app.content.vk_image_critic import critic_profile
+                critic_profile(settings)  # Visual review is mandatory, not a hidden optional step.
             task = queue_content(db, product.id, topic, format="post",
-                          channel=fields.get("channel"), audience=audience, editorial_brief=brief)
+                          channel=fields.get("channel"), audience=audience, editorial_brief=brief,
+                          image_model=image_model,
+                          image_ratio=fields.get("vk_image_ratio", "4:5") if vk_image else "4:5")
         elif chosen in {"short_video", "story", "static_image"}:
             count_text = fields.get("frame_count") if chosen == "story" else None
             count = int(count_text) if count_text else None
@@ -2488,6 +2549,63 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         Artifact.kind.in_(["content_request", "creative_request", "edit_request"]),
     ).order_by(Artifact.created_at.desc()).limit(1))
     body = task_detail_html(product.id, task, runs, results, request=request)
+    if task.assigned_agent == "content_factory" and request is not None:
+        req_data = parse_json(request)
+        if (req_data.get("mode") == "post" and req_data.get("channel") == "vk"
+                and req_data.get("image_model", "none") != "none"):
+            newest_post = db.scalar(select(Artifact).where(
+                Artifact.product_id == product.id, Artifact.task_id == task.id,
+                Artifact.kind == "channel_text",
+            ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+            media = parse_json(newest_post) if newest_post else {}
+            state = media.get("image_state")
+            image_id = media.get("image_artifact_id")
+            if state in {"ready", "blocked", "review_unavailable", "awaiting_review"} and image_id:
+                try:
+                    exact = db.scalar(select(Artifact).where(
+                        Artifact.id == UUID(str(image_id)),
+                        Artifact.product_id == product.id,
+                        Artifact.task_id == task.id,
+                        Artifact.kind == "generated_image",
+                    ))
+                    if exact is None or parse_json(exact).get("sha256") != media.get("image_sha256"):
+                        raise LookupError("Image is not bound to the current post")
+                    verified_gallery_image(db, settings.products_root, product.id, task.id, exact)
+                    if state == "ready":
+                        from app.content.vk_image_critic import verified_vk_image_approval
+                        if not verified_vk_image_approval(db, newest_post, exact):
+                            raise LookupError("Image not reviewed")
+                except (LookupError, ValueError, TypeError, OSError):
+                    body += ('<p class="sg-warning" role="alert">'
+                             'Иллюстрация повреждена или недоступна.</p>')
+                else:
+                    body += gallery_html(product.id, task.id, [exact])
+                    if state == "blocked":
+                        notes = media.get("image_critical_issues") or []
+                        body += (
+                            '<section class="sg-surface" role="alert">'
+                            '<h3>Визуальный критик: серьёзная ошибка</h3>'
+                            '<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
+                                             for x in notes[:4]) + '</ul>'
+                            '<p>Картинка сохранена, но не допущена к публикации.</p>'
+                            '</section>'
+                        )
+                    elif state in {"review_unavailable", "awaiting_review"}:
+                        body += ('<p class="sg-warning" role="alert">'
+                                 'Проверка изображения критиком не завершена. '
+                                 'Публикация заблокирована.</p>')
+                    elif state == "ready":
+                        body += ('<p class="sg-footnote">'
+                                 'Проверено визуальным критиком: критичных ошибок нет.</p>')
+            elif state == "stale":
+                body += ('<p class="sg-warning" role="status">'
+                         'Текст изменился — прежняя иллюстрация требует обновления.</p>')
+            elif state in {"failed", "pending"}:
+                body += ('<p class="sg-warning" role="status">'
+                         'Генерация иллюстрации не завершена; текст сохранён.</p>')
+            body += ('<p class="sg-footnote">Загрузка фотографии на стену '
+                     'ВКонтакте пока не подключена. Пост с изображением '
+                     'не будет отправлен как текстовый.</p>')
     if task.assigned_agent == "content_creative":
         if task.status == TaskStatus.FAILED:
             diagnostic = db.scalar(select(Artifact).where(
@@ -2535,9 +2653,17 @@ def _creative_owner_task(db: Session, product_id: UUID, task_id: UUID) -> Task:
     _owner_product(db, product_id)
     task = db.scalar(select(Task).where(
         Task.id == task_id, Task.product_id == product_id,
-        Task.assigned_agent == "content_creative"))
+        Task.assigned_agent.in_(["content_creative", "content_factory"])))
     if task is None:
         raise HTTPException(404, "Задание не найдено")
+    if task.assigned_agent == "content_factory":
+        request = db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.product_id == product_id,
+            Artifact.kind == "content_request"))
+        raw = parse_json(request) if request is not None else {}
+        if (raw.get("mode") != "post" or raw.get("channel") != "vk"
+                or raw.get("image_model", "none") == "none"):
+            raise HTTPException(404, "Задание с изображениями не найдено")
     return task
 
 
