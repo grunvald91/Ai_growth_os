@@ -1070,3 +1070,16 @@ body[data-growth-design="v4"] .sg-create-seo-link-main a{
   display:inline-flex;align-items:center;min-height:40px;
   color:var(--blue);text-decoration:underline;text-underline-offset:3px;
 }
+
+/* Create owns its contextual right panel: hide the generic duplicate assistant rail. */
+@media(min-width:781px){
+  body[data-growth-design="v4"]:has(.sg-create-screen) .shell{
+    grid-template-columns:var(--navw) minmax(0,1fr);
+  }
+  body[data-growth-design="v4"]:has(.sg-create-screen) #rail{display:none!important;}
+}
+@media(min-width:781px) and (max-width:1080px){
+  body[data-growth-design="v4"]:has(.sg-create-screen) .shell{
+    grid-template-columns:200px minmax(0,1fr);
+  }
+}
