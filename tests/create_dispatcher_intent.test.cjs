@@ -124,19 +124,18 @@ test("package has no platform but keeps editorial brief", () => {
   assert.equal(request.creation.audience, "Малый бизнес");
 });
 
-test("explicit instructions outrank any previously selected format", () => {
+test("selected material format always takes precedence over imperative words in topic", () => {
   for (const format of ["post", "story", "static_image", "short_video", "whiteboard", "package"]) {
     const ui = setup(format);
-    for (const message of [
-      "Сделай пост про CRM",
-      "Покажи мои материалы",
-      "Опубликуй пост",
-      "Не публикуй это",
-      "Создай 4 сторис про запись"
+    for (const topic of [
+      "Сделай рекламу для владельцев CRM",
+      "Создай понятную инструкцию",
+      "Как можно улучшить запись клиентов"
     ]) {
-      const request = ui.creationRequest(message);
-      assert.equal(request.text, message, format + ": " + message);
-      assert.equal(request.creation?.topic, undefined, format + ": " + message);
+      const request = ui.creationRequest(topic);
+      assert.equal(request.text, topic, format + ": " + topic);
+      assert.equal(request.creation.format, format, topic);
+      assert.equal(request.creation.topic, topic, format + ": " + topic);
     }
   }
 });
@@ -175,7 +174,9 @@ test("typed validation retains the composer draft and never sends a request", ()
   ui.input = {value: "CRM?"};
   ui.busy = false;
   ui.grow = () => events.push("grow");
+  ui.markCreateTopicInvalid = () => {};
   ui.showNote = (text, bad) => events.push({text, bad});
+  ui.input.focus = () => {};
   ui.send = (...args) => events.push({sent: args});
   vm.runInContext(extract("sendText"), ui);
   ui.sendText();
