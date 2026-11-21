@@ -161,7 +161,7 @@ CSS = r"""
 .sg-work-steps-collapsible[open]>ol{margin-top:10px}
 
 /* Filter and pagination are part of the document, not extra fixed bars. */
-.sg-work-board .sg-work-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(124px,auto) auto;
+.sg-work-board .sg-work-search{display:grid;grid-template-columns:minmax(0,1fr) minmax(112px,auto) minmax(122px,auto) auto;
   align-items:center;gap:8px;margin:0 0 13px;min-width:0}
 .sg-work-board .sg-work-search-label{position:absolute;width:1px;height:1px;
   padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -190,11 +190,13 @@ CSS = r"""
   color:var(--s-text-muted,#587085)}
 .sg-work-board .sg-work-update{margin-bottom:10px;width:100%;font-weight:600}
 .sg-work-board .sg-work-update[hidden]{display:none}
-@media(max-width:520px){
-  .sg-work-board .sg-work-search{grid-template-columns:minmax(0,1fr) auto}
+@media(max-width:880px){
+  .sg-work-board .sg-work-search{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .sg-work-board .sg-work-search input{grid-column:1 / -1}
-  .sg-work-board .sg-work-search select{grid-column:1}
-  .sg-work-board .sg-work-search .btn{grid-column:2}
+  .sg-work-board .sg-work-search select{min-width:0}
+  .sg-work-board .sg-work-search .btn{grid-column:1 / -1}
+}
+@media(max-width:520px){
   .sg-work-board .sg-work-pagination{gap:7px}
 }
 
