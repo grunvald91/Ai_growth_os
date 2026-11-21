@@ -94,11 +94,21 @@ def main():
                                      style.pointerEvents==='none' &&
                                      left.left>=0 && right.right<=innerWidth+1 &&
                                      left.right<=right.left+1 &&
-                                     (parseFloat(getComputedStyle(main).paddingTop)>=62 ||
-                                     parseFloat(getComputedStyle(main).marginTop)>=62) &&
+                                     (() => {
+                                       const pad=parseFloat(getComputedStyle(main).paddingTop);
+                                       const liveChat=!document.body.classList.contains('home-empty') &&
+                                         !!document.querySelector('.dp-home.has-feed');
+                                       if (liveChat) return main.getBoundingClientRect().top<=3 &&
+                                         pad<2 &&
+                                         parseFloat(getComputedStyle(document.querySelector('.dp-feed')).paddingTop)>=70;
+                                       if (create) return main.getBoundingClientRect().top<=3 &&
+                                         pad<2 &&
+                                         parseFloat(getComputedStyle(document.querySelector('.sg-create-scroll')).paddingTop)>=70;
+                                       return pad>=62;
+                                     })() &&
                                      surface.backgroundColor!=='rgba(0, 0, 0, 0)' &&
                                      surface.opacity==='1' &&
-                                     (!create || create.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
+                                     (!create || document.querySelector('.sg-create-scroll').firstElementChild?.getBoundingClientRect().top>=Math.min(left.bottom,right.bottom)-1) &&
                                      document.documentElement.scrollWidth<=innerWidth;
                             }""")
                             if not correct:
@@ -124,6 +134,61 @@ def main():
                                     documentWidth:document.documentElement.scrollWidth};
                                 }""")
                                 raise AssertionError((width,suffix,theme,'floating-header-geometry',diagnostic))
+                            if suffix == '/create':
+                                assert page.evaluate("""() => {
+                                  const viewport=document.querySelector('.sg-create-scroll').getBoundingClientRect();
+                                  const buttons=document.querySelector('.topbar .top-actions').getBoundingClientRect();
+                                  const main=document.querySelector('#main').getBoundingClientRect();
+                                  const scroll=document.querySelector('.sg-create-scroll');
+                                  const first=scroll.firstElementChild?.getBoundingClientRect();
+                                  return main.top<=3 && viewport.top<15 &&
+                                    viewport.top<buttons.bottom &&
+                                    parseFloat(getComputedStyle(scroll).paddingTop)>=70 &&
+                                    (first===undefined || first.top>=buttons.bottom-1);
+                                }"""), (width,theme,'create-underlay')
+                            if suffix == '':
+                                page.evaluate("""() => {
+                                  document.body.classList.remove('home-empty');
+                                  const home=document.querySelector('.dp-home');
+                                  home.classList.add('has-feed');
+                                  const feed=document.querySelector('#dp-feed');
+                                  for(let i=0;i<24;i++){
+                                    const msg=document.createElement('div');
+                                    msg.className='dp-msg bot';
+                                    msg.textContent='Сквозная проверка прокрутки сообщения '+i;
+                                    feed.appendChild(msg);
+                                  }
+                                  feed.scrollTop=0;
+                                }""")
+                                underlay=page.evaluate("""() => {
+                                  const feed=document.querySelector('#dp-feed');
+                                  const box=feed.getBoundingClientRect();
+                                  const controls=document.querySelector('.topbar .top-actions').getBoundingClientRect();
+                                  // The dispatcher may auto-scroll on a pending frame.
+                                  // Measure both positions synchronously after resetting scroll.
+                                  feed.scrollTop=0;
+                                  const first=feed.querySelector('.dp-msg').getBoundingClientRect();
+                                  const initial=first.top;
+                                  feed.scrollTop=70;
+                                  const scrolled=feed.querySelector('.dp-msg').getBoundingClientRect();
+                                  const output={
+                                    feedTop:box.top,controlsBottom:controls.bottom,
+                                    initial,scrollTop:feed.scrollTop,
+                                    scrolledTop:scrolled.top,firstBottom:scrolled.bottom,
+                                    fill: getComputedStyle(feed).paddingTop,
+                                    mainTop:document.querySelector('#main').getBoundingClientRect().top,
+                                    bodyClass:document.body.className,
+                                    rootClass:document.querySelector('.dp-home').className,
+                                    headerBg:getComputedStyle(document.querySelector('.topbar')).backgroundColor
+                                  };
+                                  output.passes=box.top<5 && box.top<controls.bottom &&
+                                    feed.scrollTop>=65 && initial>=controls.bottom-1 &&
+                                    scrolled.top<controls.bottom-20 &&
+                                    scrolled.top>=box.top-5 &&
+                                    output.headerBg==='rgba(0, 0, 0, 0)';
+                                  return output;
+                                }""")
+                                assert underlay['passes'], (width,theme,'chat-text-must-scroll-behind-floating-controls',underlay)
                             if width in (320,390,781,1440) and suffix in ('','/create'):
                                 shot=suffix.removeprefix('/') or 'home'
                                 page.screenshot(path=str(screenshot_dir/f'floating-header-{shot}-{theme}-{width}.png'),animations='disabled')
@@ -608,7 +673,7 @@ def main():
                         mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,floatingBottom:Math.max(crumbs.bottom,actions.bottom),overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
                     }""")
                     assert metrics['scrollable'] and not metrics['overflow'],metrics
-                    assert -1<=metrics['feedTop']-metrics['floatingBottom']<=32,metrics
+                    assert 0<=metrics['feedTop']<=metrics['floatingBottom']-32,metrics
                     # The transparent floating composer intentionally overlaps
                     # the scroll region; the dedicated voice UI smoke checks
                     # that the latest message stays readable above it.
