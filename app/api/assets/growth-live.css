@@ -1377,3 +1377,13 @@ body[data-growth-design="v4"] .sg-create-screen .sg-create-extra-settings-slot{
     transition:none;
   }
 }
+
+/* Keep keyboard-to-voice affordance inside the editor bounds, not as a
+   separate full-width flex row when the user focuses the textarea. */
+body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar #dp-mode-mic:not([hidden]){
+  position:absolute;top:8px;right:8px;z-index:3;
+  flex:none;align-self:auto;width:44px;height:44px;min-height:44px;
+}
+body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar.voice-text-editing #dp-input{
+  padding-right:58px!important;
+}
