@@ -602,13 +602,13 @@ def main():
                     page.screenshot(path=f'/tmp/v4-history-{width}-{height}.png',animations='disabled')
                     metrics=page.evaluate("""()=>{
                       const rect=s=>document.querySelector(s).getBoundingClientRect();
-                      const feed=rect('#dp-feed'),form=rect('#dp-form'),dock=rect('.command-dock'),nav=rect('#mobileNav'),top=rect('.topbar');
+                      const feed=rect('#dp-feed'),form=rect('#dp-form'),dock=rect('.command-dock'),nav=rect('#mobileNav'),top=rect('.topbar'),crumbs=rect('.topbar .crumbs'),actions=rect('.topbar .top-actions');
                       const el=document.querySelector('#dp-feed');
                       return {feedTop:feed.top,feedBottom:feed.bottom,formTop:form.top,dockBottom:dock.bottom,navTop:nav.height?nav.top:innerHeight,
-                        mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
+                        mainStyle:getComputedStyle(document.querySelector('#main')).padding,rootStyle:getComputedStyle(document.querySelector('.dp-home')).padding,rootMargin:getComputedStyle(document.querySelector('.dp-home')).margin,headerBottom:top.bottom,floatingBottom:Math.max(crumbs.bottom,actions.bottom),overflow:document.documentElement.scrollWidth>innerWidth,scrollable:el.scrollHeight>el.clientHeight};
                     }""")
                     assert metrics['scrollable'] and not metrics['overflow'],metrics
-                    assert metrics['feedTop']-metrics['headerBottom']<75,metrics
+                    assert -1<=metrics['feedTop']-metrics['floatingBottom']<=32,metrics
                     # The transparent floating composer intentionally overlaps
                     # the scroll region; the dedicated voice UI smoke checks
                     # that the latest message stays readable above it.
