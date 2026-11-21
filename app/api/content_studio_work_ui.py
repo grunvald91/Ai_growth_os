@@ -153,6 +153,13 @@ CSS = r"""
  .sg-work-result{flex-wrap:wrap}
 }
 
+/* Finished work: keep the result above technical history. */
+.sg-work-steps-collapsible>summary{min-height:44px;display:flex;align-items:center;
+  cursor:pointer;font-size:17px;font-weight:700;color:var(--s-text,var(--text,#263D56))}
+.sg-work-steps-collapsible>summary:focus-visible{outline:2px solid var(--s-accent,var(--blue,#2F5BEB));
+  outline-offset:3px;border-radius:7px}
+.sg-work-steps-collapsible[open]>ol{margin-top:10px}
+
 /* Tasks page: compact, content-first cards, adaptive without a second toolbar. */
 .sg-work-board .sg-work-toolbar{display:flex;justify-content:space-between;
   gap:14px;align-items:center;margin-bottom:12px}
