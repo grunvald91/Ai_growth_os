@@ -157,6 +157,7 @@ def main():
                 page.locator('#sg-create-platform').select_option('vk')
                 expect(page.locator('#sg-create-vk-image-primary')).to_be_visible()
                 expect(page.locator('#sg-create-vk-image-model')).to_have_value('auto')
+                expect(page.locator('#sg-create-vk-review-tip')).to_be_visible()
                 expect(page.locator('#sg-create-format-help')).to_contain_text('площадки')
                 page.locator('[data-sg-format="story"]').click()
                 expect(page.locator('#sg-create-count-row')).to_be_hidden()
