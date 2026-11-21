@@ -69,7 +69,7 @@ def main():
                 page.goto(base)
                 page.get_by_text('Новый дизайн →', exact=True).click()
                 expect(page.locator('.topbar')).to_be_visible()
-                for width in (390, 1440):
+                for width in (320, 390, 768, 1440):
                     page.set_viewport_size({'width':width,'height':844})
                     for suffix in ('','/create','/work','/materials','/review','/channels',
                                    '/calendar','/analytics','/whiteboard','/seo','/campaigns','/profile','/accounts','/plan','/comments','/speed'):
@@ -149,6 +149,20 @@ def main():
                         assert geometry['aside']['top'] >= geometry['main']['bottom'], geometry
                     page.screenshot(path=f'/tmp/growth-v4-create-layout-{width}.png',full_page=True)
                 page.set_viewport_size({'width':390,'height':844})
+                # Format-specific controls must be next to the relevant action.
+                page.locator('#sg-create-platform').select_option('vk')
+                expect(page.locator('#sg-create-vk-image-primary')).to_be_visible()
+                expect(page.locator('#sg-create-vk-image-model')).to_have_value('auto')
+                expect(page.locator('#sg-create-format-help')).to_contain_text('площадки')
+                page.locator('[data-sg-format="story"]').click()
+                expect(page.locator('#sg-create-count-row')).to_be_hidden()
+                page.locator('#sg-create-advanced summary').click()
+                expect(page.locator('#sg-create-count-row')).to_be_visible()
+                expect(page.locator('#sg-create-vk-image-primary')).to_be_hidden()
+                page.locator('[data-sg-format="whiteboard"]').click()
+                expect(page.locator('#sg-create-advanced')).to_be_hidden()
+                page.locator('[data-sg-format="post"]').click()
+                expect(page.locator('#sg-create-primary-platform')).to_be_visible()
                 # Use an isolated DOM message; no AI task or real publication.
                 page.evaluate("""() => {
                   const feed=document.querySelector('#dp-feed');
@@ -158,6 +172,10 @@ def main():
                   feed.appendChild(message);
                   document.querySelector('.sg-create-dispatch').classList.add('has-feed');
                 }""")
+                expect(page.locator('#sg-create-history')).to_be_visible()
+                page.locator('[data-sg-format="post"]').click()
+                expect(page.locator('#sg-create-history')).to_be_visible()
+                page.locator('#dp-input').focus()
                 expect(page.locator('#sg-create-history')).to_be_visible()
                 page.locator('#sg-create-history-close').click()
                 expect(page.locator('#sg-create-history')).to_be_hidden()
