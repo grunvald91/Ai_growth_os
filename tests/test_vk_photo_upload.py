@@ -13,6 +13,7 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.comments.vk import VKAdapter
+from app.comments.models import CommentChannel
 from app.content.creative_images import image_folder
 from app.content.vk_image_critic import REVIEW_POLICY, _post_digest
 from app.content.vk_photo_upload import (
@@ -20,7 +21,7 @@ from app.content.vk_photo_upload import (
 )
 from app.core.config import Settings
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
-from app.social_vk import connect_community, deliver_once, schedule
+from app.social_vk import VKStore, connect_community, deliver_once, schedule
 
 
 @contextmanager
@@ -189,7 +190,8 @@ async def test_approved_post_image_reaches_wall_post_once_and_not_text_only(db, 
                    products_root=tmp_path)
     uploads, posts = [], []
 
-    async def upload(adapter, token, group, picture):
+    async def upload(adapter, token, group, picture, *, expected_sha256=None):
+        assert expected_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
         assert token == "community-token"
         assert group == "123456"
         assert picture == path
@@ -241,7 +243,7 @@ async def test_vk_upload_failure_never_posts_text_and_reports_reason(db, tmp_pat
     connect_community(db, settings, company.id, "123456", "community-token")
     pub = schedule(db, company.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=1),
                    products_root=tmp_path)
-    async def broken_upload(adapter, token, group, picture):
+    async def broken_upload(adapter, token, group, picture, *, expected_sha256=None):
         raise VKPhotoUploadError("ВК не разрешил загрузку фото этим ключом")
     async def forbidden(self, method, token, **params):
         pytest.fail("No text fallback allowed after image upload failed")
@@ -266,7 +268,7 @@ async def test_vk_wall_post_unknown_result_prevents_retry_with_image(db, tmp_pat
     pub = schedule(db, company.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=1),
                    products_root=tmp_path)
     calls = []
-    async def upload(adapter, token, group, picture):
+    async def upload(adapter, token, group, picture, *, expected_sha256=None):
         return "photo123_456"
     async def timeout(self, method, token, **params):
         calls.append(method)
@@ -290,3 +292,67 @@ def test_blocked_image_cannot_be_scheduled_even_if_post_status_is_approved(db, t
         schedule(db, company.id, post.id, datetime.now(timezone.utc) + timedelta(minutes=10),
                  products_root=tmp_path)
     assert db.scalar(select(Publication).where(Publication.product_id == company.id)) is None
+
+
+@pytest.mark.asyncio
+async def test_separately_connected_legacy_user_token_uploads_photo_but_group_key_posts(
+    db, tmp_path, monkeypatch,
+):
+    company, post, image, path = image_post(db, tmp_path, slug="dual-credentials")
+    settings = Settings(_env_file=None, products_root=tmp_path, content_vk_autopost_enabled=True)
+    connect_community(db, settings, company.id, "123456", "community-token")
+    user = CommentChannel(product_id=company.id, platform="vk",
+                          account_id="123456", account_name="Старая авторизация",
+                          status="connected")
+    db.add(user)
+    db.commit()
+    VKStore(settings.products_root).save_token(user.id, "vk1.a.classic-user-key")
+    pub = schedule(db, company.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=1),
+                   products_root=tmp_path)
+    calls = []
+
+    async def manager(self, account, token):
+        assert account == "123456" and token == "vk1.a.classic-user-key"
+        calls.append("manager")
+        return {"id": 123456}
+
+    async def upload(adapter, token, group, picture, *, expected_sha256=None):
+        assert token == "vk1.a.classic-user-key"
+        assert expected_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+        calls.append("image")
+        return "photo923_174"
+
+    async def post(self, method, token, **params):
+        assert method == "wall.post"
+        assert token == "community-token"
+        assert params["attachments"] == "photo923_174"
+        calls.append("post")
+        return {"post_id": 333}
+
+    monkeypatch.setattr(VKAdapter, "manager", manager)
+    monkeypatch.setattr(VKAdapter, "call", post)
+    monkeypatch.setattr("app.social_vk.upload_wall_photo", upload)
+    assert await deliver_once(lambda: sessions(db), settings,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=3)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert calls == ["manager", "image", "post"]
+
+
+@pytest.mark.asyncio
+async def test_photo_upload_rechecks_digest_to_reject_file_swap(tmp_path):
+    data = io.BytesIO()
+    Image.new("RGB", (12, 15)).save(data, format="PNG")
+    path = tmp_path / "photo.png"
+    path.write_bytes(data.getvalue())
+    known_good = hashlib.sha256(path.read_bytes()).hexdigest()
+    # The original approved file was replaced after the worker's preflight.
+    Image.new("RGB", (12, 15), (45, 100, 200)).save(path, format="PNG")
+
+    class Adapter:
+        async def call(self, method, token, **params):
+            assert method == "photos.getWallUploadServer"
+            return {"upload_url": "https://pu.vk.ru/upload.php"}
+
+    with pytest.raises(VKPhotoUploadError, match="изменилось"):
+        await upload_wall_photo(Adapter(), "secret", "123456", path, expected_sha256=known_good)
