@@ -1610,6 +1610,9 @@
       }, { passive: false });
     }
     form.addEventListener('pointerdown', function (event) {
+      // Create embeds settings and a summary inside this form. A touch on an
+      // accordion, label or select must never arm the voice recorder.
+      if (event.target !== input && event.target !== voiceHitbox) return;
       if (event.button !== 0 || event.target.closest('button') ||
           form.classList.contains('voice-text-editing') || activeHold || recorder ||
           micOpening || voiceWorking || busy || voiceDispatchPending) return;
