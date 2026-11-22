@@ -216,6 +216,42 @@ CSS = r"""
   .sg-work-board .sg-work-pagination{gap:7px}
 }
 
+/* Context-only desktop rail. The primary card remains an ordinary link. */
+.sg-work-board .sg-has-task-peek{position:relative}
+.sg-work-board .sg-has-task-peek .sg-work-item-foot{
+  min-height:44px;padding-right:101px}
+.sg-work-board .sg-task-peek-action{
+  box-sizing:border-box;position:absolute;right:12px;bottom:12px;
+  display:inline-flex;align-items:center;justify-content:center;
+  min-height:44px;min-width:86px;padding:9px 10px;border:1px solid var(--s-line,#DDE5EE);
+  border-radius:10px;background:var(--s-surface-2,#F4F7FB);
+  color:var(--s-text,#263D56);font:600 12px/1.3 inherit;cursor:pointer}
+.sg-work-board .sg-task-peek-action[aria-pressed="true"]{
+  border-color:var(--s-accent,#2F5BEB);color:var(--s-accent,#2F5BEB)}
+.sg-work-board .sg-task-peek-action:focus-visible{
+  outline:2px solid var(--s-accent,#2F5BEB);outline-offset:2px}
+.sg-work-preview{min-width:0;padding:16px 14px;
+  border:1px solid var(--s-line,#DFE7F0);border-radius:15px;
+  background:var(--s-surface,#fff)}
+.sg-work-preview-hint{color:var(--s-text-muted,#587085);
+  font-size:13px;line-height:1.65;margin:0}
+.sg-work-preview-detail{display:grid;gap:10px;min-width:0}
+.sg-work-preview-detail[hidden],.sg-work-preview-hint[hidden]{display:none}
+.sg-work-preview-kind{font-size:12px;font-weight:650;color:var(--s-text-muted,#587085)}
+.sg-work-preview-detail h3{font-size:16px;font-weight:700;line-height:1.45;
+  overflow-wrap:anywhere;margin:0;color:var(--s-text,#263D56)}
+.sg-work-preview-status{font-size:12px;font-weight:650;
+  color:var(--s-accent,#2F5BEB)}
+.sg-work-preview-detail p{font-size:13px;line-height:1.6;
+  margin:0;color:var(--s-text-muted,#587085);overflow-wrap:anywhere}
+.sg-work-preview-detail .sg-work-preview-date{font-size:11px}
+.sg-work-preview-detail .btn{display:inline-flex;align-items:center;
+  justify-content:center;min-height:44px;margin-top:6px}
+@media(max-width:1080px){
+  .sg-work-board .sg-task-peek-action{display:none!important}
+  .sg-work-board .sg-has-task-peek .sg-work-item-foot{min-height:0;padding-right:0}
+}
+
 /* Tasks page: compact, content-first cards, adaptive without a second toolbar. */
 .sg-work-board .sg-work-toolbar{display:flex;justify-content:space-between;
   gap:14px;align-items:center;margin-bottom:12px}
