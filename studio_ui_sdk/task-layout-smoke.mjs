@@ -149,6 +149,7 @@ try{
             const s=getComputedStyle(el);return {color:s.color,background:s.backgroundColor};
           }),
           active:css(".sg-work-tabs a.active"),
+          open:css(".sg-work-open"),
           summary:css(".sg-work-summary"),
           date:css(".sg-work-item-foot"),
           cardColor:css(".sg-work-item"),
@@ -172,6 +173,17 @@ try{
         (theme==="dark"?"rgb(23, 34, 55)":"rgb(255, 255, 255)"):layout.cardColor.background;
       assert.ok(contrast(layout.summary.color,bg)>=4.5,
         "low contrast summary "+theme+" "+width);
+      assert.ok(contrast(layout.date.color,bg)>=4.5,
+        "low contrast date "+theme+" "+width);
+      assert.ok(contrast(layout.open.color,bg)>=4.5,
+        "low contrast card action "+theme+" "+width);
+      assert.ok(contrast(layout.active.color,layout.active.background)>=4.5,
+        "low contrast active filter "+theme+" "+width);
+      if(width<=780){
+        assert.ok(layout.logo.right<=layout.actions.x+1,
+          "floating header controls overlap "+theme+" "+width+
+          ": "+JSON.stringify({logo:layout.logo,actions:layout.actions}));
+      }
       if(width===320){
         assert.ok(layout.kind.width>200 && layout.period.width>200,
           "320px should use single-column full-width filters");
