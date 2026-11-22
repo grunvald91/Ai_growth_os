@@ -258,6 +258,8 @@ def test_business_review_task_opens_its_own_page_not_an_empty_material_page(owne
     page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
     assert page.status_code == 200
     assert "Вечер пустой" in page.text and "готовый материал пока не найден" not in page.text
+    assert f'data-sg-task="{task.id}"' in page.text
+    assert 'data-sg-state="completed"' in page.text
     assert client.get(f"/studio/products/{other.id}/tasks/{task.id}").status_code == 404
 
 
@@ -1024,3 +1026,23 @@ def test_tasks_unicode_casefold_cyrillic_search(owner_studio):
                           params={"q": "вечерние", "kind": "business"})
     assert response.status_code == 200
     assert f'/tasks/{business.id}' in response.text
+
+
+def test_running_business_analysis_detail_tracks_completion(owner_studio):
+    """Results page can notice that a pending business review was completed."""
+    client, db, company, _ = owner_studio
+    job = Task(product_id=company.id, assigned_agent="business_insights",
+               title="Разбор данных бизнеса", status=TaskStatus.RUNNING)
+    db.add(job)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    page = client.get(f"{base}/tasks/{job.id}")
+    assert page.status_code == 200
+    assert f'data-sg-task="{job.id}"' in page.text
+    assert 'data-sg-state="running"' in page.text
+    job.status = TaskStatus.COMPLETED
+    db.commit()
+    feed = client.get(base + "/activity.json", params={"task_id": str(job.id)})
+    assert feed.status_code == 200
+    assert any(x["id"] == str(job.id) and x["state"] == "completed"
+               for x in feed.json()["jobs"])
