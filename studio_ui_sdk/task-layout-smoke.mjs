@@ -114,9 +114,13 @@ const browser=await chromium.launch({
 const url="http://127.0.0.1:"+server.address().port+"/studio/products/"+company+"/work";
 
 function luminance(rgb){
-  const nums=rgb.match(/[\d.]+/g)?.slice(0,3).map(Number);
-  assert.ok(nums && nums.length===3,"expected computed RGB: "+rgb);
-  const c=nums.map(x=>x/255).map(x=>x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4);
+  const values=rgb.match(/\d*\.?\d+/g)?.map(Number);
+  assert.ok(values && values.length>=3,"expected computed RGB: "+rgb);
+  // Chrome can preserve CSS Color 4 values as color(srgb .8 .9 1)
+  // instead of rgb(204, 230, 255). CSS color() channels are 0..1.
+  const channels=values.slice(0,3).map(x=>rgb.startsWith("color(srgb")?x:x/255);
+  assert.ok(channels.every(x=>x>=0&&x<=1),"invalid RGB channels: "+rgb);
+  const c=channels.map(x=>x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4);
   return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];
 }
 function contrast(a,b){const x=luminance(a),y=luminance(b);return (Math.max(x,y)+0.05)/(Math.min(x,y)+0.05);}
@@ -161,7 +165,8 @@ try{
       for(const [index,pill] of layout.pills.entries()){
         assert.ok(contrast(pill.color,pill.background)>=4.5,
           "low contrast status "+index+" "+theme+" "+width+": "+
-          contrast(pill.color,pill.background).toFixed(2));
+          contrast(pill.color,pill.background).toFixed(2)+
+          " "+JSON.stringify(pill));
       }
       const bg=layout.cardColor.background==="rgba(0, 0, 0, 0)"?
         (theme==="dark"?"rgb(23, 34, 55)":"rgb(255, 255, 255)"):layout.cardColor.background;
