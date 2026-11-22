@@ -59,7 +59,9 @@ const taskMarkup=
 
 const notice='<details class="sg-notifications" data-sg-notifications data-feed-url="/studio/products/'+company+'/activity.json">'+
   '<summary aria-label="Уведомления"><span aria-hidden="true">🔔</span></summary>'+
-  '<div class="sg-notify-popover"><strong>Требует внимания</strong><div data-sg-notify-list></div>'+
+  '<div class="sg-notify-popover"><strong>Требует внимания</strong>'+
+  '<button class="sg-notify-read" type="button">Прочитать все</button>'+
+  '<div data-sg-notify-list></div>'+
   '<a class="sg-notify-all" href="#">Все задания</a></div></details>';
 const rail='<aside class="rail" id="rail">'+
   '<div class="rail-head"><h2>Задание</h2><span>Быстрый просмотр</span></div>'+
@@ -195,6 +197,20 @@ try{
         await page.screenshot({path:resolve("../studio-resource-widgets-tasks-"+theme+"-"+width+".png"),
           fullPage:true});
       }
+      // The floating bell's popup must not revert to light-only action ink.
+      await page.locator(".top-actions .sg-notifications > summary").click();
+      const notificationContrast=await page.evaluate(()=>{
+        const bg=getComputedStyle(document.querySelector(".sg-notify-popover")).backgroundColor;
+        return ["sg-notify-all","sg-notify-read"].map(cl=>({
+          label:cl,ink:getComputedStyle(document.querySelector("."+cl)).color,bg,
+          height:document.querySelector("."+cl).getBoundingClientRect().height
+        }));
+      });
+      for(const n of notificationContrast){
+        assert.ok(contrast(n.ink,n.bg)>=4.5,
+          "floating notification contrast "+theme+" "+width+" "+JSON.stringify(n));
+      }
+      assert.ok(notificationContrast[1].height>=44,"notification touch target");
       assert.deepEqual(errors,[],"no page exceptions "+theme+" "+width);
       await page.close();
     }
