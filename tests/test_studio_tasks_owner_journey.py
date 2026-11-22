@@ -201,3 +201,44 @@ def test_story_failure_retry_keeps_checkpoints_and_needs_explicit_consent(owner_
     )))) == 1
     assert detail_url in client.get(base + "/work", params={"tab": "active"}).text
     assert detail_url not in client.get(base + "/work", params={"tab": "problems"}).text
+
+
+@pytest.mark.parametrize("format_name,channel,expected_agent,expected_request", [
+    ("package", "telegram", "content_factory", "content_request"),
+    ("short_video", "youtube_shorts", "content_creative", "creative_request"),
+    ("static_image", "vk", "content_creative", "creative_request"),
+])
+def test_all_remaining_create_formats_have_real_task_and_no_fake_output(
+    owner_journey, format_name, channel, expected_agent, expected_request,
+):
+    """Complete Create format coverage alongside the post and story journeys."""
+    client, db, company, foreign = owner_journey
+    base = f"/studio/products/{company.id}"
+    response = client.post(base + "/create", data={
+        "format": format_name,
+        "channel": channel,
+        "topic": "Памятка о выборе кофе",
+    }, follow_redirects=False)
+    assert response.status_code == 303
+    detail_url = response.headers["location"]
+    assert detail_url.startswith(base + "/tasks/")
+    task = db.scalar(select(Task).where(Task.product_id == company.id))
+    assert task is not None
+    assert task.assigned_agent == expected_agent
+    assert task.status == TaskStatus.QUEUED
+    brief = db.scalar(select(Artifact).where(
+        Artifact.product_id == company.id, Artifact.task_id == task.id,
+        Artifact.kind == expected_request,
+    ))
+    assert brief is not None
+    data = json.loads(brief.content)
+    assert data["topic"] == "Памятка о выборе кофе"
+    assert data["mode"] == ("creative" if expected_agent == "content_creative"
+                           else data["mode"])
+    page = client.get(detail_url)
+    assert page.status_code == 200
+    assert "В очереди" in page.text
+    assert detail_url in client.get(base + "/work", params={"tab": "active"}).text
+    assert client.get(f"/studio/products/{foreign.id}/tasks/{task.id}").status_code == 404
+    assert not list(db.scalars(select(Publication)))
+    assert not list(db.scalars(select(Approval)))
