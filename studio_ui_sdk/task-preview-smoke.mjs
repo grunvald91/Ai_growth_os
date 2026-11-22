@@ -55,14 +55,14 @@ const browser=await chromium.launch({
   headless:true,executablePath:process.env.SERVGO_CHROME_PATH||"/usr/bin/google-chrome"
 });
 try{
-  for(const width of [390,1280]){
+  for(const width of [360,390,768,1024,1081,1280,1440]){
     const page=await browser.newPage({viewport:{width,height:820}});
     const errors=[];
     page.on("pageerror",err=>errors.push(err.message));
     await page.goto("http://127.0.0.1:"+server.address().port+
       "/studio/products/11111111-1111-4111-8111-111111111111/work");
     const button=page.locator("[data-sg-task-peek]");
-    if(width===390){
+    if(width<=1080){
       assert.equal(await button.count(),0,"mobile must not add an extra button");
       assert.equal(await page.locator(".rail").isVisible(),false);
     }else{
@@ -79,7 +79,7 @@ try{
       assert.match(await detail.innerText(),/Поставлено статей в очередь: 3/);
       assert.equal(await page.locator("[data-sg-preview-link]").getAttribute("href"),
         "/studio/products/11111111-1111-4111-8111-111111111111/tasks/t1");
-      await page.screenshot({path:resolve("../studio-resource-widgets-tasks-desktop.png")});
+      if(width===1280)await page.screenshot({path:resolve("../studio-resource-widgets-tasks-desktop.png")});
     }
     const main=page.locator("#job > a.sg-work-item");
     assert.ok((await main.getAttribute("href")).endsWith("/tasks/t1"));
@@ -92,4 +92,4 @@ try{
   await browser.close();
   await new Promise(ok=>server.close(ok));
 }
-console.log("Tasks contextual preview: mobile 390 / desktop 1280 OK");
+console.log("Tasks contextual preview: 360/390/768/1024/1081/1280/1440px OK");
