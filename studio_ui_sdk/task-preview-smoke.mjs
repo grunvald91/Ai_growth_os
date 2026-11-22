@@ -126,6 +126,7 @@ try{
     window.__taskDocumentMarker="kept";
     window.scrollTo(0,280);
   });
+  const originalScroll=await stagePage.evaluate(()=>window.scrollY);
   await stagePage.request.get(origin+"/test/advance");
   await stagePage.evaluate(()=>document.dispatchEvent(new Event("visibilitychange")));
   await stagePage.waitForFunction(()=>
@@ -133,6 +134,8 @@ try{
     "Составление контент-плана");
   assert.equal(await stagePage.evaluate(()=>window.__taskDocumentMarker),"kept",
     "SEO phase must not reload the document");
+  assert.equal(await stagePage.evaluate(()=>window.scrollY),originalScroll,
+    "SEO phase must preserve the reading position");
   assert.equal(await stagePage.locator("[data-sg-task]").getAttribute("data-sg-stage"),
     "Составление контент-плана");
   assert.deepEqual(stageErrors,[],"SEO phase has no page errors");
