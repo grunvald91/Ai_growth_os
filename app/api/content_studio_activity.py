@@ -431,9 +431,13 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
                 ),
             ))
             base.append(Task.assigned_agent == "content_factory")
-            base.append(or_(req_mode,
-                            Task.title.ilike("POST:%") if kind == "post"
-                            else Task.title.ilike("ARTICLE:%")))
+            if kind == "post":
+                base.append(or_(req_mode, Task.title.ilike("POST:%")))
+            else:
+                # SEO-ARTICLE is a real content_factory article job, not an
+                # SEO-factory planning job. It belongs in the article filter.
+                base.append(or_(req_mode, Task.title.ilike("ARTICLE:%"),
+                                Task.title.like("SEO-ARTICLE:%")))
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
