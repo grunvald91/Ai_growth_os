@@ -532,8 +532,10 @@ JS = r"""
      if(detail){
        const changed=jobs.find(j=>j.id===detail.dataset.sgTask &&
            (j.state!==detail.dataset.sgState ||
-            (detail.hasAttribute('data-sg-stage') &&
-             j.stage_signature!==detail.dataset.sgStage)));
+            (detail.dataset.sgStageMode==='seo'
+              ? j.current_stage!==detail.dataset.sgStage
+              : (detail.hasAttribute('data-sg-stage') &&
+                 j.stage_signature!==detail.dataset.sgStage))));
        if(changed&&document.visibilityState==='visible')location.reload();
      }
      if(showWork&&!workBoard){
