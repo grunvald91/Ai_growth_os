@@ -443,8 +443,19 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
                 base.append(or_(req_mode, Task.title.ilike("ARTICLE:%"),
                                 Task.title.like("SEO-ARTICLE:%")))
     if q:
-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        # SQLite lower()/ILIKE is ASCII-only; use our deterministic
+        # sg_casefold() on SQLite so mixed-case Russian searches work.
+        # Other databases retain their native case-insensitive ILIKE.
+        sqlite_search = db.get_bind().dialect.name == "sqlite"
+        normalized = q.casefold() if sqlite_search else q
+        escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
+
+        def text_matches(column):
+            if sqlite_search:
+                return func.sg_casefold(column).like(pattern, escape="\\")
+            return column.ilike(pattern, escape="\\")
+
         request_match = exists(select(Artifact.id).where(
             Artifact.product_id == product_id,
             Artifact.task_id == Task.id,
@@ -454,11 +465,11 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
                 "content_request", "creative_request", "edit_request",
                 "seo_factory_request", "business_review",
             )),
-            Artifact.content.ilike(pattern, escape="\\"),
+            text_matches(Artifact.content),
         ))
         base.append(or_(
-            Task.title.ilike(pattern, escape="\\"),
-            Task.description.ilike(pattern, escape="\\"),
+            text_matches(Task.title),
+            text_matches(Task.description),
             request_match,
         ))
     # The latest draft editorial plan is a real user decision even when the
