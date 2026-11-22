@@ -973,11 +973,18 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
         introduction = "SEO-завод ожидает начала планирования."
     else:
         introduction = "Подробности планирования находятся в SEO-заводе."
-    current = (
-        '<p class="sg-seo-task-stage"><b>Текущий этап:</b> '
-        + safe(phase) + '</p>'
-        if phase and state in {"running", "queued", "failed"} else ''
-    )
+    if state == "running":
+        current = (
+            '<p class="sg-seo-task-stage" role="status" aria-live="polite">'
+            '<b>Текущий этап:</b> '
+            f'<span data-sg-seo-stage-text>{safe(stage_marker)}</span></p>'
+        )
+    else:
+        current = (
+            '<p class="sg-seo-task-stage"><b>Последний этап:</b> '
+            + safe(phase) + '</p>'
+            if phase and state in {"queued", "failed"} else ''
+        )
     failure_causes = {
         "upstream_timeout": "Сервис не ответил вовремя",
         "network_failure": "Ошибка соединения с сервисом",
