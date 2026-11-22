@@ -992,3 +992,35 @@ def test_activity_feed_does_not_duplicate_fresh_open_job(owner_studio):
     data = client.get(f"/studio/products/{company.id}/activity.json",
                       params={"task_id": str(task.id)}).json()
     assert sum(row["id"] == str(task.id) for row in data["jobs"]) == 1
+
+
+def test_tasks_unicode_casefold_cyrillic_search(owner_studio):
+    """SQLite native lower/ILIKE is ASCII-only; Russian case must be normalized."""
+    from app.api.content_studio_activity import work_page
+    from sqlalchemy import func
+    client, db, company, other = owner_studio
+    assert db.scalar(select(func.sg_casefold("ВЕЧЕРНИЕ ЁЛКИ"))) == "вечерние ёлки"
+    business = Task(product_id=company.id, assigned_agent="business_insights",
+                    title="Бизнес-анализ", status=TaskStatus.COMPLETED)
+    own = Task(product_id=company.id, assigned_agent="content_factory",
+               title="CONTENT: КЕРАМИЧЕСКИЕ ИЗДЕЛИЯ", status=TaskStatus.COMPLETED)
+    foreign = Task(product_id=other.id, assigned_agent="business_insights",
+                   title="Бизнес-анализ", status=TaskStatus.COMPLETED)
+    db.add_all([business, own, foreign])
+    db.flush()
+    db.add_all([
+        Artifact(product_id=company.id, task_id=business.id,
+                 title="Разбор", kind="business_review", status="draft",
+                 content=json.dumps({"summary": "ВЕЧЕРНИЕ ПРОДАЖИ"}, ensure_ascii=False)),
+        Artifact(product_id=other.id, task_id=foreign.id,
+                 title="Разбор", kind="business_review", status="draft",
+                 content=json.dumps({"summary": "ЧУЖИЕ ДАННЫЕ"}, ensure_ascii=False)),
+    ])
+    db.commit()
+    assert work_page(db, company.id, query="вечерние")["items"][0]["id"] == str(business.id)
+    assert work_page(db, company.id, query="керамические")["items"][0]["id"] == str(own.id)
+    assert work_page(db, company.id, query="чужие")["total"] == 0
+    response = client.get(f"/studio/products/{company.id}/work",
+                          params={"q": "вечерние", "kind": "business"})
+    assert response.status_code == 200
+    assert f'/tasks/{business.id}' in response.text
