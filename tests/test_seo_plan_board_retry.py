@@ -182,7 +182,8 @@ def test_generic_task_retry_must_reuse_seo_owner_gate_and_reject_cancelled_jobs(
                                       "path": "/studio/seo/retry", "headers": []})
             viewer_request.state.studio_sso_role = "viewer"
             with pytest.raises(HTTPException) as denied:
-                studio_retry_task(company.id, task.id, viewer_request, db=db)
+                studio_retry_task(company.id, task.id, viewer_request,
+                                  confirm_retry="yes", db=db)
             assert denied.value.status_code == 403
             assert task.status == TaskStatus.FAILED
             with TestClient(app) as client:
@@ -191,12 +192,21 @@ def test_generic_task_retry_must_reuse_seo_owner_gate_and_reject_cancelled_jobs(
                                   follow_redirects=False)
                 assert bad.status_code == 409
                 assert cancelled.status == TaskStatus.CANCELLED
+                unconfirmed = client.post(f"{base}/tasks/{task.id}/retry",
+                                          follow_redirects=False)
+                assert unconfirmed.status_code == 409
+                assert task.status == TaskStatus.FAILED
+                assert not list(db.scalars(select(Artifact).where(
+                    Artifact.task_id == task.id,
+                    Artifact.kind == "seo_article_manual_retry")))
                 first = client.post(f"{base}/tasks/{task.id}/retry",
+                                    data={"confirm_retry": "yes"},
                                     follow_redirects=False)
                 assert first.status_code == 303
                 assert first.headers["location"] == f"{base}/seo"
                 assert task.status == TaskStatus.QUEUED
                 duplicate = client.post(f"{base}/tasks/{task.id}/retry",
+                                        data={"confirm_retry": "yes"},
                                         follow_redirects=False)
                 assert duplicate.status_code == 409
                 assert len(list(db.scalars(select(Artifact).where(
