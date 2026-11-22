@@ -448,7 +448,12 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
         request_match = exists(select(Artifact.id).where(
             Artifact.product_id == product_id,
             Artifact.task_id == Task.id,
-            Artifact.kind.in_(("content_request", "creative_request", "edit_request")),
+            # Planning and business-review tasks carry user topics in their
+            # own artifacts, not in content/creative/edit requests.
+            Artifact.kind.in_((
+                "content_request", "creative_request", "edit_request",
+                "seo_factory_request", "business_review",
+            )),
             Artifact.content.ilike(pattern, escape="\\"),
         ))
         base.append(or_(
@@ -928,7 +933,19 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
             if type(total) is int else
             "Предложения посадочных страниц подготовлены"
         )
-    phase = SEO_PHASE_NAMES.get(str(report.get("current_stage")), "")
+    raw_phase = report.get("current_stage")
+    phase = SEO_PHASE_NAMES.get(str(raw_phase), "") if raw_phase else ""
+    # Work-page polling returns a friendly current_stage for running SEO tasks.
+    # Keep the same value in the detail so a changed stage is detected without
+    # inventing progress percentages or extra paid calls.
+    stage_marker = (
+        SEO_PHASE_NAMES.get(str(raw_phase), "Обработка SEO-запросов")
+        if raw_phase else "Подготовка поисковых запросов и плана"
+    ) if state == "running" else ""
+    stage_attrs = (
+        f' data-sg-stage-mode="seo" data-sg-stage="{safe(stage_marker)}"'
+        if state == "running" else ""
+    )
     if state == "completed":
         introduction = (
             "Планирование завершено. Это не означает, что статьи написаны "
@@ -975,7 +992,7 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
     )
     return (
         f'<section class="sg-surface sg-work-detail sg-seo-task-detail"'
-        f' data-sg-task="{task.id}" data-sg-state="{safe(state)}">'
+        f' data-sg-task="{task.id}" data-sg-state="{safe(state)}"{stage_attrs}>'
         f'<span class="sg-work-status sg-work-{safe(tones.get(state, "queued"))}">'
         f'{safe(labels.get(state, "Проверить статус"))}</span>'
         '<h2>SEO-завод: запросы и контент-план</h2>'
