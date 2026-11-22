@@ -78,7 +78,7 @@ try{
       assert.equal(await detail.isVisible(),true);
       assert.match(await detail.innerText(),/Планирование завершено/);
       assert.match(await detail.innerText(),/Поставлено статей в очередь: 3/);
-      assert.match(await page.locator("[data-sg-preview-announcement]").innerText(),
+      assert.match(await page.locator("[data-sg-preview-announcement]").textContent(),
         /Выбрано задание: SEO-завод: поисковые запросы\. Статус: Планирование завершено/);
       assert.equal(await page.locator("[data-sg-preview-link]").getAttribute("href"),
         "/studio/products/11111111-1111-4111-8111-111111111111/tasks/t1");
