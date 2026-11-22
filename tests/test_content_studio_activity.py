@@ -838,3 +838,28 @@ def test_new_task_types_keep_other_content_filters_intact(owner_studio):
     # SEO-article creation belongs to content factory; it must not be
     # falsely counted as the SEO planning task itself.
     assert work_page(db, company.id, kind="article")["total"] == 1
+    article_item = work_page(db, company.id, kind="article")["items"][0]
+    assert article_item["kind_label"] == "Статья"
+
+
+def test_seo_factory_failure_reason_is_human_readable_and_not_raw_provider_text(owner_studio):
+    client, db, company, _ = owner_studio
+    job = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.FAILED)
+    db.add(job)
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, task_id=job.id,
+        kind="seo_factory_report", title="SEO-завод остановился",
+        status="draft",
+        content=json.dumps({
+            "error": "PrivateBackendError: secret-file-path",
+            "error_code": "upstream_timeout", "stage": "collect_suggestions"
+        }),
+    ))
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/tasks/{job.id}")
+    assert page.status_code == 200
+    assert "Сервис не ответил вовремя" in page.text
+    assert "secret-file-path" not in page.text
+    assert "PrivateBackendError" not in page.text
