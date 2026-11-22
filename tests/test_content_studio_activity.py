@@ -938,7 +938,11 @@ def test_running_seo_detail_marks_same_current_stage_as_work_feed(owner_studio):
         "Составление контент-плана"
     )
     assert "detail.dataset.sgStageMode==='seo'" in JS
-    assert "j.current_stage!==detail.dataset.sgStage" in JS
+    assert "updatedStage!==detail.dataset.sgStage" in JS
+    assert "stageNode.textContent=updatedStage" in JS
+    assert "const stateChanged=currentJob.state!==detail.dataset.sgState" in JS
+    assert 'data-sg-seo-stage-text' in task_page.text
+    assert 'role="status" aria-live="polite"' in task_page.text
 
 
 def test_nonrunning_seo_page_does_not_request_phase_refresh(owner_studio):
