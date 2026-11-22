@@ -1562,7 +1562,7 @@ def test_tasks_desktop_context_rail_only_on_work_route(live):
     assert 'data-growth-design="v4"' in work.text
     assert 'data-sg-work-preview' in work.text
     assert 'id="sgWorkPreviewDetail"' in work.text
-    assert 'data-sg-preview-title aria-live="polite" aria-atomic="true"' in work.text
+    assert 'data-sg-preview-announcement role="status" aria-live="polite" aria-atomic="true"' in work.text
     assert 'data-sg-preview-link' in work.text
     assert 'data-sg-work-board' in work.text
     assert f'href="{base}/tasks/{task.id}"' in work.text
