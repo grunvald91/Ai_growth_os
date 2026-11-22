@@ -316,7 +316,7 @@ JS = r"""
    const a=node?.querySelector('a.sg-work-item[href]');
    if(!a)return null;
    const url=new URL(a.getAttribute('href'),window.location.origin);
-   const root=window.location.pathname.replace(/\\/work$/, '')+'/';
+   const root=window.location.pathname.replace(/\/work$/, '')+'/';
    if(url.origin!==window.location.origin||!url.pathname.startsWith(root))return null;
    return {a,url};
  }
