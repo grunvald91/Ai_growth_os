@@ -334,6 +334,10 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
                     special_summary = "Подготовлены выводы по показателям компании."
                 else:
                     special_summary = "Задание завершено, но результаты разбора отсутствуют."
+        if task.assigned_agent == "content_factory" and (
+            task.title or ""
+        ).startswith("SEO-ARTICLE:"):
+            kind_name = "Статья"
         if by_request.get(task.id):
             try:
                 request_data = json.loads(by_request[task.id].content or "{}")
@@ -946,6 +950,22 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
         + safe(phase) + '</p>'
         if phase and state in {"running", "queued", "failed"} else ''
     )
+    failure_causes = {
+        "upstream_timeout": "Сервис не ответил вовремя",
+        "network_failure": "Ошибка соединения с сервисом",
+        "provider_http_error": "Сервис вернул ошибку",
+        "model_unusable_response": "ИИ-модель вернула неподходящий ответ",
+        "plan_validation_failed": "Не удалось проверить контент-план",
+        "invalid_data_or_configuration": "Недостаточно корректных данных или настроек",
+        "search_upstream_failures": "Поисковые сервисы недоступны",
+        "search_invalid_responses": "Поисковые сервисы вернули неподходящие данные",
+        "internal_exception": "Внутренняя ошибка выполнения",
+    }
+    reason = failure_causes.get(str(report.get("last_error_code")), "")
+    error_note = (
+        f'<p class="sg-seo-task-error" role="alert"><b>Причина:</b> {safe(reason)}</p>'
+        if state == "failed" and reason else ""
+    )
     completed = (
         '<section class="sg-work-results"><h3>Подтверждённые результаты</h3><ul>'
         + ''.join(f'<li>{safe(value)}</li>' for value in stages)
@@ -960,7 +980,7 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
         f'{safe(labels.get(state, "Проверить статус"))}</span>'
         '<h2>SEO-завод: запросы и контент-план</h2>'
         f'<p>{safe(introduction)}</p>'
-        + current + completed
+        + current + error_note + completed
         + '<div class="sg-seo-task-actions">'
         + f'<a class="btn primary" href="{base}/seo">Открыть SEO-завод</a>'
         + f'<a class="sg-mini-link" href="{base}/work">← Все задания</a>'
