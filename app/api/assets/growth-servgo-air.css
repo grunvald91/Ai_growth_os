@@ -1783,8 +1783,11 @@ body[data-growth-design="v4"] .sg-work-board .sg-work-tabs a {
   color:var(--s-muted);
 }
 body[data-growth-design="v4"] .sg-work-board .sg-work-tabs a.active {
-  background:var(--s-accent-soft);color:var(--s-accent);
+  background:var(--s-accent-soft);color:var(--s-accent-press);
   border-color:var(--s-line-2);border-bottom-color:var(--s-accent);
+}
+body[data-growth-design="v4"] .sg-work-board .sg-work-open {
+  color:var(--s-accent-press);
 }
 body[data-growth-design="v4"] .sg-work-board .sg-work-tabs a:hover {
   background:var(--s-surface-3);color:var(--s-text);
