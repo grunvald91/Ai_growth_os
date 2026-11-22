@@ -510,7 +510,12 @@ JS = r"""
      if(workBoard){
        try{await refreshBoard();}catch(_){/* list refresh failure must not block notifications */}
      }
-     const res=await fetch(endpoint,{cache:'no-store',credentials:'same-origin',
+     const feedUrl=new URL(endpoint,window.location.origin);
+     if(detail?.dataset.sgTask &&
+        /^[0-9a-f-]{36}$/i.test(detail.dataset.sgTask)){
+       feedUrl.searchParams.set('task_id',detail.dataset.sgTask);
+     }
+     const res=await fetch(feedUrl,{cache:'no-store',credentials:'same-origin',
        headers:{'Accept':'application/json'}});
      if(!res.ok||!(res.headers.get('content-type')||'').includes('application/json'))return;
      const data=await res.json();
