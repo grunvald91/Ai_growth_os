@@ -30,7 +30,7 @@ from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_article import render_article
 from app.content.render import asset_path
 from app.api.content_studio_activity import (work_items, work_page, notice_items, notice_html,
-    activity_html, activity_overview, task_detail_html, RESULT_KINDS)
+    activity_html, activity_overview, task_detail_html, seo_factory_task_html, RESULT_KINDS)
 from app.api.content_studio_ui import (
     create_content_html, review_html, channels_html, speed_html, REVIEW_KINDS_BY_FILTER,
     review_history_html, seo_progress_html,
@@ -2541,6 +2541,22 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
     if task.assigned_agent == "company_intake":
         return RedirectResponse(f"/studio/products/{product_id}/profile", status_code=303)
+    if task.assigned_agent == "seo_factory":
+        # One job's own page; never mistake a completed plan for published SEO articles.
+        from app.api.seo_run_view import SEO_KINDS, seo_run_summary
+        records = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id == task_id,
+            Artifact.kind.in_(SEO_KINDS),
+        ).order_by(Artifact.created_at, Artifact.id)))
+        report = seo_run_summary(task, records)
+        response = HTMLResponse(studio_page_shell(
+            product, active="work", title="SEO-завод: задание",
+            subtitle="Ход планирования, сохранённые результаты и очередь статей.",
+            body=seo_factory_task_html(product.id, task, report),
+        ))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
     from app.insights.worker import AGENT as INSIGHTS_AGENT
     if task.assigned_agent == INSIGHTS_AGENT:
         from app.insights.page import review_html

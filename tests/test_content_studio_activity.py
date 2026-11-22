@@ -702,3 +702,164 @@ def test_work_requested_page_beyond_end_is_clamped(owner_studio):
     assert page.status_code == 200
     assert "Страница 1 из 1" in page.text
     assert "Показано 1–1 из 1" in page.text
+
+
+def test_seo_factory_is_visible_without_pretending_articles_are_published(owner_studio):
+    """Planning finishes independently from writing / SEO aut publishing."""
+    from app.api.content_studio_activity import work_page, work_items
+    client, db, company, other = owner_studio
+    factory = Task(product_id=company.id, assigned_agent="seo_factory",
+                   title="SEO-завод: запросы, план и статьи", status=TaskStatus.COMPLETED)
+    unrelated = Task(product_id=other.id, assigned_agent="seo_factory",
+                     title="SEO-завод: другая компания", status=TaskStatus.COMPLETED)
+    db.add_all([factory, unrelated])
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, task_id=factory.id, kind="seo_factory_report",
+        title="Отчёт планирования", status="draft",
+        content=json.dumps({
+            "articles_queued": 3, "articles_deferred": 2,
+            "sources": [], "planning_horizon_days": 7
+        }),
+    ))
+    db.commit()
+    rows = work_page(db, company.id, kind="seo")
+    assert rows["total"] == 1
+    assert rows["items"][0]["id"] == str(factory.id)
+    assert rows["items"][0]["kind_label"] == "SEO-завод"
+    assert rows["items"][0]["needs_decision"] is False
+    assert rows["items"][0]["label"] == "Планирование завершено"
+    assert "Статей поставлено в очередь: 3" in rows["items"][0]["display_summary"]
+    assert "опубликовано" not in rows["items"][0]["display_summary"]
+    assert work_items(db, company.id)[0]["agent"] == "seo_factory"
+    base = f"/studio/products/{company.id}"
+    listed = client.get(base + "/work?kind=seo")
+    assert f'/tasks/{factory.id}' in listed.text
+    assert str(unrelated.id) not in listed.text
+    page = client.get(base + f"/tasks/{factory.id}")
+    assert page.status_code == 200
+    assert "Статей поставлено в очередь: 3" in page.text
+    assert "Отложено тем: 2" in page.text
+    assert "не означает, что статьи написаны" in page.text
+    assert f'href="{base}/seo"' in page.text
+    assert client.get(f"/studio/products/{other.id}/tasks/{factory.id}").status_code == 404
+
+
+def test_seo_running_stage_is_actual_and_no_fake_approval(owner_studio):
+    from app.api.content_studio_activity import work_page
+    client, db, company, _ = owner_studio
+    job = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: план", status=TaskStatus.RUNNING)
+    db.add(job)
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, task_id=job.id, kind="seo_factory_stage",
+        title="Этап работы", status="draft",
+        content=json.dumps({
+            "stage": "build_plan", "recorded_at": "2026-11-22T04:00:00+00:00"
+        }),
+    ))
+    db.commit()
+    row = work_page(db, company.id, kind="seo")["items"][0]
+    assert row["current_stage"] == "Составление контент-плана"
+    assert row["state"] == "running" and row["needs_decision"] is False
+    assert "seo:" in row["stage_signature"]
+    html = client.get(f"/studio/products/{company.id}/work?kind=seo").text
+    assert "Составление контент-плана" in html
+    assert "Нужно решение" not in html
+
+
+def test_business_analysis_is_in_work_list_with_existing_real_detail(owner_studio):
+    from app.api.content_studio_activity import work_page
+    client, db, company, other = owner_studio
+    task = Task(product_id=company.id, assigned_agent="business_insights",
+                title="Маркетинг: разбор данных бизнеса", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, task_id=task.id,
+        kind="business_review", title="Разбор",
+        content=json.dumps({"summary": "Слабые вечерние часы",
+                            "decision_ids": [], "task_ids": []},
+                           ensure_ascii=False),
+    ))
+    db.add(Task(product_id=other.id, assigned_agent="business_insights",
+                title="Другая компания", status=TaskStatus.RUNNING))
+    db.commit()
+    data = work_page(db, company.id, kind="business")
+    assert data["total"] == 1
+    row = data["items"][0]
+    assert row["kind_label"] == "Бизнес-анализ"
+    assert row["needs_decision"] is False
+    assert row["label"] == "Разбор готов"
+    assert "выводы" in row["display_summary"]
+    base = f"/studio/products/{company.id}"
+    html = client.get(base + "/work?kind=business").text
+    assert f'/tasks/{task.id}' in html
+    assert "Бизнес-анализ" in html
+    detail = client.get(base + f"/tasks/{task.id}")
+    assert detail.status_code == 200
+    assert "Слабые вечерние часы" in detail.text
+
+
+def test_failed_seo_factory_is_attention_not_manual_publish_approval(owner_studio):
+    from app.api.content_studio_activity import work_page, notice_items
+    client, db, company, _ = owner_studio
+    job = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.FAILED)
+    db.add(job)
+    db.commit()
+    data = work_page(db, company.id, tab="approval", kind="seo")
+    assert data["total"] == 1
+    assert data["items"][0]["state"] == "failed"
+    assert data["items"][0]["needs_decision"] is False
+    alerts = notice_items(db, company.id)
+    assert any("SEO-завод остановился" in x["text"] for x in alerts)
+    page = client.get(f"/studio/products/{company.id}/tasks/{job.id}").text
+    assert "Ошибка планирования" in page
+    assert "Планирование остановилось" in page
+    assert "Подтвердить публикацию" not in page
+    assert "Повторить" not in page  # no unreviewed costly retry button
+
+
+def test_new_task_types_keep_other_content_filters_intact(owner_studio):
+    from app.api.content_studio_activity import work_page
+    _, db, company, _ = owner_studio
+    seo_factory = Task(product_id=company.id, assigned_agent="seo_factory",
+                       title="SEO-завод", status=TaskStatus.COMPLETED)
+    article = Task(product_id=company.id, assigned_agent="content_factory",
+                   title="SEO-ARTICLE:historical-plan:abc", status=TaskStatus.COMPLETED)
+    business = Task(product_id=company.id, assigned_agent="business_insights",
+                    title="Бизнес-анализ", status=TaskStatus.COMPLETED)
+    db.add_all([seo_factory, article, business])
+    db.commit()
+    assert work_page(db, company.id, kind="seo")["total"] == 1
+    assert work_page(db, company.id, kind="business")["total"] == 1
+    # SEO-article creation belongs to content factory; it must not be
+    # falsely counted as the SEO planning task itself.
+    assert work_page(db, company.id, kind="article")["total"] == 1
+    article_item = work_page(db, company.id, kind="article")["items"][0]
+    assert article_item["kind_label"] == "Статья"
+
+
+def test_seo_factory_failure_reason_is_human_readable_and_not_raw_provider_text(owner_studio):
+    client, db, company, _ = owner_studio
+    job = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.FAILED)
+    db.add(job)
+    db.flush()
+    db.add(Artifact(
+        product_id=company.id, task_id=job.id,
+        kind="seo_factory_report", title="SEO-завод остановился",
+        status="draft",
+        content=json.dumps({
+            "error": "PrivateBackendError: secret-file-path",
+            "error_code": "upstream_timeout", "stage": "collect_suggestions"
+        }),
+    ))
+    db.commit()
+    page = client.get(f"/studio/products/{company.id}/tasks/{job.id}")
+    assert page.status_code == 200
+    assert "Сервис не ответил вовремя" in page.text
+    assert "secret-file-path" not in page.text
+    assert "PrivateBackendError" not in page.text

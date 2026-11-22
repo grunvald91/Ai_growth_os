@@ -20,7 +20,19 @@ from sqlalchemy.orm import Session
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.api.studio_resource_widgets import resource_widget
 
-WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content_renderer", "editorial_planner", "whiteboard_renderer")
+# Only explicitly mapped, owner-visible jobs. Do not expose every internal Task.
+WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content_renderer",
+               "editorial_planner", "whiteboard_renderer", "seo_factory", "business_insights")
+# These are read-only job reports; do not apply material approval semantics to them.
+JOB_REPORT_KINDS = {"seo_factory_report", "business_review"}
+SEO_PHASE_NAMES = {
+    "prepare_queries": "Подготовка поисковых запросов",
+    "collect_suggestions": "Сбор поисковых подсказок",
+    "landing_opportunities": "Подготовка вариантов посадочных страниц",
+    "build_plan": "Составление контент-плана",
+    "queue_articles": "Постановка статей в очередь",
+    "completed": "Планирование завершено",
+}
 
 STATES = {
     "queued": ("В очереди", "queued", "Задание принято. Ожидает свободного обработчика."),
@@ -114,6 +126,10 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
     topic = str(data.get("topic") or "").strip()
     if task.assigned_agent == "company_intake":
         return "Профиль компании: сбор сведений"
+    if task.assigned_agent == "seo_factory":
+        return "SEO-завод: подготовка запросов и плана"
+    if task.assigned_agent == "business_insights":
+        return "Разбор данных бизнеса"
     if is_seo_publish_proposal(task):
         return "Предложение публикации SEO-статьи"
     # SEO-ARTICLE:<plan UUID>:<item id> is an idempotency key used by workers.
@@ -153,6 +169,10 @@ def task_public_description(task: Task) -> str:
     """Show truthful Russian owner copy without rewriting historical task keys."""
     if task.assigned_agent == "company_intake":
         return "Сведения о компании проверяются в разделе «Профиль компании»."
+    if task.assigned_agent == "seo_factory":
+        return "SEO-завод собирает поисковые запросы, план и ставит статьи в очередь. Это не подтверждение публикации."
+    if task.assigned_agent == "business_insights":
+        return "ИИ-команда изучает показатели компании и готовит выводы. Никаких публикаций это не запускает."
     if is_seo_publish_proposal(task):
         return ("Предложение ИИ-команды о публикации SEO-статьи. "
                 "Оно не подтверждает готовность статьи и не запускает публикацию.")
@@ -203,7 +223,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
         by_runs.setdefault(run.task_id, []).append(run)
     results = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id.in_(ids),
-        Artifact.kind.in_(RESULT_KINDS),
+        Artifact.kind.in_(RESULT_KINDS | JOB_REPORT_KINDS),
     ).order_by(Artifact.created_at.desc(), Artifact.id.desc())))
     by_results = {}
     for result in results:
@@ -212,6 +232,29 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
         Artifact.product_id == product_id, Artifact.task_id.in_(ids),
         Artifact.kind == "whiteboard_job_state",
     ))}
+    # Read SEO stage artifacts for the displayed jobs only, not the entire SEO log.
+    seo_ids = [task.id for task in tasks if task.assigned_agent == "seo_factory"]
+    latest_seo_stages = {}
+    if seo_ids:
+        stage_rows = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id.in_(seo_ids), Artifact.kind == "seo_factory_stage",
+        ).order_by(Artifact.created_at.desc(), Artifact.id.desc())))
+        for record in stage_rows:
+            try:
+                data = json.loads(record.content or "{}")
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            stamp = str(data.get("recorded_at") or "")
+            current = latest_seo_stages.get(record.task_id)
+            if isinstance(data.get("stage"), str) and (
+                current is None or (stamp, str(record.id)) > current[0]
+            ):
+                latest_seo_stages[record.task_id] = (
+                    (stamp, str(record.id)), data["stage"]
+                )
     output = []
     for task in tasks:
         key = task_state(task)
@@ -229,7 +272,8 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
         # A completed worker may still have an artifact waiting for an owner.
         # Keep publication state separate from task completion.
         pending_artifacts = any(
-            getattr(art.status, "value", str(art.status)) == "awaiting_approval"
+            art.kind in RESULT_KINDS
+            and getattr(art.status, "value", str(art.status)) == "awaiting_approval"
             for art in items
         )
         draft_plan = False
@@ -251,8 +295,49 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "content_factory": "Материал", "content_creative": "Креатив",
             "content_editor": "Редактирование", "content_renderer": "Видео",
             "editorial_planner": "Контент-план",
-            "whiteboard_renderer": "Видео",
+            "whiteboard_renderer": "Видео", "seo_factory": "SEO-завод",
+            "business_insights": "Бизнес-анализ",
         }.get(task.assigned_agent, "Задание")
+        special_summary = None
+        display_label = "Нужно решение" if needs_decision else title
+        if task.assigned_agent == "seo_factory":
+            stage_row = latest_seo_stages.get(task.id)
+            if key == "running" and stage_row:
+                stage_name = SEO_PHASE_NAMES.get(stage_row[1], "Обработка SEO-запросов")
+            elif key == "running":
+                stage_name = "Подготовка поисковых запросов и плана"
+            if key == "completed":
+                # Finishing a factory job means queueing articles, not publishing.
+                report_count = None
+                for art in items:
+                    if art.kind != "seo_factory_report":
+                        continue
+                    try:
+                        report_data = json.loads(art.content or "{}")
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(report_data, dict) and type(report_data.get("articles_queued")) is int:
+                        report_count = report_data["articles_queued"]
+                        break
+                display_label = "Планирование завершено"
+                special_summary = (
+                    f"Статей поставлено в очередь: {report_count}. Публикация выполняется отдельно."
+                    if report_count is not None else
+                    "Планирование завершено. Результаты и очередь статей — в SEO-заводе."
+                )
+        elif task.assigned_agent == "business_insights":
+            if key == "running":
+                stage_name = "Анализ показателей бизнеса"
+            elif key == "completed":
+                if any(art.kind == "business_review" for art in items):
+                    display_label = "Разбор готов"
+                    special_summary = "Подготовлены выводы по показателям компании."
+                else:
+                    special_summary = "Задание завершено, но результаты разбора отсутствуют."
+        if task.assigned_agent == "content_factory" and (
+            task.title or ""
+        ).startswith("SEO-ARTICLE:"):
+            kind_name = "Статья"
         if by_request.get(task.id):
             try:
                 request_data = json.loads(by_request[task.id].content or "{}")
@@ -268,12 +353,13 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "agent": task.assigned_agent,
             "title": task_title(task, by_request.get(task.id)),
             "state": key,
-            "label": "Нужно решение" if needs_decision else title,
+            "label": display_label,
             "tone": "review" if needs_decision else kind,
             "description": explanation,
             "needs_decision": needs_decision,
             "kind_label": kind_name,
             "current_stage": stage_name,
+            "display_summary": special_summary,
             "result_count": len(items),
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
@@ -283,8 +369,9 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "animator_stage": animator_stage,
             "animator_calls": animator_calls,
             "stage_signature": "|".join(
-                str(run.id) + ":" + run.status
-                for run in by_runs.get(task.id, [])[-20:]
+                [str(run.id) + ":" + run.status for run in by_runs.get(task.id, [])[-20:]]
+                + (["seo:" + latest_seo_stages[task.id][0][0]]
+                   if task.id in latest_seo_stages else [])
             ),
             # DB timestamps are UTC; SQLite returns func.now() without tzinfo.
             "created_at": (
@@ -303,6 +390,7 @@ WORK_TYPES = {
     "all": "Все виды", "post": "Посты", "article": "Статьи",
     "creative": "Креативы", "video": "Видео",
     "plan": "Контент-планы", "edit": "Доработки",
+    "seo": "SEO-завод", "business": "Бизнес-анализ",
 }
 
 
@@ -331,6 +419,8 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
             "video": ("content_renderer", "whiteboard_renderer"),
             "plan": ("editorial_planner",),
             "edit": ("content_editor",),
+            "seo": ("seo_factory",),
+            "business": ("business_insights",),
         }
         if kind in types:
             base.append(Task.assigned_agent.in_(types[kind]))
@@ -345,9 +435,13 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
                 ),
             ))
             base.append(Task.assigned_agent == "content_factory")
-            base.append(or_(req_mode,
-                            Task.title.ilike("POST:%") if kind == "post"
-                            else Task.title.ilike("ARTICLE:%")))
+            if kind == "post":
+                base.append(or_(req_mode, Task.title.ilike("POST:%")))
+            else:
+                # SEO-ARTICLE is a real content_factory article job, not an
+                # SEO-factory planning job. It belongs in the article filter.
+                base.append(or_(req_mode, Task.title.ilike("ARTICLE:%"),
+                                Task.title.like("SEO-ARTICLE:%")))
     if q:
         escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
@@ -529,7 +623,13 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         if task.created_at and task.created_at.replace(tzinfo=task.created_at.tzinfo or timezone.utc) < recent:
             continue
         notes.append({
-            "kind": "error", "text": "Не удалось подготовить материал — проверьте задание",
+            "kind": "error", "text": (
+                "SEO-завод остановился — проверьте планирование"
+                if task.assigned_agent == "seo_factory" else
+                "Не удалось завершить бизнес-анализ — откройте разбор"
+                if task.assigned_agent == "business_insights" else
+                "Не удалось подготовить материал — проверьте задание"
+            ),
             "resource_kind": "task",
             "resource_title": task_title(task),
             "resource_status": "Ошибка",
@@ -635,7 +735,9 @@ def activity_html(product_id: UUID, items: list[dict], tab: str = "all", *,
     for item in visible:
         count = item.get("result_count", len(item.get("artifacts") or []))
         state = item["state"]
-        summary = item.get("current_stage") if state == "running" else None
+        summary = item.get("display_summary") or (
+            item.get("current_stage") if state == "running" else None
+        )
         if item.get("agent") == "whiteboard_renderer":
             stage = ANIMATOR_PHASES.get(str(item.get("animator_stage")))
             if stage:
@@ -772,7 +874,7 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         primary = (
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
-            f'<p>{safe(ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"])}</p></div>'
+            f'<p>{safe(item.get("display_summary") or item.get("current_stage") or (ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"]))}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(item["label"])}</span>'
             '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
         )
@@ -788,6 +890,101 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         '</h2><p>Задания не пропадут: вернуться можно в любой момент.</p></div>'
         f'<a class="sg-mini-link" href="{base}/work">Все задания →</a></div>'
         + "".join(cards) + '</section>'
+    )
+
+
+def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
+    """Owner-facing report for exactly one factory task, no approval/publish actions.
+
+    SEO factory completion is not article generation or publication; those are
+    tracked by separate content_factory tasks and Publication records.
+    """
+    base = f"/studio/products/{product_id}"
+    state = task_state(task)
+    labels = {
+        "queued": "В очереди", "running": "Планирование выполняется",
+        "completed": "Планирование завершено", "failed": "Ошибка планирования",
+        "cancelled": "Планирование отменено", "waiting_approval": "Ожидает решения",
+    }
+    tones = {
+        "queued": "queued", "running": "running", "completed": "done",
+        "failed": "error", "cancelled": "error", "waiting_approval": "review",
+    }
+    stages = []
+    if report.get("semantic_ready"):
+        stages.append("Семантическое ядро подготовлено")
+    if report.get("plan_ready"):
+        stages.append("Контент-план сформирован")
+    queued = report.get("articles_queued")
+    if type(queued) is int and queued >= 0:
+        stages.append(f"Статей поставлено в очередь: {queued}")
+    deferred = report.get("articles_deferred")
+    if type(deferred) is int and deferred > 0:
+        stages.append(f"Отложено тем: {deferred}")
+    if report.get("landing_ready"):
+        total = report.get("landing_candidates_total")
+        stages.append(
+            f"Вариантов посадочных страниц: {total}"
+            if type(total) is int else
+            "Предложения посадочных страниц подготовлены"
+        )
+    phase = SEO_PHASE_NAMES.get(str(report.get("current_stage")), "")
+    if state == "completed":
+        introduction = (
+            "Планирование завершено. Это не означает, что статьи написаны "
+            "или опубликованы: их создание и публикация выполняются отдельно."
+        )
+    elif state == "failed":
+        introduction = (
+            "Планирование остановилось с ошибкой. Готовые этапы сохранены; "
+            "проверьте состояние и доступные действия в SEO-заводе."
+        )
+    elif state == "running":
+        introduction = "Идёт подготовка запросов и контент-плана."
+    elif state == "queued":
+        introduction = "SEO-завод ожидает начала планирования."
+    else:
+        introduction = "Подробности планирования находятся в SEO-заводе."
+    current = (
+        '<p class="sg-seo-task-stage"><b>Текущий этап:</b> '
+        + safe(phase) + '</p>'
+        if phase and state in {"running", "queued", "failed"} else ''
+    )
+    failure_causes = {
+        "upstream_timeout": "Сервис не ответил вовремя",
+        "network_failure": "Ошибка соединения с сервисом",
+        "provider_http_error": "Сервис вернул ошибку",
+        "model_unusable_response": "ИИ-модель вернула неподходящий ответ",
+        "plan_validation_failed": "Не удалось проверить контент-план",
+        "invalid_data_or_configuration": "Недостаточно корректных данных или настроек",
+        "search_upstream_failures": "Поисковые сервисы недоступны",
+        "search_invalid_responses": "Поисковые сервисы вернули неподходящие данные",
+        "internal_exception": "Внутренняя ошибка выполнения",
+    }
+    reason = failure_causes.get(str(report.get("last_error_code")), "")
+    error_note = (
+        f'<p class="sg-seo-task-error" role="alert"><b>Причина:</b> {safe(reason)}</p>'
+        if state == "failed" and reason else ""
+    )
+    completed = (
+        '<section class="sg-work-results"><h3>Подтверждённые результаты</h3><ul>'
+        + ''.join(f'<li>{safe(value)}</li>' for value in stages)
+        + '</ul></section>'
+        if stages else
+        '<p class="sg-seo-task-muted">Подтверждённых результатов планирования пока нет.</p>'
+    )
+    return (
+        f'<section class="sg-surface sg-work-detail sg-seo-task-detail"'
+        f' data-sg-task="{task.id}" data-sg-state="{safe(state)}">'
+        f'<span class="sg-work-status sg-work-{safe(tones.get(state, "queued"))}">'
+        f'{safe(labels.get(state, "Проверить статус"))}</span>'
+        '<h2>SEO-завод: запросы и контент-план</h2>'
+        f'<p>{safe(introduction)}</p>'
+        + current + error_note + completed
+        + '<div class="sg-seo-task-actions">'
+        + f'<a class="btn primary" href="{base}/seo">Открыть SEO-завод</a>'
+        + f'<a class="sg-mini-link" href="{base}/work">← Все задания</a>'
+        + '</div></section>'
     )
 
 
