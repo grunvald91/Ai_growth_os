@@ -1547,3 +1547,43 @@ def test_v4_header_uses_transparent_shell_and_separate_opaque_controls(live):
     assert 'padding-top:0 !important;' in floating
     assert 'body.home-page.sg-keyboard-open[data-growth-design="v4"]' in floating
     assert 'body.home-page.sg-keyboard-open[data-growth-design="v4"]' in floating
+
+
+def test_tasks_desktop_context_rail_only_on_work_route(live):
+    """The task preview replaces the helper rail only for the Work list."""
+    client, db, product = live
+    task = Task(product_id=product.id, assigned_agent="content_factory",
+                title="CONTENT: Сценарий обновления", status=TaskStatus.RUNNING)
+    db.add(task)
+    db.commit()
+    base = f"/studio/products/{product.id}"
+    work = client.get(base + "/work?design=v4")
+    assert work.status_code == 200
+    assert 'data-growth-design="v4"' in work.text
+    assert 'data-sg-work-preview' in work.text
+    assert 'id="sgWorkPreviewDetail"' in work.text
+    assert 'data-sg-preview-link' in work.text
+    assert 'data-sg-work-board' in work.text
+    assert f'href="{base}/tasks/{task.id}"' in work.text
+    # A no-JS client still has a normal task link, no inert peek buttons.
+    assert 'data-sg-task-peek' not in work.text
+    assert '<h2>Ваш помощник</h2>' not in work.text
+    create = client.get(base + "/create?design=v4")
+    assert create.status_code == 200
+    assert '<h2>Ваш помощник</h2>' in create.text
+    assert 'data-sg-work-preview' not in create.text
+    classic = client.get(base + "/work?design=classic")
+    assert 'data-sg-work-preview' not in classic.text
+
+
+def test_task_preview_script_preserves_primary_links_and_mobile_layout():
+    from app.api.content_studio_work_ui import CSS, JS
+    assert "previewMq=window.matchMedia('(min-width:1081px)')" in JS
+    assert "button.setAttribute('aria-controls','sgWorkPreviewDetail')" in JS
+    assert "showTaskPreview(button.closest('.sg-resource-widget'))" in JS
+    assert "node.textContent=value" in JS
+    assert "installPreviewButtons(previous)" in JS
+    assert 'window.location.pathname.replace(/\\/work$/' in JS
+    assert '.sg-has-task-peek .sg-work-item-foot' in CSS
+    assert '@media(max-width:1080px)' in CSS
+    assert '.sg-work-preview-detail[hidden]' in CSS
