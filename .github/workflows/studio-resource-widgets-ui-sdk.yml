@@ -18,10 +18,13 @@ on:
       - "app/api/content_studio_activity.py"
       - "app/api/content_studio_work_ui.py"
       - "app/api/growth_v4.py"
+      - "app/api/assets/growth-servgo-air.css"
+      - "app/api/assets/servgo-air-tokens.css"
       - "app/api/dispatcher.py"
       - "app/api/dispatcher_assets/**"
       - "studio_ui_sdk/resource-widgets-smoke.mjs"
       - "studio_ui_sdk/task-preview-smoke.mjs"
+      - "studio_ui_sdk/task-layout-smoke.mjs"
       - "studio_ui_sdk/workflow-smoke.mjs"
       - "studio_ui_sdk/durable-workflow-smoke.mjs"
       - "tests/test_content_studio.py"
@@ -71,6 +74,7 @@ jobs:
           node --check app/api/dispatcher_assets/resource-widgets.js
           node --check studio_ui_sdk/resource-widgets-smoke.mjs
           node --check studio_ui_sdk/task-preview-smoke.mjs
+          node --check studio_ui_sdk/task-layout-smoke.mjs
           node --check studio_ui_sdk/workflow-smoke.mjs
           node --check studio_ui_sdk/durable-workflow-smoke.mjs
       - name: Install pinned UI SDK
@@ -80,12 +84,13 @@ jobs:
         run: |
           cd studio_ui_sdk && npm run build && cd ..
           git diff --exit-code -- app/api/dispatcher_assets/ui-sdk-pilot.bundle.js
-      - name: Browser smoke 390px and 1280px
+      - name: Browser smoke 320px through desktop, light and dark
         working-directory: studio_ui_sdk
         run: |
           npm install --no-save playwright@1.56.1 --no-audit --no-fund
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node resource-widgets-smoke.mjs
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node task-preview-smoke.mjs
+          SERVGO_CHROME_PATH="$(command -v google-chrome)" node task-layout-smoke.mjs
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node workflow-smoke.mjs
           SERVGO_CHROME_PATH="$(command -v google-chrome)" node durable-workflow-smoke.mjs
       - name: Upload screenshots

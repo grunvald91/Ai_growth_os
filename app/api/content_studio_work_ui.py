@@ -305,6 +305,17 @@ CSS = r"""
   .sg-work-board .sg-work-item-main b{font-size:14px}
   .sg-work-board .sg-work-tabs{margin-inline:-2px}
 }
+@media(max-width:360px){
+  /* 320px phones: do not squeeze two long filters or a primary CTA
+     next to descriptive text. These controls stay 44px minimum. */
+  .sg-work-board .sg-work-toolbar{flex-direction:column;align-items:stretch;gap:9px}
+  .sg-work-board .sg-work-toolbar .btn{width:100%}
+  .sg-work-board .sg-work-search{grid-template-columns:minmax(0,1fr)}
+  .sg-work-board .sg-work-search :is(input,select,.btn){grid-column:1/-1}
+  .sg-work-board .sg-work-item-head{flex-wrap:wrap;justify-content:flex-start;gap:7px}
+  .sg-work-board .sg-work-kind{min-width:0;overflow-wrap:anywhere}
+  .sg-work-board .sg-work-status{max-width:100%;min-width:0;overflow-wrap:anywhere}
+}
 @media(prefers-reduced-motion:reduce){
   .sg-work-board .sg-work-item{transition:none}
 }
