@@ -153,6 +153,20 @@ CSS = r"""
  .sg-work-result{flex-wrap:wrap}
 }
 
+/* Scoped SEO task progress: avoid a fake article / publish CTA. */
+.sg-seo-task-detail .sg-work-results ul{list-style:disc;padding-left:22px;
+  margin:9px 0;display:grid;gap:8px}
+.sg-seo-task-detail .sg-work-results li{line-height:1.5;
+  color:var(--s-text,#263D56);overflow-wrap:anywhere}
+.sg-seo-task-stage{margin:10px 0;font-size:14px;
+  color:var(--s-text-muted,#587085)}
+.sg-seo-task-muted{margin:15px 0;color:var(--s-text-muted,#587085)}
+.sg-seo-task-actions{display:flex;flex-wrap:wrap;gap:12px;
+  align-items:center;margin-top:20px}
+.sg-seo-task-actions .btn,.sg-seo-task-actions .sg-mini-link{
+  min-height:44px;display:inline-flex;align-items:center;justify-content:center}
+@media(max-width:520px){.sg-seo-task-actions .btn{width:100%}}
+
 /* Finished work: keep the result above technical history. */
 .sg-work-steps-collapsible>summary{min-height:44px;display:flex;align-items:center;
   cursor:pointer;font-size:17px;font-weight:700;color:var(--s-text,var(--text,#263D56))}
@@ -389,7 +403,8 @@ JS = r"""
      if(detail){
        const changed=jobs.find(j=>j.id===detail.dataset.sgTask &&
            (j.state!==detail.dataset.sgState ||
-            j.stage_signature!==detail.dataset.sgStage));
+            (detail.hasAttribute('data-sg-stage') &&
+             j.stage_signature!==detail.dataset.sgStage)));
        if(changed&&document.visibilityState==='visible')location.reload();
      }
      if(showWork&&!workBoard){
