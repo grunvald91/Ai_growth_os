@@ -1084,12 +1084,25 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
                'Эту страницу можно закрыть и вернуться позже.</p>'
                if key in {"queued", "running"} else "")
     creative_resume = task.assigned_agent == "content_creative"
+    # No paid requeue from one accidental tap. Native disclosure works
+    # without JavaScript; the server also rejects POSTs without the explicit
+    # acknowledgement. Saved creative checkpoints remain intact.
     fail = (
+        '<details class="sg-work-retry-confirm">'
+        '<summary>Продолжить или повторить задание</summary>'
+        '<div class="sg-work-retry-body">'
+        '<p>Повторная обработка может использовать платные API и расходовать '
+        'лимиты. Сохранённые этапы не удаляются, но повтор некоторых '
+        'платных вызовов исключить нельзя.</p>'
         f'<form action="{base}/tasks/{task.id}/retry" method="post">'
+        '<label class="sg-work-retry-consent">'
+        '<input type="checkbox" name="confirm_retry" value="yes" required>'
+        '<span>Подтверждаю повторный запуск с возможными расходами.</span>'
+        '</label>'
         '<button class="btn secondary" type="submit">'
         + ("Продолжить с сохранённых этапов" if creative_resume and results
            else "Повторить задание")
-        + '</button></form>'
+        + '</button></form></div></details>'
         if key in {"failed", "cancelled"} and task.assigned_agent
         in {"content_factory", "content_creative", "content_editor"}
         and (creative_resume or not results) else ""

@@ -317,11 +317,15 @@ def test_failed_creative_with_saved_brief_can_resume_original_task(owner_studio)
     assert detail.status_code == 200
     assert "Продолжить с сохранённых этапов" in detail.text
     assert client.post(f"/studio/products/{other.id}/tasks/{task.id}/retry").status_code == 404
-    resumed = client.post(base + "/retry", follow_redirects=False)
+    unconfirmed = client.post(base + "/retry", follow_redirects=False)
+    assert unconfirmed.status_code == 409
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    resumed = client.post(
+        base + "/retry", data={"confirm_retry": "yes"}, follow_redirects=False)
     assert resumed.status_code == 303
     assert resumed.headers["location"] == base
     assert db.get(Task, task.id).status == TaskStatus.QUEUED
-    assert client.post(base + "/retry").status_code == 409
+    assert client.post(base + "/retry", data={"confirm_retry": "yes"}).status_code == 409
 
 
 def test_company_intake_task_routes_to_profile_not_empty_material_view(owner_studio):
@@ -505,6 +509,9 @@ def test_failed_task_keeps_steps_visible_and_retry_available(owner_studio):
     page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
     assert page.status_code == 200
     assert "Повторить задание" in page.text
+    assert "Повторная обработка может использовать платные API" in page.text
+    assert '<details class="sg-work-retry-confirm">' in page.text
+    assert 'name="confirm_retry" value="yes" required' in page.text
     assert '<div class="sg-work-steps">' in page.text
     assert '<details class="sg-work-steps' not in page.text
 
@@ -1050,3 +1057,30 @@ def test_running_business_analysis_detail_tracks_completion(owner_studio):
     assert feed.status_code == 200
     assert any(x["id"] == str(job.id) and x["state"] == "completed"
                for x in feed.json()["jobs"])
+
+
+def test_failed_content_retry_requires_confirmation_without_side_effect(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_editor",
+                title="EDIT: Неудачное исправление", status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    endpoint = f"/studio/products/{company.id}/tasks/{task.id}/retry"
+    # Missing or forged acknowledgement must never requeue a paid step.
+    assert client.post(endpoint, follow_redirects=False).status_code == 409
+    assert client.post(endpoint, data={"confirm_retry": "no"},
+                       follow_redirects=False).status_code == 409
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    approved = client.post(endpoint, data={"confirm_retry": "yes"},
+                           follow_redirects=False)
+    assert approved.status_code == 303
+    assert db.get(Task, task.id).status == TaskStatus.QUEUED
+    assert client.post(endpoint, data={"confirm_retry": "yes"}).status_code == 409
+
+
+def test_retry_disclosure_has_accessible_label_and_touch_targets():
+    from app.api.content_studio_work_ui import CSS
+    assert ".sg-work-retry-confirm>summary" in CSS
+    assert ".sg-work-retry-consent" in CSS
+    assert "min-height:44px" in CSS
+    assert "accent-color:var(--s-accent" in CSS

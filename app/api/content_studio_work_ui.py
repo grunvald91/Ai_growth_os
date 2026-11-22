@@ -77,6 +77,25 @@ CSS = r"""
 .sg-work-result>span{white-space:nowrap}
 .sg-work-refresh{border-radius:10px;background:#EEF4FF;border:1px solid #D8E6FA;
   padding:12px 14px;color:#365B8A!important;font-size:13px!important}
+/* Retry is deliberately a two-step owner action, never a one-tap paid call. */
+.sg-work-retry-confirm{margin:15px 0;padding:0 13px;
+  border:1px solid var(--s-line-2,#D8E2EE);border-radius:12px;
+  background:var(--s-surface-2,#F7F9FC);color:var(--s-text,#263D56)}
+.sg-work-retry-confirm>summary{display:flex;align-items:center;min-height:44px;
+  cursor:pointer;font-size:14px;font-weight:650;line-height:1.45}
+.sg-work-retry-confirm>summary:focus-visible{
+  outline:2px solid var(--s-accent,#3478D6);outline-offset:3px}
+.sg-work-retry-body{padding:0 0 14px;display:grid;gap:12px}
+.sg-work-retry-body p{margin:0;color:var(--s-text-2,#465B72);
+  line-height:1.55;font-size:13px}
+.sg-work-retry-body form{display:grid;gap:12px}
+.sg-work-retry-consent{display:flex;align-items:center;gap:10px;
+  min-height:44px;font-size:13px;line-height:1.45;cursor:pointer}
+.sg-work-retry-consent input{appearance:auto;width:21px;height:21px;
+  flex:none;accent-color:var(--s-accent,#3478D6)}
+.sg-work-retry-consent span{min-width:0;overflow-wrap:anywhere}
+.sg-work-retry-body button{min-height:44px;white-space:normal;text-align:center}
+
 .sg-create-work-link{padding:10px 0 4px;font-size:13px}
 .sg-create-work-link a{color:#2F5BEB;font-weight:600}
 .sg-side-extras{border-top:1px solid #E9EEF2;margin-top:15px;padding:9px 0 0}
