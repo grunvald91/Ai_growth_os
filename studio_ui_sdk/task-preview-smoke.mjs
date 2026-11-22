@@ -121,7 +121,8 @@ try{
   stagePage.on("pageerror",err=>stageErrors.push(err.message));
   const origin="http://127.0.0.1:"+server.address().port;
   await stagePage.goto(origin+"/studio/products/11111111-1111-4111-8111-111111111111/tasks/"+seoId);
-  await stagePage.locator(".sg-notify-empty").waitFor();
+  // Notification dropdown is closed: its feed is attached but not visible.
+  await stagePage.locator(".sg-notify-empty").waitFor({state:"attached"});
   await stagePage.evaluate(()=>{
     window.__taskDocumentMarker="kept";
     window.scrollTo(0,280);
