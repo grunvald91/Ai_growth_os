@@ -67,8 +67,14 @@ def test_failed_creative_task_is_visible_and_retries_once(studio_v5):
     base = f"/studio/products/{company.id}"
     assert "Визуальный бриф" in client.get(base + "/create").text
     assert "Повторить задание" in client.get(base + f"/tasks/{task.id}").text
-    assert client.post(base + f"/tasks/{task.id}/retry", follow_redirects=False).status_code == 303
-    assert client.post(base + f"/tasks/{task.id}/retry").status_code == 409
+    # Retrying can incur paid calls: direct/unconfirmed submits are rejected.
+    assert client.post(base + f"/tasks/{task.id}/retry", follow_redirects=False).status_code == 409
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    assert client.post(base + f"/tasks/{task.id}/retry",
+                       data={"confirm_retry": "yes"},
+                       follow_redirects=False).status_code == 303
+    assert client.post(base + f"/tasks/{task.id}/retry",
+                       data={"confirm_retry": "yes"}).status_code == 409
 
 
 def test_changed_audience_and_brief_are_distinct_jobs(db):
