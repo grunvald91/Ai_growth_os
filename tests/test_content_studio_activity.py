@@ -949,3 +949,46 @@ def test_nonrunning_seo_page_does_not_request_phase_refresh(owner_studio):
     response = client.get(f"/studio/products/{company.id}/tasks/{seo.id}")
     assert response.status_code == 200
     assert 'data-sg-stage-mode="seo"' not in response.text
+
+
+def test_activity_feed_tracks_old_open_job_outside_recent_window(owner_studio):
+    """The exact active detail must update even with many newer active jobs."""
+    from datetime import datetime, timedelta, timezone
+    from app.api.content_studio_work_ui import JS
+    client, db, company, other = owner_studio
+    old = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: старая активная задача",
+               status=TaskStatus.RUNNING,
+               created_at=datetime.now(timezone.utc)-timedelta(days=120))
+    hidden_foreign = Task(product_id=other.id, assigned_agent="seo_factory",
+                          title="Другое планирование", status=TaskStatus.RUNNING)
+    db.add_all([old, hidden_foreign])
+    for i in range(50):
+        db.add(Task(product_id=company.id, assigned_agent="content_factory",
+                    title=f"CONTENT: Новый запуск {i}", status=TaskStatus.RUNNING))
+    db.commit()
+    url = f"/studio/products/{company.id}/activity.json"
+    plain = client.get(url)
+    assert plain.status_code == 200
+    plain_data = plain.json()
+    assert str(old.id) not in {job["id"] for job in plain_data["jobs"]}
+    tracked = client.get(url, params={"task_id": str(old.id)})
+    assert tracked.status_code == 200
+    tracked_data = tracked.json()
+    assert sum(job["id"] == str(old.id) for job in tracked_data["jobs"]) == 1
+    assert tracked_data["active_count"] == plain_data["active_count"]
+    outsider = client.get(url, params={"task_id": str(hidden_foreign.id)})
+    assert outsider.status_code == 200
+    assert str(hidden_foreign.id) not in {job["id"] for job in outsider.json()["jobs"]}
+    assert "feedUrl.searchParams.set('task_id',detail.dataset.sgTask)" in JS
+
+
+def test_activity_feed_does_not_duplicate_fresh_open_job(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="seo_factory",
+                title="SEO-завод: актуальная задача", status=TaskStatus.RUNNING)
+    db.add(task)
+    db.commit()
+    data = client.get(f"/studio/products/{company.id}/activity.json",
+                      params={"task_id": str(task.id)}).json()
+    assert sum(row["id"] == str(task.id) for row in data["jobs"]) == 1
