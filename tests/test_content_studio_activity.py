@@ -863,3 +863,89 @@ def test_seo_factory_failure_reason_is_human_readable_and_not_raw_provider_text(
     assert "Сервис не ответил вовремя" in page.text
     assert "secret-file-path" not in page.text
     assert "PrivateBackendError" not in page.text
+
+
+def test_tasks_search_finds_seo_focus_and_business_review_but_not_other_tenants(owner_studio):
+    """Cross-module search should use user-facing saved context, tenant-scoped."""
+    from app.api.content_studio_activity import work_page
+    client, db, company, other = owner_studio
+    seo = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы, план и статьи", status=TaskStatus.COMPLETED)
+    business = Task(product_id=company.id, assigned_agent="business_insights",
+                    title="Маркетинг: разбор данных бизнеса", status=TaskStatus.COMPLETED)
+    foreign = Task(product_id=other.id, assigned_agent="seo_factory",
+                   title="SEO-завод: запросы, план и статьи", status=TaskStatus.COMPLETED)
+    db.add_all([seo, business, foreign])
+    db.flush()
+    db.add_all([
+        Artifact(product_id=company.id, task_id=seo.id, kind="seo_factory_request",
+                 title="Запрос", status="draft",
+                 content=json.dumps({"focus": "доставка керамических чашек"}, ensure_ascii=False)),
+        Artifact(product_id=company.id, task_id=business.id, kind="business_review",
+                 title="Разбор", status="draft",
+                 content=json.dumps({"summary": "Вечерняя загрузка зала"}, ensure_ascii=False)),
+        Artifact(product_id=other.id, task_id=foreign.id, kind="seo_factory_request",
+                 title="Запрос", status="draft",
+                 content=json.dumps({"focus": "скрытый чужой заказ"}, ensure_ascii=False)),
+    ])
+    db.commit()
+    seo_results = work_page(db, company.id, query="керамических", kind="seo")
+    assert seo_results["total"] == 1
+    assert seo_results["items"][0]["id"] == str(seo.id)
+    business_results = work_page(db, company.id, query="Вечерняя", kind="business")
+    assert business_results["total"] == 1
+    assert business_results["items"][0]["id"] == str(business.id)
+    assert work_page(db, company.id, query="чужой")["total"] == 0
+    page = client.get(f"/studio/products/{company.id}/work",
+                      params={"q": "керамических", "kind": "seo"})
+    assert page.status_code == 200
+    assert f'/tasks/{seo.id}' in page.text
+    assert f'/tasks/{foreign.id}' not in page.text
+
+
+def test_running_seo_detail_marks_same_current_stage_as_work_feed(owner_studio):
+    from app.api.content_studio_activity import work_page
+    from app.api.content_studio_work_ui import JS
+    client, db, company, _ = owner_studio
+    seo = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.RUNNING)
+    db.add(seo)
+    db.flush()
+    stage = Artifact(product_id=company.id, task_id=seo.id,
+                     kind="seo_factory_stage", status="draft",
+                     title="Этап", content=json.dumps({
+                         "stage": "collect_suggestions",
+                         "recorded_at": "2026-11-22T05:00:00+00:00",
+                     }))
+    db.add(stage)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    task_page = client.get(base + f"/tasks/{seo.id}")
+    assert task_page.status_code == 200
+    assert 'data-sg-stage-mode="seo"' in task_page.text
+    assert 'data-sg-stage="Сбор поисковых подсказок"' in task_page.text
+    assert work_page(db, company.id, kind="seo")["items"][0]["current_stage"] == (
+        "Сбор поисковых подсказок"
+    )
+    stage.content = json.dumps({
+        "stage": "build_plan",
+        "recorded_at": "2026-11-22T05:05:00+00:00",
+    })
+    db.commit()
+    assert work_page(db, company.id, kind="seo")["items"][0]["current_stage"] == (
+        "Составление контент-плана"
+    )
+    assert "detail.dataset.sgStageMode==='seo'" in JS
+    assert "j.current_stage!==detail.dataset.sgStage" in JS
+
+
+def test_nonrunning_seo_page_does_not_request_phase_refresh(owner_studio):
+    """A finished factory must not reload every poll due to a stale stage label."""
+    client, db, company, _ = owner_studio
+    seo = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.COMPLETED)
+    db.add(seo)
+    db.commit()
+    response = client.get(f"/studio/products/{company.id}/tasks/{seo.id}")
+    assert response.status_code == 200
+    assert 'data-sg-stage-mode="seo"' not in response.text
