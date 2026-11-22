@@ -482,7 +482,7 @@ def render_v4(page, request, pid, switch):
             'Нажмите «Просмотр» в карточке, чтобы увидеть её подробности здесь.</p>'
             '<div class="sg-work-preview-detail" id="sgWorkPreviewDetail" data-sg-preview-detail hidden>'
             '<span class="sg-work-preview-kind" data-sg-preview-kind></span>'
-            '<h3 data-sg-preview-title></h3>'
+            '<h3 data-sg-preview-title aria-live="polite" aria-atomic="true"></h3>'
             '<span class="sg-work-preview-status" data-sg-preview-status></span>'
             '<p data-sg-preview-summary></p>'
             '<p class="sg-work-preview-date" data-sg-preview-date></p>'
