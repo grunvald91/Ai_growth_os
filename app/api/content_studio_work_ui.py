@@ -216,6 +216,43 @@ CSS = r"""
   .sg-work-board .sg-work-pagination{gap:7px}
 }
 
+/* Context-only desktop rail. The primary card remains an ordinary link. */
+.sg-work-board .sg-has-task-peek{position:relative}
+.sg-work-board .sg-has-task-peek .sg-work-item-foot{
+  min-height:44px;padding-right:101px}
+.sg-work-board .sg-task-peek-action{
+  box-sizing:border-box;position:absolute;right:12px;bottom:12px;
+  display:inline-flex;align-items:center;justify-content:center;
+  min-height:44px;min-width:86px;padding:9px 10px;border:1px solid var(--s-line,#DDE5EE);
+  border-radius:10px;background:var(--s-surface-2,#F4F7FB);
+  color:var(--s-text,#263D56);font-family:inherit;font-size:12px;
+  font-weight:600;line-height:1.3;cursor:pointer}
+.sg-work-board .sg-task-peek-action[aria-pressed="true"]{
+  border-color:var(--s-accent,#2F5BEB);color:var(--s-accent,#2F5BEB)}
+.sg-work-board .sg-task-peek-action:focus-visible{
+  outline:2px solid var(--s-accent,#2F5BEB);outline-offset:2px}
+.sg-work-preview{min-width:0;padding:16px 14px;
+  border:1px solid var(--s-line,#DFE7F0);border-radius:15px;
+  background:var(--s-surface,#fff)}
+.sg-work-preview-hint{color:var(--s-text-muted,#587085);
+  font-size:13px;line-height:1.65;margin:0}
+.sg-work-preview-detail{display:grid;gap:10px;min-width:0}
+.sg-work-preview-detail[hidden],.sg-work-preview-hint[hidden]{display:none}
+.sg-work-preview-kind{font-size:12px;font-weight:650;color:var(--s-text-muted,#587085)}
+.sg-work-preview-detail h3{font-size:16px;font-weight:700;line-height:1.45;
+  overflow-wrap:anywhere;margin:0;color:var(--s-text,#263D56)}
+.sg-work-preview-status{font-size:12px;font-weight:650;
+  color:var(--s-accent,#2F5BEB)}
+.sg-work-preview-detail p{font-size:13px;line-height:1.6;
+  margin:0;color:var(--s-text-muted,#587085);overflow-wrap:anywhere}
+.sg-work-preview-detail .sg-work-preview-date{font-size:11px}
+.sg-work-preview-detail .btn{display:inline-flex;align-items:center;
+  justify-content:center;min-height:44px;margin-top:6px}
+@media(max-width:1080px){
+  .sg-work-board .sg-task-peek-action{display:none!important}
+  .sg-work-board .sg-has-task-peek .sg-work-item-foot{min-height:0;padding-right:0}
+}
+
 /* Tasks page: compact, content-first cards, adaptive without a second toolbar. */
 .sg-work-board .sg-work-toolbar{display:flex;justify-content:space-between;
   gap:14px;align-items:center;margin-bottom:12px}
@@ -295,6 +332,9 @@ JS = r"""
  const workList=document.querySelector('.sg-work-list');
  const workBoard=document.querySelector('[data-sg-work-board]');
  const updateButton=workBoard?.querySelector('[data-sg-work-update]');
+ const previewRail=document.querySelector('[data-sg-work-preview]');
+ const previewMq=window.matchMedia('(min-width:1081px)');
+ let selectedPreviewHref='';
  let pendingBoard=null;
  let lastSignature=null;
  let shown=[];
@@ -306,6 +346,86 @@ JS = r"""
      const value=new Date(el.getAttribute('datetime'));
      if(Number.isFinite(value.getTime()))el.textContent='Создано '+formatter.format(value);
    });
+ }
+ // Contextual desktop preview uses existing, server-escaped cards.
+ // It never steals the main card link or sends a new API request.
+ function previewAnchor(node){
+   const a=node?.querySelector('a.sg-work-item[href]');
+   if(!a)return null;
+   const url=new URL(a.getAttribute('href'),window.location.origin);
+   const root=window.location.pathname.replace(/\/work$/, '')+'/';
+   if(url.origin!==window.location.origin||!url.pathname.startsWith(root))return null;
+   return {a,url};
+ }
+ function resetTaskPreview(){
+   selectedPreviewHref='';
+   if(!previewRail)return;
+   const hint=previewRail.querySelector('[data-sg-preview-hint]');
+   const detail=previewRail.querySelector('[data-sg-preview-detail]');
+   if(hint)hint.hidden=false;
+   if(detail)detail.hidden=true;
+   workBoard?.querySelectorAll('[data-sg-task-peek]').forEach(b=>
+     b.setAttribute('aria-pressed','false'));
+ }
+ function showTaskPreview(row){
+   if(!previewRail||!previewMq.matches)return;
+   const verified=previewAnchor(row);
+   if(!verified)return;
+   const {a,url}=verified;
+   const summary=(selector)=>a.querySelector(selector)?.textContent?.trim()||'';
+   const values={
+     '[data-sg-preview-kind]': summary('.sg-work-kind'),
+     '[data-sg-preview-title]': summary('.sg-work-item-main b'),
+     '[data-sg-preview-status]': summary('.sg-work-status'),
+     '[data-sg-preview-summary]': summary('.sg-work-summary'),
+     '[data-sg-preview-date]': summary('.sg-work-item-foot time'),
+   };
+   for(const [selector,value] of Object.entries(values)){
+     const node=previewRail.querySelector(selector);
+     if(node)node.textContent=value;
+   }
+   const link=previewRail.querySelector('[data-sg-preview-link]');
+   if(link)link.href=url.pathname+url.search;
+   const hint=previewRail.querySelector('[data-sg-preview-hint]');
+   const detail=previewRail.querySelector('[data-sg-preview-detail]');
+   if(hint)hint.hidden=true;
+   if(detail)detail.hidden=false;
+   selectedPreviewHref=a.getAttribute('href');
+   workBoard?.querySelectorAll('[data-sg-task-peek]').forEach(b=>{
+     const target=previewAnchor(b.closest('.sg-resource-widget'));
+     b.setAttribute('aria-pressed',String(
+       Boolean(target&&target.a.getAttribute('href')===selectedPreviewHref)));
+   });
+ }
+ function installPreviewButtons(root){
+   if(!previewRail||!previewMq.matches||!root)return;
+   root.querySelectorAll('.sg-resource-widget[data-sg-resource-widget="task"]').forEach(row=>{
+     if(row.querySelector('[data-sg-task-peek]')||!previewAnchor(row))return;
+     const button=document.createElement('button');
+     button.type='button';
+     button.className='sg-task-peek-action';
+     button.dataset.sgTaskPeek='';
+     button.textContent='Просмотр';
+     button.setAttribute('aria-label','Быстрый просмотр справа: '+
+       (row.querySelector('.sg-work-item-main b')?.textContent||'Задание'));
+     button.setAttribute('aria-controls','sgWorkPreviewDetail');
+     button.setAttribute('aria-pressed','false');
+     row.classList.add('sg-has-task-peek');
+     row.appendChild(button);
+   });
+ }
+ if(workBoard&&previewRail){
+   workBoard.addEventListener('click',event=>{
+     const button=event.target instanceof Element ?
+       event.target.closest('[data-sg-task-peek]'):null;
+     if(button&&workBoard.contains(button)){
+       showTaskPreview(button.closest('.sg-resource-widget'));
+     }
+   });
+   previewMq.addEventListener('change',()=>{
+     if(previewMq.matches)installPreviewButtons(workBoard);
+   });
+   installPreviewButtons(workBoard);
  }
  const anchor=(item)=>{
    const a=document.createElement('a');
@@ -326,6 +446,13 @@ JS = r"""
    const oldY=window.scrollY;
    previous.replaceChildren(...Array.from(next.childNodes));
    localizeWorkTimes(previous);
+   installPreviewButtons(previous);
+   if(selectedPreviewHref){
+     const match=Array.from(previous.querySelectorAll('.sg-work-item[href]'))
+       .find(a=>a.getAttribute('href')===selectedPreviewHref);
+     if(match)showTaskPreview(match.closest('.sg-resource-widget'));
+     else resetTaskPreview();
+   }
    const oldPages=workBoard.querySelector('.sg-work-pagination');
    const newPages=fresh.querySelector('.sg-work-pagination');
    if(oldPages&&newPages)oldPages.replaceWith(newPages);

@@ -472,14 +472,38 @@ def render_v4(page, request, pid, switch):
             styles += '<link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=5">'
     # Page-specific form styles and scripts belong to their original modules.
     styles += ''.join(original.outer(e) for e in original.elements if e[0]=='style')
-    replacements = [(doc.find(ident='main'), content), (doc.find(ident='leftNav'), ''.join(link(r) for r in links)),
-                    (doc.find(ident='crumbTitle'), html.escape(label)),
-                    (doc.find(ident='rail'), '<div class="rail-head"><h2>Ваш помощник</h2><span>ServGo AI</span></div>'
-                     '<div class="assistant-box"><div class="assistant-avatar">'+icon('spark')+'</div><h3>Что нужно сделать?</h3>'
-                     '<p>Опишите задачу обычными словами. Команда предложит следующий шаг.</p>'
-                     f'<a class="btn blue" href="{base}">Открыть помощника</a>'
-                     + (f'<a class="btn" style="margin-top:8px" href="/studio/chat?product_id={pid}">Открыть ИИ-чат</a>' if pid else '<a class="btn" style="margin-top:8px" href="/studio/chat">Открыть ИИ-чат</a>')
-                     + '</div>'+''.join('<div class="rail-card">'+link(r)+'</div>' for r in links[:4]))]
+    # Only Tasks gets a contextual desktop rail. Other routes keep the same
+    # helper; on mobile the shared CSS already hides the entire rail.
+    if pid and current == base + '/work':
+        rail_markup = (
+            '<div class="rail-head"><h2>Задание</h2><span>Быстрый просмотр</span></div>'
+            '<section class="sg-work-preview" data-sg-work-preview aria-label="Быстрый просмотр задания">'
+            '<p class="sg-work-preview-hint" data-sg-preview-hint>'
+            'Нажмите «Просмотр» в карточке, чтобы увидеть её подробности здесь.</p>'
+            '<div class="sg-work-preview-detail" id="sgWorkPreviewDetail" data-sg-preview-detail hidden>'
+            '<span class="sg-work-preview-kind" data-sg-preview-kind></span>'
+            '<h3 data-sg-preview-title></h3>'
+            '<span class="sg-work-preview-status" data-sg-preview-status></span>'
+            '<p data-sg-preview-summary></p>'
+            '<p class="sg-work-preview-date" data-sg-preview-date></p>'
+            f'<a class="btn blue" data-sg-preview-link href="{base}/work">'
+            'Открыть задание</a></div></section>'
+        )
+    else:
+        rail_markup = (
+            '<div class="rail-head"><h2>Ваш помощник</h2><span>ServGo AI</span></div>'
+            '<div class="assistant-box"><div class="assistant-avatar">'+icon('spark')+'</div><h3>Что нужно сделать?</h3>'
+            '<p>Опишите задачу обычными словами. Команда предложит следующий шаг.</p>'
+            f'<a class="btn blue" href="{base}">Открыть помощника</a>'
+            + (f'<a class="btn" style="margin-top:8px" href="/studio/chat?product_id={pid}">Открыть ИИ-чат</a>' if pid else '<a class="btn" style="margin-top:8px" href="/studio/chat">Открыть ИИ-чат</a>')
+            + '</div>'+''.join('<div class="rail-card">'+link(r)+'</div>' for r in links[:4])
+        )
+    replacements = [
+        (doc.find(ident='main'), content),
+        (doc.find(ident='leftNav'), ''.join(link(r) for r in links)),
+        (doc.find(ident='crumbTitle'), html.escape(label)),
+        (doc.find(ident='rail'), rail_markup),
+    ]
     # Offsets belong to the pristine document: apply before title/styles edits.
     pristine = template
     for e,value in sorted(replacements,key=lambda x:x[0][3],reverse=True):
