@@ -546,13 +546,26 @@ JS = r"""
      }
      const jobs=Array.isArray(data.jobs)?data.jobs:[];
      if(detail){
-       const changed=jobs.find(j=>j.id===detail.dataset.sgTask &&
-           (j.state!==detail.dataset.sgState ||
-            (detail.dataset.sgStageMode==='seo'
-              ? j.current_stage!==detail.dataset.sgStage
-              : (detail.hasAttribute('data-sg-stage') &&
-                 j.stage_signature!==detail.dataset.sgStage))));
-       if(changed&&document.visibilityState==='visible')location.reload();
+       const currentJob=jobs.find(j=>j.id===detail.dataset.sgTask);
+       if(currentJob){
+         const seoPhase=detail.dataset.sgStageMode==='seo';
+         if(seoPhase && currentJob.state===detail.dataset.sgState){
+           const updatedStage=currentJob.current_stage||
+             'Подготовка поисковых запросов и плана';
+           if(updatedStage!==detail.dataset.sgStage){
+             const stageNode=detail.querySelector('[data-sg-seo-stage-text]');
+             if(stageNode){
+               stageNode.textContent=updatedStage;
+               detail.dataset.sgStage=updatedStage;
+             }
+           }
+         }
+         const stateChanged=currentJob.state!==detail.dataset.sgState;
+         const otherStageChanged=!seoPhase && detail.hasAttribute('data-sg-stage') &&
+           currentJob.stage_signature!==detail.dataset.sgStage;
+         if((stateChanged||otherStageChanged) &&
+            document.visibilityState==='visible')location.reload();
+       }
      }
      if(showWork&&!workBoard){
        const statuses=jobs.map(j=>j.id+':'+j.state+':'+Boolean(j.needs_decision)+':'+j.result_count+':'+(j.artifacts||[]).map(a=>a.id+':'+a.status).join(',')).join('|');
