@@ -233,8 +233,13 @@ def test_all_remaining_create_formats_have_real_task_and_no_fake_output(
     assert brief is not None
     data = json.loads(brief.content)
     assert data["topic"] == "Памятка о выборе кофе"
-    assert data["mode"] == ("creative" if expected_agent == "content_creative"
-                           else data["mode"])
+    if expected_agent == "content_creative":
+        assert data["mode"] == "creative"
+        assert data["format"] == format_name
+        assert data["platform"] == channel
+    else:
+        # A package is an article-production contract, not a single post.
+        assert data.get("mode") != "post"
     page = client.get(detail_url)
     assert page.status_code == 200
     assert "В очереди" in page.text
