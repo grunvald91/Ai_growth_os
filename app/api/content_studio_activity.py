@@ -365,8 +365,9 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "animator_stage": animator_stage,
             "animator_calls": animator_calls,
             "stage_signature": "|".join(
-                str(run.id) + ":" + run.status
-                for run in by_runs.get(task.id, [])[-20:]
+                [str(run.id) + ":" + run.status for run in by_runs.get(task.id, [])[-20:]]
+                + (["seo:" + latest_seo_stages[task.id][0][0]]
+                   if task.id in latest_seo_stages else [])
             ),
             # DB timestamps are UTC; SQLite returns func.now() without tzinfo.
             "created_at": (
@@ -614,7 +615,13 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         if task.created_at and task.created_at.replace(tzinfo=task.created_at.tzinfo or timezone.utc) < recent:
             continue
         notes.append({
-            "kind": "error", "text": "Не удалось подготовить материал — проверьте задание",
+            "kind": "error", "text": (
+                "SEO-завод остановился — проверьте планирование"
+                if task.assigned_agent == "seo_factory" else
+                "Не удалось завершить бизнес-анализ — откройте разбор"
+                if task.assigned_agent == "business_insights" else
+                "Не удалось подготовить материал — проверьте задание"
+            ),
             "resource_kind": "task",
             "resource_title": task_title(task),
             "resource_status": "Ошибка",
@@ -875,6 +882,85 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         '</h2><p>Задания не пропадут: вернуться можно в любой момент.</p></div>'
         f'<a class="sg-mini-link" href="{base}/work">Все задания →</a></div>'
         + "".join(cards) + '</section>'
+    )
+
+
+def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
+    """Owner-facing report for exactly one factory task, no approval/publish actions.
+
+    SEO factory completion is not article generation or publication; those are
+    tracked by separate content_factory tasks and Publication records.
+    """
+    base = f"/studio/products/{product_id}"
+    state = task_state(task)
+    labels = {
+        "queued": "В очереди", "running": "Планирование выполняется",
+        "completed": "Планирование завершено", "failed": "Ошибка планирования",
+        "cancelled": "Планирование отменено", "waiting_approval": "Ожидает решения",
+    }
+    tones = {
+        "queued": "queued", "running": "running", "completed": "done",
+        "failed": "error", "cancelled": "error", "waiting_approval": "review",
+    }
+    stages = []
+    if report.get("semantic_ready"):
+        stages.append("Семантическое ядро подготовлено")
+    if report.get("plan_ready"):
+        stages.append("Контент-план сформирован")
+    queued = report.get("articles_queued")
+    if type(queued) is int and queued >= 0:
+        stages.append(f"Статей поставлено в очередь: {queued}")
+    deferred = report.get("articles_deferred")
+    if type(deferred) is int and deferred > 0:
+        stages.append(f"Отложено тем: {deferred}")
+    if report.get("landing_ready"):
+        total = report.get("landing_candidates_total")
+        stages.append(
+            f"Вариантов посадочных страниц: {total}"
+            if type(total) is int else
+            "Предложения посадочных страниц подготовлены"
+        )
+    phase = SEO_PHASE_NAMES.get(str(report.get("current_stage")), "")
+    if state == "completed":
+        introduction = (
+            "Планирование завершено. Это не означает, что статьи написаны "
+            "или опубликованы: их создание и публикация выполняются отдельно."
+        )
+    elif state == "failed":
+        introduction = (
+            "Планирование остановилось с ошибкой. Готовые этапы сохранены; "
+            "проверьте состояние и доступные действия в SEO-заводе."
+        )
+    elif state == "running":
+        introduction = "Идёт подготовка запросов и контент-плана."
+    elif state == "queued":
+        introduction = "SEO-завод ожидает начала планирования."
+    else:
+        introduction = "Подробности планирования находятся в SEO-заводе."
+    current = (
+        '<p class="sg-seo-task-stage"><b>Текущий этап:</b> '
+        + safe(phase) + '</p>'
+        if phase and state in {"running", "queued", "failed"} else ''
+    )
+    completed = (
+        '<section class="sg-work-results"><h3>Подтверждённые результаты</h3><ul>'
+        + ''.join(f'<li>{safe(value)}</li>' for value in stages)
+        + '</ul></section>'
+        if stages else
+        '<p class="sg-seo-task-muted">Подтверждённых результатов планирования пока нет.</p>'
+    )
+    return (
+        f'<section class="sg-surface sg-work-detail sg-seo-task-detail"'
+        f' data-sg-task="{task.id}" data-sg-state="{safe(state)}">'
+        f'<span class="sg-work-status sg-work-{safe(tones.get(state, "queued"))}">'
+        f'{safe(labels.get(state, "Проверить статус"))}</span>'
+        '<h2>SEO-завод: запросы и контент-план</h2>'
+        f'<p>{safe(introduction)}</p>'
+        + current + completed
+        + '<div class="sg-seo-task-actions">'
+        + f'<a class="btn primary" href="{base}/seo">Открыть SEO-завод</a>'
+        + f'<a class="sg-mini-link" href="{base}/work">← Все задания</a>'
+        + '</div></section>'
     )
 
 
