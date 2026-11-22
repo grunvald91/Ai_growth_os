@@ -32,6 +32,7 @@ const html=String.raw`<!doctype html>
 </div></section>
 <aside class="rail"><section data-sg-work-preview>
 <p data-sg-preview-hint>Выберите задание.</p>
+<span data-sg-preview-announcement role="status" aria-live="polite"></span>
 <div id="sgWorkPreviewDetail" data-sg-preview-detail hidden>
 <span data-sg-preview-kind></span><h3 data-sg-preview-title></h3>
 <span data-sg-preview-status></span><p data-sg-preview-summary></p>
@@ -77,6 +78,8 @@ try{
       assert.equal(await detail.isVisible(),true);
       assert.match(await detail.innerText(),/Планирование завершено/);
       assert.match(await detail.innerText(),/Поставлено статей в очередь: 3/);
+      assert.match(await page.locator("[data-sg-preview-announcement]").innerText(),
+        /Выбрано задание: SEO-завод: поисковые запросы\. Статус: Планирование завершено/);
       assert.equal(await page.locator("[data-sg-preview-link]").getAttribute("href"),
         "/studio/products/11111111-1111-4111-8111-111111111111/tasks/t1");
       if(width===1280)await page.screenshot({path:resolve("../studio-resource-widgets-tasks-desktop.png")});
