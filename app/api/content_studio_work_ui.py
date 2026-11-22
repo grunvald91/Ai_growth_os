@@ -225,7 +225,8 @@ CSS = r"""
   display:inline-flex;align-items:center;justify-content:center;
   min-height:44px;min-width:86px;padding:9px 10px;border:1px solid var(--s-line,#DDE5EE);
   border-radius:10px;background:var(--s-surface-2,#F4F7FB);
-  color:var(--s-text,#263D56);font:600 12px/1.3 inherit;cursor:pointer}
+  color:var(--s-text,#263D56);font-family:inherit;font-size:12px;
+  font-weight:600;line-height:1.3;cursor:pointer}
 .sg-work-board .sg-task-peek-action[aria-pressed="true"]{
   border-color:var(--s-accent,#2F5BEB);color:var(--s-accent,#2F5BEB)}
 .sg-work-board .sg-task-peek-action:focus-visible{
