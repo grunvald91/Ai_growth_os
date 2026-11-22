@@ -234,6 +234,9 @@ CSS = r"""
 .sg-work-preview{min-width:0;padding:16px 14px;
   border:1px solid var(--s-line,#DFE7F0);border-radius:15px;
   background:var(--s-surface,#fff)}
+.sg-work-preview-announcement{position:absolute;width:1px;height:1px;
+  margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);
+  white-space:nowrap;border:0}
 .sg-work-preview-hint{color:var(--s-text-muted,#587085);
   font-size:13px;line-height:1.65;margin:0}
 .sg-work-preview-detail{display:grid;gap:10px;min-width:0}
@@ -364,6 +367,8 @@ JS = r"""
    const detail=previewRail.querySelector('[data-sg-preview-detail]');
    if(hint)hint.hidden=false;
    if(detail)detail.hidden=true;
+   const announcement=previewRail.querySelector('[data-sg-preview-announcement]');
+   if(announcement)announcement.textContent='';
    workBoard?.querySelectorAll('[data-sg-task-peek]').forEach(b=>
      b.setAttribute('aria-pressed','false'));
  }
@@ -390,6 +395,12 @@ JS = r"""
    const detail=previewRail.querySelector('[data-sg-preview-detail]');
    if(hint)hint.hidden=true;
    if(detail)detail.hidden=false;
+   // The live status stays in the accessibility tree even while detail is
+   // hidden, so title and status changes are announced after the reveal.
+   const announcement=previewRail.querySelector('[data-sg-preview-announcement]');
+   if(announcement)announcement.textContent=
+     'Выбрано задание: '+values['[data-sg-preview-title]']+
+     '. Статус: '+values['[data-sg-preview-status]'];
    selectedPreviewHref=a.getAttribute('href');
    workBoard?.querySelectorAll('[data-sg-task-peek]').forEach(b=>{
      const target=previewAnchor(b.closest('.sg-resource-widget'));
