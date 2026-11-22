@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from uuid import UUID
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse, FileResponse, StreamingResponse
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
@@ -2785,6 +2785,7 @@ def studio_creative_images_zip(product_id: UUID, task_id: UUID,
 
 @router.post("/studio/products/{product_id}/tasks/{task_id}/retry")
 def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
+                      confirm_retry: str = Form(default=""),
                       db: Session = Depends(get_db)):
     _owner_product(db, product_id)
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
@@ -2807,6 +2808,11 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
         if task.title.startswith(SEO_TASK_PREFIX) or body.get("seo_brief") is not None:
             if getattr(request.state, "studio_sso_role", None) not in (None, "owner", "co_owner"):
                 raise HTTPException(403, "Повторять SEO-статьи может только владелец компании")
+            # A manual retry can requeue paid AI work. Require an explicit
+            # owner acknowledgement even for SEO requests; background SEO
+            # auto-publication does not use this endpoint.
+            if confirm_retry != "yes":
+                raise HTTPException(409, "Подтвердите возможные платные вызовы перед повтором")
             from app.seo.article_retry import retry_failed_article
             try:
                 retry_failed_article(
@@ -2831,6 +2837,10 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
             Artifact.task_id == task_id, Artifact.kind.in_(MATERIAL_KINDS)))
         if partial:
             raise HTTPException(409, "У задания уже есть материалы. Проверьте их перед новым запуском.")
+    # A requeue is not free: only completed creative checkpoints are reused,
+    # and an interrupted provider call may still have incurred charges.
+    if confirm_retry != "yes":
+        raise HTTPException(409, "Подтвердите возможные платные вызовы перед повтором")
     # Creative stages and frames are idempotent checkpoints. The worker itself
     # validates the stored request before invoking any paid provider calls.
     task.status = TaskStatus.QUEUED
