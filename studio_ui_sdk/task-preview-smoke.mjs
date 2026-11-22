@@ -40,6 +40,20 @@ const html=String.raw`<!doctype html>
 </div></section></aside>
 <script src="/studio/assets/work-ui.js"></script>
 </body></html>`;
+const seoId="22222222-2222-4222-8222-222222222222";
+let currentPhase="Сбор поисковых подсказок";
+const seoHtml=()=>`<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<details data-sg-notifications data-feed-url="/studio/products/11111111-1111-4111-8111-111111111111/activity.json">
+<summary>Уведомления <span data-sg-count hidden>0</span></summary>
+<div data-sg-notify-list></div></details>
+<main style="min-height:1800px">
+<section data-sg-task="${seoId}" data-sg-state="running"
+  data-sg-stage-mode="seo" data-sg-stage="${currentPhase}">
+<h1>SEO-завод</h1><p role="status" aria-live="polite">
+Текущий этап: <span data-sg-seo-stage-text>${currentPhase}</span></p>
+</section></main>
+<script src="/studio/assets/work-ui.js"></script></body></html>`;
 const server=createServer((req,res)=>{
   const answer=(type,body)=>{
     res.writeHead(200,{"Content-Type":type,"Cache-Control":"no-store"});
@@ -47,7 +61,17 @@ const server=createServer((req,res)=>{
   };
   if(req.url==="/studio/assets/work-ui.js")return answer("application/javascript",js);
   if(req.url==="/studio/assets/work-ui.css")return answer("text/css",css);
-  if(req.url.endsWith("/activity.json"))return answer("application/json",'{"jobs":[],"notices":[]}');
+  if(req.url.startsWith("/test/advance")){
+    currentPhase="Составление контент-плана";
+    return answer("text/plain","ok");
+  }
+  if(req.url.includes("/activity.json")){
+    return answer("application/json",JSON.stringify({
+      jobs:[{id:seoId,state:"running",current_stage:currentPhase}],
+      notices:[]
+    }));
+  }
+  if(req.url.includes("/tasks/"+seoId))return answer("text/html",seoHtml());
   if(req.url.includes("/tasks/t1"))return answer("text/html","<h1>Задание открыто</h1>");
   return answer("text/html",html);
 });
@@ -91,8 +115,30 @@ try{
     assert.deepEqual(errors,[],"no page errors at width "+width);
     await page.close();
   }
+  // The running SEO phase updates in place; the document and scroll survive.
+  const stagePage=await browser.newPage({viewport:{width:390,height:820}});
+  const stageErrors=[];
+  stagePage.on("pageerror",err=>stageErrors.push(err.message));
+  const origin="http://127.0.0.1:"+server.address().port;
+  await stagePage.goto(origin+"/studio/products/11111111-1111-4111-8111-111111111111/tasks/"+seoId);
+  await stagePage.locator(".sg-notify-empty").waitFor();
+  await stagePage.evaluate(()=>{
+    window.__taskDocumentMarker="kept";
+    window.scrollTo(0,280);
+  });
+  await stagePage.request.get(origin+"/test/advance");
+  await stagePage.evaluate(()=>document.dispatchEvent(new Event("visibilitychange")));
+  await stagePage.waitForFunction(()=>
+    document.querySelector("[data-sg-seo-stage-text]")?.textContent===
+    "Составление контент-плана");
+  assert.equal(await stagePage.evaluate(()=>window.__taskDocumentMarker),"kept",
+    "SEO phase must not reload the document");
+  assert.equal(await stagePage.locator("[data-sg-task]").getAttribute("data-sg-stage"),
+    "Составление контент-плана");
+  assert.deepEqual(stageErrors,[],"SEO phase has no page errors");
+  await stagePage.close();
 }finally{
   await browser.close();
   await new Promise(ok=>server.close(ok));
 }
-console.log("Tasks contextual preview: 360/390/768/1024/1081/1280/1440px OK");
+console.log("Tasks preview and in-place SEO phase: 360/390/768/1024/1081/1280/1440px OK");
