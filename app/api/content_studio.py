@@ -2573,9 +2573,17 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     from app.insights.worker import AGENT as INSIGHTS_AGENT
     if task.assigned_agent == INSIGHTS_AGENT:
         from app.insights.page import review_html
+        # Business analysis can finish while its result page is open. Expose
+        # the real task status to the shared activity poll so the finished
+        # review appears without a user-initiated page refresh.
+        task_state_value = getattr(task.status, "value", str(task.status))
+        review_body = (
+            f'<div data-sg-task="{task.id}" data-sg-state="{esc(task_state_value)}">'
+            + review_html(db, product.id, task) + '</div>'
+        )
         response = HTMLResponse(studio_page_shell(
             product, active="work", title="Разбор данных бизнеса",
-            subtitle="Решения команды и цифры, на которые они опираются.", body=review_html(db, product.id, task)))
+            subtitle="Решения команды и цифры, на которые они опираются.", body=review_body))
         response.headers["Cache-Control"] = "private, no-store"
         return response
     runs = list(db.scalars(select(AgentRun).where(
