@@ -866,7 +866,7 @@ def activity_overview(product_id: UUID, items: list[dict]) -> str:
         primary = (
             f'<a class="sg-work-item sg-work-{item["tone"]}" href="{work_url(product_id, item)}">'
             f'<div class="sg-work-item-main"><b>{safe(item["title"])}</b>'
-            f'<p>{safe(ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"])}</p></div>'
+            f'<p>{safe(item.get("display_summary") or item.get("current_stage") or (ANIMATOR_PHASES.get(str(item.get("animator_stage")), item["description"]) if item.get("agent") == "whiteboard_renderer" else item["description"]))}</p></div>'
             f'<span class="sg-work-status sg-work-{item["tone"]}">{safe(item["label"])}</span>'
             '<span class="sg-work-arrow" aria-hidden="true">→</span></a>'
         )
