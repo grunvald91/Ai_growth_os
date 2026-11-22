@@ -1847,3 +1847,19 @@ body[data-growth-design="v4"] :is(.sg-work-board,.sg-work-detail) .sg-work-statu
   content:"";display:inline-block;flex:none;width:7px;height:7px;
   border-radius:50%;margin-right:6px;background:var(--sg-task-status-dot,var(--s-muted));
 }
+
+/* Consistent floating notifications in both themes; no light-only actions
+   inside a dark popover. Shared header controls stay fully clickable. */
+body[data-growth-design="v4"] .top-actions .sg-notify-popover :is(.sg-notify-all,.sg-notify-read){
+  color:var(--s-accent-press);
+}
+body[data-growth-design="v4"] .top-actions .sg-notify-popover .sg-notify-all{
+  border-top-color:var(--s-line-2);
+}
+body[data-growth-design="v4"] .top-actions .sg-notify-popover .sg-notify-read{
+  background:var(--s-accent-soft);border:1px solid var(--s-line-2);
+  min-height:44px;
+}
+body[data-growth-design="v4"] .top-actions .sg-notify-popover .sg-notify-entry:hover{
+  background:var(--s-surface-3);
+}
