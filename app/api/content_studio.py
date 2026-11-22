@@ -29,8 +29,9 @@ from app.api.studio_servgo_org_js import JS as STUDIO_SERVGO_ORG_JS
 from app.api.content_studio_brand import SERVGO_FAVICON_SVG, servgo_brand_html
 from app.api.content_studio_article import render_article
 from app.content.render import asset_path
-from app.api.content_studio_activity import (work_items, work_page, notice_items, notice_html,
-    activity_html, activity_overview, task_detail_html, seo_factory_task_html, RESULT_KINDS)
+from app.api.content_studio_activity import (work_items, work_page, _work_items_for_tasks,
+    WORK_AGENTS, notice_items, notice_html, activity_html, activity_overview,
+    task_detail_html, seo_factory_task_html, RESULT_KINDS)
 from app.api.content_studio_ui import (
     create_content_html, review_html, channels_html, speed_html, REVIEW_KINDS_BY_FILTER,
     review_history_html, seo_progress_html,
@@ -2501,16 +2502,28 @@ def studio_work_page(product_id: UUID, tab: str = "all", q: str = "",
 
 
 @router.get("/studio/products/{product_id}/activity.json")
-def studio_activity_json(product_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
+def studio_activity_json(product_id: UUID, task_id: UUID | None = None,
+                         db: Session = Depends(get_db), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     jobs = work_items(db, product.id, limit=45)
+    active_count = sum(1 for job in jobs if job["state"] in {"queued", "running"})
+    # Keep the open detail fresh even if it is older than the capped activity
+    # feed or more than 22 other jobs are concurrently running. Strictly
+    # enforce the same visible-agent and tenant allowlists as the work page.
+    if task_id is not None and all(job["id"] != str(task_id) for job in jobs):
+        selected = db.scalar(select(Task).where(
+            Task.id == task_id, Task.product_id == product.id,
+            Task.assigned_agent.in_(WORK_AGENTS),
+        ))
+        if selected is not None:
+            jobs.extend(_work_items_for_tasks(db, product.id, [selected]))
     read = read_ids(settings, product.id)
     notes = [note for note in notice_items(db, product.id, limit=40) if note["id"] not in read][:10]
     response = JSONResponse({
         "jobs": jobs,
         "notices": notes,
         "attention_count": len(notes),
-        "active_count": sum(1 for job in jobs if job["state"] in {"queued", "running"}),
+        "active_count": active_count,
     })
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -2560,9 +2573,17 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
     from app.insights.worker import AGENT as INSIGHTS_AGENT
     if task.assigned_agent == INSIGHTS_AGENT:
         from app.insights.page import review_html
+        # Business analysis can finish while its result page is open. Expose
+        # the real task status to the shared activity poll so the finished
+        # review appears without a user-initiated page refresh.
+        task_state_value = getattr(task.status, "value", str(task.status))
+        review_body = (
+            f'<div data-sg-task="{task.id}" data-sg-state="{esc(task_state_value)}">'
+            + review_html(db, product.id, task) + '</div>'
+        )
         response = HTMLResponse(studio_page_shell(
             product, active="work", title="Разбор данных бизнеса",
-            subtitle="Решения команды и цифры, на которые они опираются.", body=review_html(db, product.id, task)))
+            subtitle="Решения команды и цифры, на которые они опираются.", body=review_body))
         response.headers["Cache-Control"] = "private, no-store"
         return response
     runs = list(db.scalars(select(AgentRun).where(

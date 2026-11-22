@@ -480,6 +480,8 @@ def render_v4(page, request, pid, switch):
             '<section class="sg-work-preview" data-sg-work-preview aria-label="Быстрый просмотр задания">'
             '<p class="sg-work-preview-hint" data-sg-preview-hint>'
             'Нажмите «Просмотр» в карточке, чтобы увидеть её подробности здесь.</p>'
+            '<span class="sg-work-preview-announcement" data-sg-preview-announcement '
+            'role="status" aria-live="polite" aria-atomic="true"></span>'
             '<div class="sg-work-preview-detail" id="sgWorkPreviewDetail" data-sg-preview-detail hidden>'
             '<span class="sg-work-preview-kind" data-sg-preview-kind></span>'
             '<h3 data-sg-preview-title></h3>'

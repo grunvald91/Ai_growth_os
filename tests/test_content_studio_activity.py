@@ -258,6 +258,8 @@ def test_business_review_task_opens_its_own_page_not_an_empty_material_page(owne
     page = client.get(f"/studio/products/{company.id}/tasks/{task.id}")
     assert page.status_code == 200
     assert "Вечер пустой" in page.text and "готовый материал пока не найден" not in page.text
+    assert f'data-sg-task="{task.id}"' in page.text
+    assert 'data-sg-state="completed"' in page.text
     assert client.get(f"/studio/products/{other.id}/tasks/{task.id}").status_code == 404
 
 
@@ -863,3 +865,188 @@ def test_seo_factory_failure_reason_is_human_readable_and_not_raw_provider_text(
     assert "Сервис не ответил вовремя" in page.text
     assert "secret-file-path" not in page.text
     assert "PrivateBackendError" not in page.text
+
+
+def test_tasks_search_finds_seo_focus_and_business_review_but_not_other_tenants(owner_studio):
+    """Cross-module search should use user-facing saved context, tenant-scoped."""
+    from app.api.content_studio_activity import work_page
+    client, db, company, other = owner_studio
+    seo = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы, план и статьи", status=TaskStatus.COMPLETED)
+    business = Task(product_id=company.id, assigned_agent="business_insights",
+                    title="Маркетинг: разбор данных бизнеса", status=TaskStatus.COMPLETED)
+    foreign = Task(product_id=other.id, assigned_agent="seo_factory",
+                   title="SEO-завод: запросы, план и статьи", status=TaskStatus.COMPLETED)
+    db.add_all([seo, business, foreign])
+    db.flush()
+    db.add_all([
+        Artifact(product_id=company.id, task_id=seo.id, kind="seo_factory_request",
+                 title="Запрос", status="draft",
+                 content=json.dumps({"focus": "доставка керамических чашек"}, ensure_ascii=False)),
+        Artifact(product_id=company.id, task_id=business.id, kind="business_review",
+                 title="Разбор", status="draft",
+                 content=json.dumps({"summary": "Вечерняя загрузка зала"}, ensure_ascii=False)),
+        Artifact(product_id=other.id, task_id=foreign.id, kind="seo_factory_request",
+                 title="Запрос", status="draft",
+                 content=json.dumps({"focus": "скрытый чужой заказ"}, ensure_ascii=False)),
+    ])
+    db.commit()
+    seo_results = work_page(db, company.id, query="керамических", kind="seo")
+    assert seo_results["total"] == 1
+    assert seo_results["items"][0]["id"] == str(seo.id)
+    business_results = work_page(db, company.id, query="Вечерняя", kind="business")
+    assert business_results["total"] == 1
+    assert business_results["items"][0]["id"] == str(business.id)
+    assert work_page(db, company.id, query="чужой")["total"] == 0
+    page = client.get(f"/studio/products/{company.id}/work",
+                      params={"q": "керамических", "kind": "seo"})
+    assert page.status_code == 200
+    assert f'/tasks/{seo.id}' in page.text
+    assert f'/tasks/{foreign.id}' not in page.text
+
+
+def test_running_seo_detail_marks_same_current_stage_as_work_feed(owner_studio):
+    from app.api.content_studio_activity import work_page
+    from app.api.content_studio_work_ui import JS
+    client, db, company, _ = owner_studio
+    seo = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.RUNNING)
+    db.add(seo)
+    db.flush()
+    stage = Artifact(product_id=company.id, task_id=seo.id,
+                     kind="seo_factory_stage", status="draft",
+                     title="Этап", content=json.dumps({
+                         "stage": "collect_suggestions",
+                         "recorded_at": "2026-11-22T05:00:00+00:00",
+                     }))
+    db.add(stage)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    task_page = client.get(base + f"/tasks/{seo.id}")
+    assert task_page.status_code == 200
+    assert 'data-sg-stage-mode="seo"' in task_page.text
+    assert 'data-sg-stage="Сбор поисковых подсказок"' in task_page.text
+    assert work_page(db, company.id, kind="seo")["items"][0]["current_stage"] == (
+        "Сбор поисковых подсказок"
+    )
+    stage.content = json.dumps({
+        "stage": "build_plan",
+        "recorded_at": "2026-11-22T05:05:00+00:00",
+    })
+    db.commit()
+    assert work_page(db, company.id, kind="seo")["items"][0]["current_stage"] == (
+        "Составление контент-плана"
+    )
+    assert "detail.dataset.sgStageMode==='seo'" in JS
+    assert "updatedStage!==detail.dataset.sgStage" in JS
+    assert "stageNode.textContent=updatedStage" in JS
+    assert "const stateChanged=currentJob.state!==detail.dataset.sgState" in JS
+    assert 'data-sg-seo-stage-text' in task_page.text
+    assert 'role="status" aria-live="polite"' in task_page.text
+
+
+def test_nonrunning_seo_page_does_not_request_phase_refresh(owner_studio):
+    """A finished factory must not reload every poll due to a stale stage label."""
+    client, db, company, _ = owner_studio
+    seo = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: запросы", status=TaskStatus.COMPLETED)
+    db.add(seo)
+    db.commit()
+    response = client.get(f"/studio/products/{company.id}/tasks/{seo.id}")
+    assert response.status_code == 200
+    assert 'data-sg-stage-mode="seo"' not in response.text
+
+
+def test_activity_feed_tracks_old_open_job_outside_recent_window(owner_studio):
+    """The exact active detail must update even with many newer active jobs."""
+    from datetime import datetime, timedelta, timezone
+    from app.api.content_studio_work_ui import JS
+    client, db, company, other = owner_studio
+    old = Task(product_id=company.id, assigned_agent="seo_factory",
+               title="SEO-завод: старая активная задача",
+               status=TaskStatus.RUNNING,
+               created_at=datetime.now(timezone.utc)-timedelta(days=120))
+    hidden_foreign = Task(product_id=other.id, assigned_agent="seo_factory",
+                          title="Другое планирование", status=TaskStatus.RUNNING)
+    db.add_all([old, hidden_foreign])
+    for i in range(50):
+        db.add(Task(product_id=company.id, assigned_agent="content_factory",
+                    title=f"CONTENT: Новый запуск {i}", status=TaskStatus.RUNNING))
+    db.commit()
+    url = f"/studio/products/{company.id}/activity.json"
+    plain = client.get(url)
+    assert plain.status_code == 200
+    plain_data = plain.json()
+    assert str(old.id) not in {job["id"] for job in plain_data["jobs"]}
+    tracked = client.get(url, params={"task_id": str(old.id)})
+    assert tracked.status_code == 200
+    tracked_data = tracked.json()
+    assert sum(job["id"] == str(old.id) for job in tracked_data["jobs"]) == 1
+    assert tracked_data["active_count"] == plain_data["active_count"]
+    outsider = client.get(url, params={"task_id": str(hidden_foreign.id)})
+    assert outsider.status_code == 200
+    assert str(hidden_foreign.id) not in {job["id"] for job in outsider.json()["jobs"]}
+    assert "feedUrl.searchParams.set('task_id',detail.dataset.sgTask)" in JS
+
+
+def test_activity_feed_does_not_duplicate_fresh_open_job(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="seo_factory",
+                title="SEO-завод: актуальная задача", status=TaskStatus.RUNNING)
+    db.add(task)
+    db.commit()
+    data = client.get(f"/studio/products/{company.id}/activity.json",
+                      params={"task_id": str(task.id)}).json()
+    assert sum(row["id"] == str(task.id) for row in data["jobs"]) == 1
+
+
+def test_tasks_unicode_casefold_cyrillic_search(owner_studio):
+    """SQLite native lower/ILIKE is ASCII-only; Russian case must be normalized."""
+    from app.api.content_studio_activity import work_page
+    from sqlalchemy import func
+    client, db, company, other = owner_studio
+    assert db.scalar(select(func.sg_casefold("ВЕЧЕРНИЕ ЁЛКИ"))) == "вечерние ёлки"
+    business = Task(product_id=company.id, assigned_agent="business_insights",
+                    title="Бизнес-анализ", status=TaskStatus.COMPLETED)
+    own = Task(product_id=company.id, assigned_agent="content_factory",
+               title="CONTENT: КЕРАМИЧЕСКИЕ ИЗДЕЛИЯ", status=TaskStatus.COMPLETED)
+    foreign = Task(product_id=other.id, assigned_agent="business_insights",
+                   title="Бизнес-анализ", status=TaskStatus.COMPLETED)
+    db.add_all([business, own, foreign])
+    db.flush()
+    db.add_all([
+        Artifact(product_id=company.id, task_id=business.id,
+                 title="Разбор", kind="business_review", status="draft",
+                 content=json.dumps({"summary": "ВЕЧЕРНИЕ ПРОДАЖИ"}, ensure_ascii=False)),
+        Artifact(product_id=other.id, task_id=foreign.id,
+                 title="Разбор", kind="business_review", status="draft",
+                 content=json.dumps({"summary": "ЧУЖИЕ ДАННЫЕ"}, ensure_ascii=False)),
+    ])
+    db.commit()
+    assert work_page(db, company.id, query="вечерние")["items"][0]["id"] == str(business.id)
+    assert work_page(db, company.id, query="керамические")["items"][0]["id"] == str(own.id)
+    assert work_page(db, company.id, query="чужие")["total"] == 0
+    response = client.get(f"/studio/products/{company.id}/work",
+                          params={"q": "вечерние", "kind": "business"})
+    assert response.status_code == 200
+    assert f'/tasks/{business.id}' in response.text
+
+
+def test_running_business_analysis_detail_tracks_completion(owner_studio):
+    """Results page can notice that a pending business review was completed."""
+    client, db, company, _ = owner_studio
+    job = Task(product_id=company.id, assigned_agent="business_insights",
+               title="Разбор данных бизнеса", status=TaskStatus.RUNNING)
+    db.add(job)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    page = client.get(f"{base}/tasks/{job.id}")
+    assert page.status_code == 200
+    assert f'data-sg-task="{job.id}"' in page.text
+    assert 'data-sg-state="running"' in page.text
+    job.status = TaskStatus.COMPLETED
+    db.commit()
+    feed = client.get(base + "/activity.json", params={"task_id": str(job.id)})
+    assert feed.status_code == 200
+    assert any(x["id"] == str(job.id) and x["state"] == "completed"
+               for x in feed.json()["jobs"])

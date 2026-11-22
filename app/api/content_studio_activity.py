@@ -443,17 +443,33 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
                 base.append(or_(req_mode, Task.title.ilike("ARTICLE:%"),
                                 Task.title.like("SEO-ARTICLE:%")))
     if q:
-        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        # SQLite lower()/ILIKE is ASCII-only; use our deterministic
+        # sg_casefold() on SQLite so mixed-case Russian searches work.
+        # Other databases retain their native case-insensitive ILIKE.
+        sqlite_search = db.get_bind().dialect.name == "sqlite"
+        normalized = q.casefold() if sqlite_search else q
+        escaped = normalized.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
+
+        def text_matches(column):
+            if sqlite_search:
+                return func.sg_casefold(column).like(pattern, escape="\\")
+            return column.ilike(pattern, escape="\\")
+
         request_match = exists(select(Artifact.id).where(
             Artifact.product_id == product_id,
             Artifact.task_id == Task.id,
-            Artifact.kind.in_(("content_request", "creative_request", "edit_request")),
-            Artifact.content.ilike(pattern, escape="\\"),
+            # Planning and business-review tasks carry user topics in their
+            # own artifacts, not in content/creative/edit requests.
+            Artifact.kind.in_((
+                "content_request", "creative_request", "edit_request",
+                "seo_factory_request", "business_review",
+            )),
+            text_matches(Artifact.content),
         ))
         base.append(or_(
-            Task.title.ilike(pattern, escape="\\"),
-            Task.description.ilike(pattern, escape="\\"),
+            text_matches(Task.title),
+            text_matches(Task.description),
             request_match,
         ))
     # The latest draft editorial plan is a real user decision even when the
@@ -928,7 +944,19 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
             if type(total) is int else
             "Предложения посадочных страниц подготовлены"
         )
-    phase = SEO_PHASE_NAMES.get(str(report.get("current_stage")), "")
+    raw_phase = report.get("current_stage")
+    phase = SEO_PHASE_NAMES.get(str(raw_phase), "") if raw_phase else ""
+    # Work-page polling returns a friendly current_stage for running SEO tasks.
+    # Keep the same value in the detail so a changed stage is detected without
+    # inventing progress percentages or extra paid calls.
+    stage_marker = (
+        SEO_PHASE_NAMES.get(str(raw_phase), "Обработка SEO-запросов")
+        if raw_phase else "Подготовка поисковых запросов и плана"
+    ) if state == "running" else ""
+    stage_attrs = (
+        f' data-sg-stage-mode="seo" data-sg-stage="{safe(stage_marker)}"'
+        if state == "running" else ""
+    )
     if state == "completed":
         introduction = (
             "Планирование завершено. Это не означает, что статьи написаны "
@@ -945,11 +973,18 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
         introduction = "SEO-завод ожидает начала планирования."
     else:
         introduction = "Подробности планирования находятся в SEO-заводе."
-    current = (
-        '<p class="sg-seo-task-stage"><b>Текущий этап:</b> '
-        + safe(phase) + '</p>'
-        if phase and state in {"running", "queued", "failed"} else ''
-    )
+    if state == "running":
+        current = (
+            '<p class="sg-seo-task-stage" role="status" aria-live="polite">'
+            '<b>Текущий этап:</b> '
+            f'<span data-sg-seo-stage-text>{safe(stage_marker)}</span></p>'
+        )
+    else:
+        current = (
+            '<p class="sg-seo-task-stage"><b>Последний этап:</b> '
+            + safe(phase) + '</p>'
+            if phase and state in {"queued", "failed"} else ''
+        )
     failure_causes = {
         "upstream_timeout": "Сервис не ответил вовремя",
         "network_failure": "Ошибка соединения с сервисом",
@@ -975,7 +1010,7 @@ def seo_factory_task_html(product_id: UUID, task: Task, report: dict) -> str:
     )
     return (
         f'<section class="sg-surface sg-work-detail sg-seo-task-detail"'
-        f' data-sg-task="{task.id}" data-sg-state="{safe(state)}">'
+        f' data-sg-task="{task.id}" data-sg-state="{safe(state)}"{stage_attrs}>'
         f'<span class="sg-work-status sg-work-{safe(tones.get(state, "queued"))}">'
         f'{safe(labels.get(state, "Проверить статус"))}</span>'
         '<h2>SEO-завод: запросы и контент-план</h2>'

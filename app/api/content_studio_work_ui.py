@@ -234,6 +234,9 @@ CSS = r"""
 .sg-work-preview{min-width:0;padding:16px 14px;
   border:1px solid var(--s-line,#DFE7F0);border-radius:15px;
   background:var(--s-surface,#fff)}
+.sg-work-preview-announcement{position:absolute;width:1px;height:1px;
+  margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);
+  white-space:nowrap;border:0}
 .sg-work-preview-hint{color:var(--s-text-muted,#587085);
   font-size:13px;line-height:1.65;margin:0}
 .sg-work-preview-detail{display:grid;gap:10px;min-width:0}
@@ -364,6 +367,8 @@ JS = r"""
    const detail=previewRail.querySelector('[data-sg-preview-detail]');
    if(hint)hint.hidden=false;
    if(detail)detail.hidden=true;
+   const announcement=previewRail.querySelector('[data-sg-preview-announcement]');
+   if(announcement)announcement.textContent='';
    workBoard?.querySelectorAll('[data-sg-task-peek]').forEach(b=>
      b.setAttribute('aria-pressed','false'));
  }
@@ -390,6 +395,12 @@ JS = r"""
    const detail=previewRail.querySelector('[data-sg-preview-detail]');
    if(hint)hint.hidden=true;
    if(detail)detail.hidden=false;
+   // The live status stays in the accessibility tree even while detail is
+   // hidden, so title and status changes are announced after the reveal.
+   const announcement=previewRail.querySelector('[data-sg-preview-announcement]');
+   if(announcement)announcement.textContent=
+     'Выбрано задание: '+values['[data-sg-preview-title]']+
+     '. Статус: '+values['[data-sg-preview-status]'];
    selectedPreviewHref=a.getAttribute('href');
    workBoard?.querySelectorAll('[data-sg-task-peek]').forEach(b=>{
      const target=previewAnchor(b.closest('.sg-resource-widget'));
@@ -510,7 +521,12 @@ JS = r"""
      if(workBoard){
        try{await refreshBoard();}catch(_){/* list refresh failure must not block notifications */}
      }
-     const res=await fetch(endpoint,{cache:'no-store',credentials:'same-origin',
+     const feedUrl=new URL(endpoint,window.location.origin);
+     if(detail?.dataset.sgTask &&
+        /^[0-9a-f-]{36}$/i.test(detail.dataset.sgTask)){
+       feedUrl.searchParams.set('task_id',detail.dataset.sgTask);
+     }
+     const res=await fetch(feedUrl,{cache:'no-store',credentials:'same-origin',
        headers:{'Accept':'application/json'}});
      if(!res.ok||!(res.headers.get('content-type')||'').includes('application/json'))return;
      const data=await res.json();
@@ -530,11 +546,26 @@ JS = r"""
      }
      const jobs=Array.isArray(data.jobs)?data.jobs:[];
      if(detail){
-       const changed=jobs.find(j=>j.id===detail.dataset.sgTask &&
-           (j.state!==detail.dataset.sgState ||
-            (detail.hasAttribute('data-sg-stage') &&
-             j.stage_signature!==detail.dataset.sgStage)));
-       if(changed&&document.visibilityState==='visible')location.reload();
+       const currentJob=jobs.find(j=>j.id===detail.dataset.sgTask);
+       if(currentJob){
+         const seoPhase=detail.dataset.sgStageMode==='seo';
+         if(seoPhase && currentJob.state===detail.dataset.sgState){
+           const updatedStage=currentJob.current_stage||
+             'Подготовка поисковых запросов и плана';
+           if(updatedStage!==detail.dataset.sgStage){
+             const stageNode=detail.querySelector('[data-sg-seo-stage-text]');
+             if(stageNode){
+               stageNode.textContent=updatedStage;
+               detail.dataset.sgStage=updatedStage;
+             }
+           }
+         }
+         const stateChanged=currentJob.state!==detail.dataset.sgState;
+         const otherStageChanged=!seoPhase && detail.hasAttribute('data-sg-stage') &&
+           currentJob.stage_signature!==detail.dataset.sgStage;
+         if((stateChanged||otherStageChanged) &&
+            document.visibilityState==='visible')location.reload();
+       }
      }
      if(showWork&&!workBoard){
        const statuses=jobs.map(j=>j.id+':'+j.state+':'+Boolean(j.needs_decision)+':'+j.result_count+':'+(j.artifacts||[]).map(a=>a.id+':'+a.status).join(',')).join('|');
