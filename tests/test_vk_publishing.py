@@ -1030,7 +1030,7 @@ def test_vk_page_explains_separate_photo_access_and_keeps_user_key_private(db, t
     assert 'Настройки ВКонтакте' in markup
     assert f'/studio/products/{product.id}/vk/photo-key' not in markup
     assert f'/studio/products/{product.id}/vk/check-photo' not in markup
-    assert 'name="access_token" type="password"' not in markup
+    assert 'Пользовательский ключ VK API для фото' not in markup
     assert "community-token" not in markup
     response = vk_photo_settings_page(product.id, request, db=db, settings=settings)
     assert response.headers["cache-control"] == "private, no-store"
