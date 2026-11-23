@@ -69,8 +69,10 @@ def export_vk_png(data: bytes, *, ratio: str = "4:5") -> bytes:
         buffer = io.BytesIO()
         image.save(buffer, format="PNG", optimize=True)
     output = buffer.getvalue()
-    if not 0 < len(output) <= LIMIT:
-        raise ValueError("VK image exceeds maximum file size")
+    # VK wall photo uploader rejects PNGs above 10 MiB; fail before owner
+    # approval, rather than queue an image that cannot be published.
+    if not 0 < len(output) <= min(LIMIT, 10 * 1024 * 1024):
+        raise ValueError("VK image exceeds the upload limit of 10 MiB")
     return output
 
 
