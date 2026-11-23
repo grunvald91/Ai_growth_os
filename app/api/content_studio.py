@@ -2700,6 +2700,51 @@ def studio_task_page(product_id: UUID, task_id: UUID, db: Session = Depends(get_
         return RedirectResponse(f"/studio/products/{product_id}/whiteboard/{task_id}", status_code=303)
     if task.assigned_agent == "company_intake":
         return RedirectResponse(f"/studio/products/{product_id}/profile", status_code=303)
+    if task.assigned_agent == "content_image_regen":
+        source = db.scalar(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.task_id == task.id,
+            Artifact.kind == "vk_image_redraw_request",
+        ))
+        data = parse_json(source) if source is not None else {}
+        state = getattr(task.status, "value", str(task.status))
+        names = {
+            "queued": "Ожидает генерации",
+            "running": "Создаём и проверяем картинку",
+            "completed": "Новая картинка готова",
+            "failed": "Переделать картинку не удалось",
+            "cancelled": "Переделка отменена",
+        }
+        post_link = ""
+        try:
+            source_post_id = UUID(str(data["post_id"]))
+            original = db.scalar(select(Artifact).where(
+                Artifact.id == source_post_id, Artifact.product_id == product_id,
+                Artifact.kind == "channel_text",
+            ))
+            if original is not None:
+                post_link = (
+                    f'<a class="btn primary" href="/studio/products/{product_id}/materials/{original.id}">'
+                    'Открыть пост и картинку</a>'
+                )
+        except (KeyError, ValueError, TypeError):
+            pass
+        body = (
+            f'<section class="sg-surface" data-sg-task="{task.id}" data-sg-state="{esc(state)}">'
+            f'<h2>{esc(names.get(state, state))}</h2>'
+            '<p>Текст поста остаётся без изменений. '
+            'Каждая новая картинка проходит отдельную проверку критиком.</p>'
+            + (f'<p class="sg-warning">Если генерация не завершилась, откройте пост: '
+               'старая картинка сохранена.</p>' if state == "failed" else '')
+            + post_link + '</section>'
+        )
+        response = HTMLResponse(studio_page_shell(
+            product, active="work", title="Переделка картинки ВКонтакте",
+            subtitle="Генерация, проверка и сохранение без изменений текста.",
+            body=body,
+        ))
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
     if task.assigned_agent == "seo_factory":
         # One job's own page; never mistake a completed plan for published SEO articles.
         from app.api.seo_run_view import SEO_KINDS, seo_run_summary
