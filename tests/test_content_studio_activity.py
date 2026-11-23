@@ -1088,11 +1088,12 @@ def test_retry_disclosure_has_accessible_label_and_touch_targets():
 @pytest.mark.parametrize("error,expected", [
     ("quick_post_failed:ReadTimeout:private-token", "Превышено время ожидания ответа сервиса."),
     ("creative_failed:ConnectError", "Не удалось установить соединение с сервисом."),
-    ("upstream_failed:provider_request_failed:post_writer_editor", "Сервис обработки вернул ошибку."),
+    ("upstream_failed:provider_request_failed:post_writer_editor", "Не удалось выполнить запрос к сервису обработки."),
     ("assembly_failed:invalid_article_output:marketing_editor", "Результат генерации не прошёл проверку формата или содержимого."),
     ("local_render_failed:RuntimeError", "Не удалось собрать видеофайл."),
     ("One or more image frames could not be generated", "Не удалось создать одно или несколько изображений."),
     ("creative_failed:SecretCustomException:https://private.example/api", "Точная причина ошибки не определена по сохранённому журналу."),
+    ("creative_failed:NotConnectionError:secret", "Точная причина ошибки не определена по сохранённому журналу."),
 ])
 def test_owner_failure_reason_is_conservative_and_never_echoes_provider_error(error, expected):
     from app.api.content_studio_activity import owner_failure_reason
