@@ -44,7 +44,9 @@ class JobRequest(Contract):
     visual_repair_from: UUID | None = None
     repair_source_digest: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     repair_manifest_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
-    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS)
+    # Historical usage is audit-only for a repair. The source may include up to
+    # TOP_UP_TOTAL owner-approved extra calls beyond the initial MAX_API_CALLS.
+    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS + 25)
     # New repairs receive their own separately approved budget; the original calls are audit-only.
     repair_regenerate_images: bool = False
 
