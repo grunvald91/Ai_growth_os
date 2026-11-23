@@ -1252,7 +1252,7 @@ def test_tasks_server_timing_headers_are_safe_and_scoped(owner_studio):
         assert response.headers["cache-control"] == "private, no-store"
         header = response.headers.get("server-timing", "")
         for name in fields:
-            assert re.search(r"\\b" + name + r";dur=\\d+\\.\\d{2}\\b", header), header
+            assert re.search(r"\b" + name + r";dur=\d+\.\d{2}\b", header), header
         assert str(task.id) not in header
         assert str(company.id) not in header
         assert "PRIVATE" not in header
