@@ -2492,20 +2492,24 @@ def studio_work_page(product_id: UUID, tab: str = "all", q: str = "",
         total=data["total"], page_size=data["page_size"], counts=data["counts"],
     )
     render_ms = (perf_counter() - rendered_at) * 1000
+    shell_at = perf_counter()
     if partial:
         # Growth v4 middleware wraps HTML documents; a dedicated fragment media
         # type keeps this authenticated read-only response free of page chrome.
         result = Response(content=html_body, media_type="application/vnd.servgo.tasks+html")
+        shell_ms = 0.0
     else:
         result = HTMLResponse(studio_page_shell(
             product, active="work", title="Задания",
             subtitle="Что выполняется, что готово и где требуется ваше решение.",
             body=html_body,
         ))
+        shell_ms = (perf_counter() - shell_at) * 1000
     result.headers["Cache-Control"] = "private, no-store"
-    # Visible in browser Network > Timing; never include company/task details.
+    # Visible in the same-origin browser Network panel; no company/task data.
     result.headers["Server-Timing"] = (
-        f"tasks_db;dur={db_ms:.2f}, tasks_html;dur={render_ms:.2f}"
+        f"tasks_db;dur={db_ms:.2f}, tasks_html;dur={render_ms:.2f}, "
+        f"tasks_shell;dur={shell_ms:.2f}"
     )
     return result
 
