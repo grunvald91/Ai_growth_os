@@ -66,4 +66,36 @@ jobs:
             echo "::error::PERF_PROBE_FAILED reason=server_probe_unavailable_or_error"
             exit 1
           fi
-          printf 'STUDIO_TASKS_PROD_PERF %s\n' "$output"
+          # Whitelist the report fields again at the GitHub boundary. Never echo
+          # raw container stdout even if a dependency unexpectedly printed PII.
+          PERF_JSON="$output" python3 - <<'PY'
+          import json, math, os, sys
+          try:
+              raw = os.environ["PERF_JSON"].strip().splitlines()
+              value = json.loads(raw[-1])
+              if value.get("schema") != 1 or value.get("read_only") is not True:
+                  raise ValueError("invalid_schema")
+              if value.get("status") == "no_tasks":
+                  print("STUDIO_TASKS_PROD_PERF status=no_tasks read_only=true")
+                  sys.exit(0)
+              if value.get("status") != "ok" or not isinstance(value.get("scenarios"), dict):
+                  raise ValueError("invalid_status")
+              expected = {"all", "approval", "search_no_match"}
+              if set(value["scenarios"]) != expected:
+                  raise ValueError("invalid_scenarios")
+              fields = ("samples", "total_p50_ms", "total_p95_ms", "database_p95_ms",
+                        "sql_p95_ms", "render_p95_ms", "sql_calls_max", "html_bytes_max")
+              for label in sorted(expected):
+                  metrics = value["scenarios"][label]
+                  if set(metrics) != set(fields):
+                      raise ValueError("invalid_metric_names")
+                  if not all(type(metrics[key]) in (int, float) and
+                             math.isfinite(metrics[key]) and 0 <= metrics[key] <= 1e9
+                             for key in fields):
+                      raise ValueError("invalid_metrics")
+                  print("STUDIO_TASKS_PROD_PERF scenario=" + label + " " +
+                        " ".join(f"{key}={metrics[key]}" for key in fields))
+          except (IndexError, ValueError, TypeError, KeyError, AttributeError):
+              print("::error::PERF_PROBE_FAILED reason=invalid_sanitized_report")
+              sys.exit(1)
+          PY
