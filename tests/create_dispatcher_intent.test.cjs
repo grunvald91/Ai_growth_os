@@ -26,7 +26,7 @@ function setup(format, options = {}) {
     "sg-create-brief": "",
     "sg-create-image-model": "auto",
     "sg-create-aspect": "",
-    "sg-create-vk-image-model": "auto",
+    "sg-create-vk-model-choice": "auto",
     "sg-create-vk-image-ratio": "4:5"
   };
   Object.assign(fieldValues, options);
@@ -94,6 +94,13 @@ test("static image keeps aspect ratio, model, and destination", () => {
   assert.equal(request.creation.image_model, "openai");
   assert.equal(request.creation.platform, "instagram_reels");
   assert.equal(request.creation.editorial_brief, "Не использовать неподтверждённые цифры");
+});
+
+test("VK post reads the one model selector (including text-only)", () => {
+  assert.equal(setup("post", {"sg-create-vk-model-choice": "none"})
+    .creationRequest("Тема поста").creation.image_model, "none");
+  assert.equal(setup("post", {"sg-create-vk-model-choice": "gemini"})
+    .creationRequest("Тема поста").creation.image_model, "gemini");
 });
 
 test("simple video never inherits invisible image/audience settings", () => {
@@ -200,7 +207,7 @@ test("voice validation preserves recognized text instead of sending invalid sele
 test("VK post creation sends image model and selected square format", () => {
   const request = setup("post", {
     "sg-create-platform": "vk",
-    "sg-create-vk-image-model": "gemini",
+    "sg-create-vk-model-choice": "gemini",
     "sg-create-vk-image-ratio": "1:1"
   }).creationRequest("Зачем нужна CRM?");
   assert.equal(request.creation.format, "post");
@@ -212,14 +219,14 @@ test("VK post creation sends image model and selected square format", () => {
 test("other channels and text-only VK never accidentally request paid media", () => {
   const telegram = setup("post", {
     "sg-create-platform": "telegram",
-    "sg-create-vk-image-model": "gemini",
+    "sg-create-vk-model-choice": "gemini",
     "sg-create-vk-image-ratio": "1:1"
   }).creationRequest("Как сделать запись проще");
   assert.equal(telegram.creation.image_model, null);
   assert.equal(telegram.creation.aspect_ratio, null);
   const noImage = setup("post", {
     "sg-create-platform": "vk",
-    "sg-create-vk-image-model": "none"
+    "sg-create-vk-model-choice": "none"
   }).creationRequest("Как сделать запись проще");
   assert.equal(noImage.creation.image_model, "none");
 });
