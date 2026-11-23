@@ -125,7 +125,7 @@ async def _approve(db, product_id, task_id, body, actor, settings):
     try:
         await preflight(scoped_settings(settings, payload.models, payload.request.voice),
                         payload.models, payload.request.voice,
-                        skip_speech=payload.repair_regenerate_images)
+                        **({'skip_speech': True} if payload.repair_regenerate_images else {}))
     except ReadinessError as exc:
         # Short transaction after network I/O. Do not overwrite cancellation.
         task = owner_task(db, product_id, task_id, lock=True)
