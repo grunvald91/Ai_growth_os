@@ -1072,7 +1072,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="ServGo">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=15">
 </head>
 <body>
 <div class="studio-page" data-studio-build="20261013-unified10"><div class="studio-layout">
@@ -1140,7 +1140,7 @@ def product_dashboard(db: Session, product: Product) -> str:
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=13"></script>
+<script src="/studio/assets/studio.js?v=14"></script>
 </body></html>"""
 
 
@@ -1221,7 +1221,7 @@ def studio_page_shell(
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="ServGo">
-  <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
+  <link rel="stylesheet" href="/studio/assets/studio.css?v=15">
   {resource_css}
 </head>
 <body>
@@ -1264,7 +1264,7 @@ def studio_page_shell(
   </main>
 </div></div>
 {dialogs}
-<script src="/studio/assets/studio.js?v=13"></script>
+<script src="/studio/assets/studio.js?v=14"></script>
 {resource_js}
 </body></html>"""
 
