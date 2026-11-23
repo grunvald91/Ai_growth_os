@@ -111,8 +111,9 @@ def test_valid_vk_upload_hosts():
     assert _upload_destination("https://pu.vk.com/upload.php") == "https://pu.vk.com/upload.php"
 
 
+@pytest.mark.parametrize("server_value", [777, "777"])
 @pytest.mark.asyncio
-async def test_photo_upload_protocol_returns_real_attachment_with_owner_id(tmp_path):
+async def test_photo_upload_protocol_returns_real_attachment_with_owner_id(tmp_path, server_value):
     png = io.BytesIO()
     Image.new("RGB", (10, 12)).save(png, format="PNG")
     path = tmp_path / "image.png"
@@ -125,7 +126,7 @@ async def test_photo_upload_protocol_returns_real_attachment_with_owner_id(tmp_p
             if method == "photos.getWallUploadServer":
                 return {"upload_url": "https://pu.vk.ru/c123/upload.php?token=signed"}
             if method == "photos.saveWallPhoto":
-                return [{"owner_id": 923, "id": 174}]
+                return [{"owner_id": -123456, "id": 174}]
             raise AssertionError("Unexpected VK method")
 
     def handler(request):
@@ -135,12 +136,12 @@ async def test_photo_upload_protocol_returns_real_attachment_with_owner_id(tmp_p
         assert b"image/png" in request.content
         assert png.getvalue() in request.content
         assert request.method == "POST"
-        return httpx.Response(200, json={"server": 777, "photo": "encoded", "hash": "signed_hash"})
+        return httpx.Response(200, json={"server": server_value, "photo": "encoded", "hash": "signed_hash"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         attachment = await upload_wall_photo(Adapter(), "secret-vk-token", "123456", path, client=client)
 
-    assert attachment == "photo923_174"
+    assert attachment == "photo-123456_174"
     assert [call[0] for call in calls] == [
         "photos.getWallUploadServer", "photos.saveWallPhoto",
     ]
@@ -158,8 +159,10 @@ async def test_community_token_upload_error_fails_before_post(tmp_path):
         async def call(self, method, token, **params):
             raise PlatformError("VK error 27")
 
+    photo = tmp_path / "input.png"
+    photo.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
     with pytest.raises(VKPhotoUploadError, match="ключом"):
-        await upload_wall_photo(BlockedAdapter(), "community-token", "123456", tmp_path / "not-used")
+        await upload_wall_photo(BlockedAdapter(), "community-token", "123456", photo)
 
 
 def test_approved_image_is_required_and_pinned_at_schedule_time(db, tmp_path):
@@ -448,3 +451,56 @@ async def test_owner_accepted_critic_blocked_image_is_queued_and_published_with_
     db.refresh(pub)
     assert pub.status == "published"
     assert uploads == [(path, initial["image_sha256"])]
+
+
+@pytest.mark.parametrize("server_value", ["", "7.7", "-1", "0", True, 2.5, "1e4", "9" * 40])
+@pytest.mark.asyncio
+async def test_vk_rejects_invalid_upload_server_without_saving_photo(tmp_path, server_value):
+    photo = tmp_path / "source.png"
+    photo.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+    class Adapter:
+        async def call(self, method, token, **params):
+            assert method == "photos.getWallUploadServer"
+            return {"upload_url": "https://pu.vk.com/upload.php"}
+    def handler(request):
+        return httpx.Response(200, json={
+            "server": server_value, "photo": "valid", "hash": "valid"
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(VKPhotoUploadError, match="не подтвердил загрузку"):
+            await upload_wall_photo(Adapter(), "user-token", "123456", photo, client=client)
+
+
+@pytest.mark.parametrize("owner_id", [123456, -654321, 0, "123456", True])
+@pytest.mark.asyncio
+async def test_vk_rejects_photo_saved_to_unrelated_owner(tmp_path, owner_id):
+    photo = tmp_path / "source.png"
+    photo.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
+    calls = []
+    class Adapter:
+        async def call(self, method, token, **params):
+            calls.append(method)
+            if method == "photos.getWallUploadServer":
+                return {"upload_url": "https://pu.vk.com/upload.php"}
+            if method == "photos.saveWallPhoto":
+                return [{"owner_id": owner_id, "id": 55}]
+            raise AssertionError(method)
+    def handler(request):
+        return httpx.Response(200, json={
+            "server": 77, "photo": "valid", "hash": "valid"
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(VKPhotoUploadError, match="не в выбранном сообществе"):
+            await upload_wall_photo(Adapter(), "user-token", "123456", photo, client=client)
+    assert calls == ["photos.getWallUploadServer", "photos.saveWallPhoto"]
+
+
+@pytest.mark.asyncio
+async def test_vk_invalid_local_photo_makes_no_provider_request(tmp_path):
+    photo = tmp_path / "source.png"
+    photo.write_bytes(b"changed bytes")
+    class Adapter:
+        async def call(self, method, token, **params):
+            pytest.fail("VK API must not be called with invalid local image")
+    with pytest.raises(VKPhotoUploadError, match="корректным PNG"):
+        await upload_wall_photo(Adapter(), "user-token", "123456", photo)
