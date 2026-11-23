@@ -221,7 +221,7 @@ def started_attempts(value) -> int:
 
 def can_resume(task_status, value, payload) -> bool:
     return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS | {'call_limit'}
-            and payload.visual_repair_from is None
+            and (payload.visual_repair_from is None or payload.repair_regenerate_images)
             # Rendering is local: a job stopped there needs no further paid calls.
             and (started_attempts(value) < call_limit(value, payload) or value.get('failed_stage') == 'rendering'))
 
@@ -229,7 +229,7 @@ def can_resume(task_status, value, payload) -> bool:
 def can_top_up(task_status, value, payload) -> bool:
     """The approved calls are spent: only the owner may add more to finish the video."""
     return (task_status == TaskStatus.FAILED and value.get('error') in RESUMABLE_ERRORS | {'call_limit'}
-            and payload.visual_repair_from is None and value.get('failed_stage') != 'rendering'
+            and (payload.visual_repair_from is None or payload.repair_regenerate_images) and value.get('failed_stage') != 'rendering'
             and started_attempts(value) >= call_limit(value, payload)
             and int(value.get('extra_calls', 0)) < TOP_UP_TOTAL)
 
@@ -276,7 +276,7 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
     provider_wait = (value.get('failed_stage') == 'preflight'
                      and code in {'openrouter_unavailable', 'claudehub_unavailable'})
     if (code not in RESUMABLE_ERRORS or (used >= limit and not provider_wait)
-            or payload.visual_repair_from is not None
+            or (payload.visual_repair_from is not None and not payload.repair_regenerate_images)
             or not (started_attempts(value) < call_limit(value, payload) or provider_wait
                     or value.get('failed_stage') == 'rendering')):
         return False
