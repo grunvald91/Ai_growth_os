@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 from app.api import whiteboard as api
 
-from app.content.whiteboard.jobs import records, owner_task, job_directory, resume_job
+from app.content.whiteboard.jobs import records, owner_task, job_directory, resume_job, digest
 from app.content.whiteboard.repair import queue_visual_repair
 from app.content.whiteboard.runtime import ReadinessError
 from app.content.whiteboard.worker import run_whiteboard_once
@@ -195,3 +195,65 @@ async def test_html_approval_shows_queued_repair_without_starting_paid_calls(env
         _, state, approval, _ = records(db, task)
         assert approval.status == 'approved'
         assert json.loads(state.content)['calls'] == 0
+
+
+@pytest.mark.asyncio
+async def test_unapproved_legacy_repair_does_not_hide_new_regeneration(environment):
+    """An old pending repair may not intercept the new image-generation button."""
+    factory, settings, product, _ = environment
+    source = new_job(environment, maximum=25)
+    approve(environment, source)
+    await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready)
+    with factory() as db:
+        old_id = queue_visual_repair(db, settings, product, source).id
+        old_task = owner_task(db, product, old_id)
+        old_request, old_state, old_approval, old_payload = records(db, old_task)
+        _, _, _, source_payload = records(db, owner_task(db, product, source))
+        old_request.content = old_payload.model_copy(update={
+            'repair_regenerate_images': False,
+            'max_api_calls': 25,
+            'models': old_payload.models.model_copy(
+                update={'regions': source_payload.models.regions}),
+        }).model_dump_json()
+        old_approval.reason = 'sha256:' + digest(old_request.content)
+        old_task.title = 'WHITEBOARD-VISUAL-REPAIR: ' + str(source)
+        db.commit()
+
+        created = queue_visual_repair(db, settings, product, source)
+        assert created.id != old_id
+        assert created.status == TaskStatus.WAITING_APPROVAL
+        _, state, approval, request = records(db, created)
+        assert request.repair_regenerate_images is True
+        assert approval.status == 'pending'
+        assert json.loads(state.content)['calls'] == 0
+
+        old_task = owner_task(db, product, old_id)
+        _, old_state, old_approval, _ = records(db, old_task)
+        assert old_task.status == TaskStatus.CANCELLED
+        assert old_approval.status == 'rejected'
+        assert json.loads(old_state.content)['superseded_by_new_repair'] is True
+        # Further clicks must return the pending new request, never the legacy one.
+        assert queue_visual_repair(db, settings, product, source).id == created.id
+
+
+@pytest.mark.asyncio
+async def test_source_with_approved_extra_calls_can_still_regenerate_images(environment):
+    factory, settings, product, _ = environment
+    source = new_job(environment, maximum=60)
+    approve(environment, source)
+    await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready)
+    with factory() as db:
+        task = owner_task(db, product, source)
+        _, state, _, _ = records(db, task)
+        value = json.loads(state.content)
+        # A legitimate source may have used up to 60 + 25 confirmed calls.
+        value.update(calls=61, attempts_started=61, extra_calls=5)
+        state.content = json.dumps(value)
+        db.commit()
+
+        repair = queue_visual_repair(db, settings, product, source)
+        _, repair_state, approval, payload = records(db, repair)
+        assert payload.inherited_calls == 61
+        assert payload.max_api_calls == 13
+        assert approval.status == 'pending'
+        assert json.loads(repair_state.content)['calls'] == 0
