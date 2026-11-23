@@ -163,9 +163,30 @@ def verified_vk_image_approval(db, post: Artifact, image: Artifact) -> bool:
     try:
         data = json.loads(post.content)
         if (data.get("image_state") != "ready" or
-                data.get("image_review_state") != "approved" or
                 str(image.id) != str(data.get("image_artifact_id")) or
                 data.get("image_sha256") != json.loads(image.content).get("sha256")):
+            return False
+        if data.get("image_review_state") == "owner_approved":
+            # Explicit owner choice is a distinct immutable audit, never a fake
+            # critic approval. Bind it to the precise image, text and tenant.
+            decision_id = UUID(str(data["image_owner_approval_artifact_id"]))
+            decision = db.scalar(select(Artifact).where(
+                Artifact.id == decision_id,
+                Artifact.product_id == post.product_id,
+                Artifact.task_id == post.task_id,
+                Artifact.kind == "vk_image_owner_approval",
+            ))
+            if decision is None:
+                return False
+            value = json.loads(decision.content)
+            return (value.get("decision") == "approved" and
+                    value.get("post_artifact_id") == str(post.id) and
+                    value.get("image_artifact_id") == str(image.id) and
+                    value.get("image_sha256") == data["image_sha256"] and
+                    value.get("post_sha256") == _post_digest(data) and
+                    value.get("critic_state_before_override") in {
+                        "blocked", "review_unavailable"})
+        if data.get("image_review_state") != "approved":
             return False
         key = UUID(str(data["image_review_artifact_id"]))
         review = db.scalar(select(Artifact).where(
@@ -204,6 +225,10 @@ async def review_vk_post_image(db, settings, *, product, task, post,
     ))
     if image is None:
         raise ValueError("Изображение поста не найдено")
+    if meta.get("image_review_state") == "owner_approved":
+        if not verified_vk_image_approval(db, post, image):
+            raise ValueError("Подтверждение владельца повреждено")
+        return "owner_approved"
     asset_meta = json.loads(image.content)
     picture = verified_file(settings.products_root, product.id, task.id, image).read_bytes()
     picture_sha = hashlib.sha256(picture).hexdigest()
