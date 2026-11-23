@@ -96,6 +96,23 @@ test("static image keeps aspect ratio, model, and destination", () => {
   assert.equal(request.creation.editorial_brief, "Не использовать неподтверждённые цифры");
 });
 
+test("topic validation keeps the voice hint in accessible descriptions", () => {
+  const attributes={};
+  const sandbox={
+    root:{classList:{contains: value=>value==="sg-create-dispatch"}},
+    input:{setAttribute:(name,value)=>{attributes[name]=value;}},
+    document:{getElementById:id=>id==="sg-create-voice-hint" ? {} : null}
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(extract("markCreateTopicInvalid"),sandbox);
+  sandbox.markCreateTopicInvalid(true);
+  assert.equal(attributes["aria-invalid"],"true");
+  assert.equal(attributes["aria-describedby"],"sg-create-context sg-create-voice-hint dp-voice-note");
+  sandbox.markCreateTopicInvalid(false);
+  assert.equal(attributes["aria-invalid"],"false");
+  assert.equal(attributes["aria-describedby"],"sg-create-context sg-create-voice-hint");
+});
+
 test("VK post reads the one model selector (including text-only)", () => {
   assert.equal(setup("post", {"sg-create-vk-model-choice": "none"})
     .creationRequest("Тема поста").creation.image_model, "none");

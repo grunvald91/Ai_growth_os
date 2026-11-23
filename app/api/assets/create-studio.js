@@ -48,6 +48,11 @@
     static_image:'telegram',package:''};
   const panel=document.getElementById('sg-create-info-panel');
   const topics=document.getElementById('sg-create-suggestions');
+  let topicRequest=null;
+  function cancelTopicRequest(){
+    if(topicRequest)topicRequest.abort();
+    topicRequest=null;
+  }
   const suggestRow=screen.querySelector('.sg-create-suggest-row');
   // Both controls and their help now live next to the editor in source order.
   // Suggestions are inserted in the same place so Tab order matches layout.
@@ -146,6 +151,12 @@
   function chooseFormat(key){
     const selected=screen.querySelector('[data-sg-format="'+key+'"]');
     if(!selected)return;
+    if(root.getAttribute('data-create-format')!==key){
+      // Invalidate suggestions from the previous material format immediately.
+      cancelTopicRequest();
+      topics.hidden=true;
+      topics.replaceChildren();
+    }
     root.setAttribute('data-create-format',key);
     screen.querySelectorAll('[data-sg-format]').forEach(button=>{
       button.setAttribute('aria-pressed',button===selected?'true':'false');
@@ -193,16 +204,20 @@
   // Make the normal path immediately understandable without a preliminary click.
   chooseFormat('post');
   screen.querySelector('[data-sg-suggest]').addEventListener('click',async()=>{
+    cancelTopicRequest();
+    const controller=new AbortController();
+    topicRequest=controller;
+    const requestedFormat=root.getAttribute('data-create-format') || 'post';
     topics.hidden=false;topics.replaceChildren();
     const status=document.createElement('p');status.textContent='Подбираем темы из профиля компании…';topics.append(status);
     try{
-      const requestedFormat=root.getAttribute('data-create-format') || 'post';
       const response=await fetch(base+'/create/topics.json?format='+encodeURIComponent(requestedFormat),
-        {credentials:'same-origin',headers:{Accept:'application/json'}});
+        {credentials:'same-origin',headers:{Accept:'application/json'},signal:controller.signal});
       if(!response.ok)throw new Error('Не удалось получить темы');
       const data=await response.json();
-      // Ignore suggestions that belong to an earlier selected format.
-      if(root.getAttribute('data-create-format')!==requestedFormat){topics.hidden=true;return;}
+      // An older response must never overwrite a newer request or another format.
+      if(controller.signal.aborted || topicRequest!==controller ||
+        root.getAttribute('data-create-format')!==requestedFormat)return;
       topics.replaceChildren();
       const list=Array.isArray(data.topics)?data.topics:[];
       if(!list.length){
@@ -223,7 +238,11 @@
         topics.append(button);
       });
     }catch(error){
-      status.textContent='Не удалось получить предложения. Вы можете задать тему самостоятельно.';
+      if(!controller.signal.aborted && topicRequest===controller &&
+          root.getAttribute('data-create-format')===requestedFormat)
+        status.textContent='Не удалось получить предложения. Вы можете задать тему самостоятельно.';
+    }finally{
+      if(topicRequest===controller)topicRequest=null;
     }
   });
 
@@ -234,7 +253,10 @@
     if(!panel.hidden && !panel.contains(event.target) &&
        !event.target.closest('[data-sg-info],[data-sg-about]'))panel.hidden=true;
     if(!topics.hidden && !topics.contains(event.target) &&
-       !event.target.closest('[data-sg-suggest]'))topics.hidden=true;
+       !event.target.closest('[data-sg-suggest]')){
+      topics.hidden=true;
+      cancelTopicRequest();
+    }
   });
 
   // The Create overlay can be collapsed without hiding the input or losing messages.
