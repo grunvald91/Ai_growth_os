@@ -45,19 +45,25 @@ class JobRequest(Contract):
     repair_source_digest: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     repair_manifest_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS)
+    # New repairs receive their own separately approved budget; the original calls are audit-only.
+    repair_regenerate_images: bool = False
 
     @model_validator(mode='after')
     def review_budget(self):
-        if self.visual_review and self.max_api_calls < 18:
+        if self.visual_review and self.max_api_calls < 18 and not self.repair_regenerate_images:
             raise ValueError('One visual review and up to three redraws require at least 18 calls')
-        if self.request.scenes > 3 and self.max_api_calls < required_calls(self.request, visual_review=self.visual_review):
+        if (self.request.scenes > 3 and not self.repair_regenerate_images
+                and self.max_api_calls < required_calls(self.request, visual_review=self.visual_review)):
             raise ValueError('The one-minute video needs more calls than this limit')
         if self.image_provider == 'claudehub' and self.models.image != 'gemini-3.1-flash-image':
             raise ValueError('ClaudeHub image generation must use Gemini 3.1 Flash Image')
         if self.visual_repair_from is not None:
             if not self.visual_review or not self.repair_source_digest or not self.repair_manifest_sha256:
                 raise ValueError('A visual repair must bind its original approved request and media manifest')
-        elif self.repair_source_digest is not None or self.repair_manifest_sha256 is not None or self.inherited_calls:
+            if self.repair_regenerate_images and self.max_api_calls < 3 * self.request.scenes + 2:
+                raise ValueError('Image regeneration must cover images, visual review, revisions and regions')
+        elif (self.repair_source_digest is not None or self.repair_manifest_sha256 is not None
+              or self.inherited_calls or self.repair_regenerate_images):
             raise ValueError('Repair metadata requires a source job')
         return self
 
@@ -111,7 +117,7 @@ def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_a
                          models=models, max_api_calls=max_api_calls, visual_review=visual_review, image_provider=image_provider)
     # Preserve the exact legacy serialization when this feature is not selected.
     content = payload.model_dump_json(exclude={'visual_repair_from', 'repair_source_digest',
-        'repair_manifest_sha256', 'inherited_calls'} | ({'visual_review'} if not visual_review else set())
+        'repair_manifest_sha256', 'inherited_calls', 'repair_regenerate_images'} | ({'visual_review'} if not visual_review else set())
         | ({'image_provider'} if image_provider == 'openrouter' else set()))
     title = 'WHITEBOARD-JOB: ' + digest(content)[:24]
     existing = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == AGENT,
