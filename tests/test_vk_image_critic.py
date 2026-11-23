@@ -220,3 +220,99 @@ def test_invented_readable_contacts_are_critical_but_decorative_glyphs_are_not()
     )
     assert VKImageReview(summary="Номер отсутствует в исходном посте.", issues=[contact]).blocked
     assert not VKImageReview(summary="Декоративные знаки не мешают.", issues=[cosmetic, uncertain]).blocked
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["blocked", "review_unavailable"])
+async def test_owner_explicitly_accepts_existing_vk_image_with_immutable_audit(
+    db, tmp_path, outcome
+):
+    from app.content.review import approve_material, ReviewError
+    from app.content.vk_image_critic import _post_digest
+    from app.api.content_studio import material_detail_page
+    from app.models.domain import ArtifactStatus, Approval
+
+    product, task, post, image = _setup(db, tmp_path)
+    settings = Settings(_env_file=None, products_root=tmp_path, xai_api_key="fake")
+    if outcome == "blocked":
+        await review_vk_post_image(
+            db, settings, product=product, task=task, post=post,
+            reviewer=FakeReviewer(report(issue(severity="critical", category="contradiction"))))
+    else:
+        await review_vk_post_image(
+            db, settings, product=product, task=task, post=post,
+            reviewer=FakeReviewer(failure=RuntimeError("offline reviewer unavailable")))
+    before = json.loads(post.content)
+    assert before["image_state"] == outcome
+    with pytest.raises(ReviewError):
+        approve_material(db, tmp_path, product.id, post.id)
+
+    page = material_detail_page(db, product, post, root=tmp_path)
+    assert "Утвердить картинку и пост" in page
+    assert 'name="image_confirmed"' in page
+    assert f"/tasks/{task.id}/images/{image.id}" in page
+
+    # A forged/stale acknowledgement must not approve a different image/text.
+    with pytest.raises(ReviewError):
+        approve_material(
+            db, tmp_path, product.id, post.id,
+            image_confirmed=True,
+            expected_image_sha256=before["image_sha256"],
+            expected_post_sha256="0" * 64)
+    db.refresh(post)
+    assert post.status == ArtifactStatus.AWAITING_APPROVAL
+    assert db.scalars(select(Artifact).where(
+        Artifact.kind == "vk_image_owner_approval")).first() is None
+
+    approved = approve_material(
+        db, tmp_path, product.id, post.id,
+        image_confirmed=True,
+        expected_image_sha256=before["image_sha256"],
+        expected_post_sha256=_post_digest(before),
+        actor="local-owner",
+    )
+    assert approved.status == ArtifactStatus.APPROVED
+    after = json.loads(approved.content)
+    assert after["image_review_state"] == "owner_approved"
+    assert after["image_state"] == "ready"
+    assert after["image_critical_issues"] == before.get("image_critical_issues", [])
+    assert verified_vk_image_approval(db, approved, image)
+    decision = db.get(Artifact, __import__("uuid").UUID(after["image_owner_approval_artifact_id"]))
+    assert decision is not None
+    details = json.loads(decision.content)
+    assert details["post_artifact_id"] == str(post.id)
+    assert details["image_sha256"] == before["image_sha256"]
+    assert details["post_sha256"] == _post_digest(after)
+    assert details["critic_state_before_override"] == outcome
+    original = db.scalars(select(Artifact).where(
+        Artifact.kind == "vk_image_critique")).all()
+    assert len(original) == (1 if outcome == "blocked" else 0)
+    approvals = db.scalars(select(Approval).where(
+        Approval.artifact_id == post.id)).all()
+    assert len(approvals) == 1
+    assert approvals[0].action_type == "studio:approve_vk_owner_image"
+    assert approve_material(db, tmp_path, product.id, post.id) == approved
+    assert len(db.scalars(select(Approval).where(
+        Approval.artifact_id == post.id)).all()) == 1
+
+
+@pytest.mark.asyncio
+async def test_owner_cannot_approve_modified_or_missing_vk_image(db, tmp_path):
+    from app.content.review import approve_material, ReviewError
+    from app.content.vk_image_critic import _post_digest
+    product, task, post, image = _setup(db, tmp_path)
+    await review_vk_post_image(
+        db, Settings(_env_file=None, products_root=tmp_path, xai_api_key="fake"),
+        product=product, task=task, post=post,
+        reviewer=FakeReviewer(report(issue(severity="critical", category="misleading"))))
+    before = json.loads(post.content)
+    path = image_folder(tmp_path, product.id, task.id) / "frame-01.png"
+    path.write_bytes(b"tampered")
+    with pytest.raises(ReviewError):
+        approve_material(
+            db, tmp_path, product.id, post.id, image_confirmed=True,
+            expected_image_sha256=before["image_sha256"],
+            expected_post_sha256=_post_digest(before))
+    db.refresh(post)
+    assert json.loads(post.content)["image_state"] == "blocked"
+    assert verified_vk_image_approval(db, post, image) is False
