@@ -1155,8 +1155,11 @@
   function markCreateTopicInvalid(invalid) {
     if (!root.classList.contains('sg-create-dispatch')) return;
     input.setAttribute('aria-invalid', invalid ? 'true' : 'false');
-    input.setAttribute('aria-describedby', invalid
-      ? 'sg-create-context dp-voice-note' : 'sg-create-context');
+    var describedBy=['sg-create-context'];
+    if(document.getElementById('sg-create-voice-hint'))
+      describedBy.push('sg-create-voice-hint');
+    if(invalid)describedBy.push('dp-voice-note');
+    input.setAttribute('aria-describedby', describedBy.join(' '));
   }
   function sendText() {
     var text = input.value.trim();
