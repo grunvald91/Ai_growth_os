@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -78,6 +79,17 @@ async def upload_wall_photo(adapter, token: str, group_id: str, picture: Path,
                             *, expected_sha256: str | None = None,
                             client: httpx.AsyncClient | None = None) -> str:
     """One upload attempt; token stays in VK method form, never at upload_url."""
+    # Check the immutable local PNG before requesting any temporary upload URL.
+    if not isinstance(group_id, str) or not re.fullmatch(r"[1-9][0-9]{0,14}", group_id):
+        raise VKPhotoUploadError("Некорректный ID сообщества VK")
+    try:
+        picture_bytes = picture.read_bytes()
+    except OSError:
+        raise VKPhotoUploadError("Файл картинки отсутствует или недоступен") from None
+    if not picture_bytes.startswith(b"\x89PNG\r\n\x1a\n") or not 0 < len(picture_bytes) <= 10 * 1024 * 1024:
+        raise VKPhotoUploadError("Файл для VK должен быть корректным PNG до 10 МБ")
+    if expected_sha256 is not None and hashlib.sha256(picture_bytes).hexdigest() != expected_sha256:
+        raise VKPhotoUploadError("Изображение изменилось непосредственно перед отправкой в VK")
     try:
         server = await adapter.call("photos.getWallUploadServer", token, group_id=int(group_id))
     except Exception:
@@ -90,11 +102,6 @@ async def upload_wall_photo(adapter, token: str, group_id: str, picture: Path,
         upload_url = _upload_destination(server["upload_url"])
     except (TypeError, KeyError):
         raise VKPhotoUploadError("ВК не вернул сервер загрузки фото") from None
-    picture_bytes = picture.read_bytes()
-    if not picture_bytes.startswith(b"\x89PNG\r\n\x1a\n") or not 0 < len(picture_bytes) <= 10 * 1024 * 1024:
-        raise VKPhotoUploadError("Файл для VK должен быть корректным PNG до 10 МБ")
-    if expected_sha256 is not None and hashlib.sha256(picture_bytes).hexdigest() != expected_sha256:
-        raise VKPhotoUploadError("Изображение изменилось непосредственно перед отправкой в VK")
     try:
         if client is None:
             async with httpx.AsyncClient(
@@ -121,7 +128,13 @@ async def upload_wall_photo(adapter, token: str, group_id: str, picture: Path,
         server_id = upload["server"]
         photo = upload["photo"]
         signature = upload["hash"]
-        if (type(server_id) is not int or server_id < 1
+        # VK Android SDK reads upload server as a string, whereas API schema
+        # 5.199 passes an integer to photos.saveWallPhoto.
+        if isinstance(server_id, str):
+            if not re.fullmatch(r"[1-9][0-9]{0,18}", server_id):
+                raise ValueError()
+            server_id = int(server_id)
+        if (type(server_id) is not int or not 0 < server_id < 2**63
                 or not isinstance(photo, str) or not 0 < len(photo) <= 1_000_000
                 or not isinstance(signature, str) or not 0 < len(signature) <= 1000):
             raise ValueError()
@@ -138,6 +151,9 @@ async def upload_wall_photo(adapter, token: str, group_id: str, picture: Path,
         raise VKPhotoUploadError("ВК не вернул идентификатор сохранённого изображения")
     saved = result[0]
     owner_id, media_id = saved.get("owner_id"), saved.get("id")
-    if (type(owner_id) is not int or owner_id == 0 or type(media_id) is not int or media_id <= 0):
-        raise VKPhotoUploadError("ВК вернул неверный идентификатор изображения")
+    if (type(owner_id) is not int or owner_id != -int(group_id)
+            or type(media_id) is not int or media_id <= 0):
+        raise VKPhotoUploadError(
+            "ВК сохранил фотографию не в выбранном сообществе; публикация остановлена"
+        )
     return f"photo{owner_id}_{media_id}"

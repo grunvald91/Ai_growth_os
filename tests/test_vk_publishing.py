@@ -1011,3 +1011,22 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
     assert owner_connected.count('<a href="/studio/tune/vk"') >= 2
     customer_connected = vk_page(product.id, customer, db=db, settings=settings).body.decode()
     assert "/studio/tune/vk" not in customer_connected
+
+
+def test_vk_page_explains_separate_photo_access_and_keeps_user_key_private(db, tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import vk_page
+    from app.social_vk import connect_community
+
+    product, _ = business_and_post(db, slug="vk-photo-form")
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    connect_community(db, settings, product.id, "123456", "community-token")
+    request = SimpleNamespace(state=SimpleNamespace(
+        studio_login="owner", studio_product_ids=None))
+    markup = vk_page(product.id, request, db=db, settings=settings).body.decode()
+    assert f'/studio/products/{product.id}/vk/photo-key' in markup
+    assert 'name="access_token" type="password"' in markup
+    assert "настроить доступ к загрузке" in markup
+    assert "Ключ сообщества для публикации текста остаётся" in markup
+    assert "community-token" not in markup
+    assert "vk1.a." not in markup
