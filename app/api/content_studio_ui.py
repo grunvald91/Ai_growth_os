@@ -9,6 +9,7 @@ import json
 import re
 from datetime import datetime
 from urllib.parse import quote
+from uuid import UUID
 
 from app.content.durations import KINDS, duration_estimate
 
@@ -281,13 +282,44 @@ def review_html(product_id, records, *, filter_name="all", counts=None,
                   if count_warnings else "")
         if fact_check:
             badges += '<span class="sg-warning">Проверьте факты</span>'
+        media_preview = ""
+        image_warning = ""
+        if row.kind == "channel_text" and data.get("channel") == "vk" and data.get("image_model", "none") != "none":
+            state = str(data.get("image_state") or "pending")
+            labels = {
+                "ready": "Картинка проверена", "blocked": "Картинка отклонена",
+                "review_unavailable": "Критик недоступен",
+                "awaiting_review": "Картинка проверяется",
+                "failed": "Ошибка генерации", "pending": "Картинка готовится",
+                "stale": "Картинка устарела",
+            }
+            badges += '<span class="sg-warning">' + esc(labels.get(state, "Картинка не проверена")) + '</span>'
+            if data.get("image_artifact_id") and row.task_id:
+                try:
+                    image_id = UUID(str(data["image_artifact_id"]))
+                except (ValueError, TypeError, AttributeError):
+                    pass
+                else:
+                    uri = f"{base}/tasks/{row.task_id}/images/{image_id}"
+                    media_preview = (
+                        f'<a class="sg-vk-review-thumb" href="{action}" '
+                        'aria-label="Открыть пост, картинку и замечания критика">'
+                        f'<img src="{uri}" width="180" height="225" loading="lazy" decoding="async" '
+                        'alt="Иллюстрация к посту ВКонтакте"></a>'
+                    )
+            issues = data.get("image_critical_issues")
+            if state == "blocked" and isinstance(issues, list) and issues:
+                image_warning = ('<p class="sg-vk-review-issue" role="status">Причина: '
+                                 + esc(str(issues[0])) + '</p>')
         primary = (
             '<div class="sg-review-item">'
             f'<div class="sg-review-top"><span class="sg-tag">{esc(kind)}</span>'
             f'<span class="sg-channel">{esc(channel)}</span>{badges}</div>'
             f'<h3>{esc(row.title)}</h3>'
-            f'<p>{esc(preview) if preview else "Предпросмотр недоступен. Откройте материал целиком."}</p>'
-            '<div class="sg-review-footer"><span>Ожидает решения</span>'
+            + media_preview
+            + f'<p>{esc(preview) if preview else "Предпросмотр недоступен. Откройте материал целиком."}</p>'
+            + image_warning
+            + '<div class="sg-review-footer"><span>Ожидает решения</span>'
             '<div class="sg-inline-actions">'
             f'<a class="btn secondary" href="{action}" '
             f'aria-label="Открыть и проверить: {esc(row.title)}">'

@@ -159,4 +159,21 @@ small,.sg-field small,.sg-footnote,.sg-field-help{font-size:var(--sg-fs-caption)
   .sg-workflow-banner h2{font-size:21px}
   .sg-mini-row b{font-size:13px}
 }
+
+/* VK image belongs to the approval artifact, not a hidden technical attachment. */
+.sg-vk-review-thumb{display:block;width:min(100%,220px);margin:12px 0;border:1px solid var(--sg-line,#dbe5ef);border-radius:12px;overflow:hidden;background:var(--sg-bg,#f4f8fd)}
+.sg-vk-review-thumb img{display:block;width:100%;height:auto;aspect-ratio:4/5;object-fit:contain}
+.sg-vk-review-thumb:focus-visible{outline:3px solid var(--sg-blue,#0b7cff);outline-offset:3px}
+.sg-vk-review-issue{font-size:13px;line-height:1.5;margin:8px 0;color:var(--sg-text,#13203d)}
+.sg-vk-image-verdict{border-left:3px solid var(--sg-orange,#f59b23)}
+.sg-vk-image-verdict h3{margin-bottom:6px}
+.sg-vk-image-verdict li{margin:5px 0;overflow-wrap:anywhere}
+.material-detail-card .sg-creative-images{margin:14px 0}
+.material-detail-card .sg-image-gallery{grid-template-columns:minmax(0,min(100%,320px))}
+.material-detail-card .sg-image-tile>a.is-vk-portrait{aspect-ratio:4/5}
+.material-detail-card .sg-image-tile>a.is-square{aspect-ratio:1/1}
+@media(max-width:620px){
+  .sg-vk-review-thumb{width:min(100%,180px)}
+  .material-detail-card .sg-image-gallery{grid-template-columns:minmax(0,1fr)}
+}
 """
