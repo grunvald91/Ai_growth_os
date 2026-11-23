@@ -1,6 +1,9 @@
 """Visual-only repair retains every original MP3 and refuses new speech."""
 import hashlib
+import io
 import json
+
+from PIL import Image
 
 import pytest
 from sqlalchemy import select
@@ -36,12 +39,23 @@ async def test_visual_only_repair_generates_new_images_without_story_or_tts_and_
     approve(environment,repair_id)
     seen=[]
     report=review(*(issue(i) for i in range(3)))
+
+    def visibly_changed(png, marker):
+        image = Image.open(io.BytesIO(png)).convert('RGB')
+        image.putpixel((1, 1), (0, 255, marker))
+        output = io.BytesIO()
+        image.save(output, format='PNG')
+        return output.getvalue()
     def build(settings,payload,store):
         p=fake_factory(settings,payload,store);p.visual_review=True;p.max_api_calls=payload.max_api_calls
         initial=p.images
         class Images:
-            async def generate(self,*args):seen.append('new image');return await initial.generate(*args)
-            async def revise(self,*args):seen.append('redraw');return await initial.generate(*args[:2])
+            async def generate(self,*args):
+                seen.append('new image')
+                return visibly_changed(await initial.generate(*args), 15)
+            async def revise(self,*args):
+                seen.append('redraw')
+                return visibly_changed(await initial.generate(*args[:2]), 30)
         class Planner:
             async def plan(self,*args):pytest.fail('Original spoken story must never be regenerated')
         class Speech:
@@ -63,6 +77,12 @@ async def test_visual_only_repair_generates_new_images_without_story_or_tts_and_
     new=job_directory(settings.products_root,product,repair_id)/'stages'
     assert {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in new.glob('*speech.data')}==original_hashes
     assert (new/'storyboard.data').read_bytes()==(original/'storyboard.data').read_bytes()
+    for index in range(3):
+        old_picture = original/f'scene-{index:02}-image.data'
+        new_picture = new/f'scene-{index:02}-image.data'
+        revised_picture = new/f'scene-{index:02}-image-revised.data'
+        assert hashlib.sha256(new_picture.read_bytes()).digest() != hashlib.sha256(old_picture.read_bytes()).digest()
+        assert hashlib.sha256(revised_picture.read_bytes()).digest() != hashlib.sha256(old_picture.read_bytes()).digest()
     with factory() as db:
         t=owner_task(db,product,repair_id);assert t.status==TaskStatus.COMPLETED
         assert json.loads(records(db,t)[1].content)['calls']==11  # 3 new + 3 regions + critic + author + 3 revisions
