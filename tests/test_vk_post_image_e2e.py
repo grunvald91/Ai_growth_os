@@ -185,6 +185,32 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
         assert failed_page.status_code == 200
         assert "Материал не утверждён" in failed_page.body.decode("utf-8")
         assert image_uri in failed_page.body.decode("utf-8")
+        # A deliberate owner click must approve the ORIGINAL media without any
+        # additional image or critic billing, and keep the reviewer audit intact.
+        from urllib.parse import urlencode
+        from app.content.vk_image_critic import _post_digest
+        accepted_form = urlencode({
+            "image_confirmed": "yes",
+            "facts_confirmed": "yes",
+            "expected_image_sha256": payload["image_sha256"],
+            "expected_post_sha256": _post_digest(payload),
+        }).encode("utf-8")
+
+        async def accepted_receive():
+            return {"type": "http.request", "body": accepted_form, "more_body": False}
+
+        accepted_request = Request({
+            "type": "http", "method": "POST", "path": "/",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+        }, receive=accepted_receive)
+        monkeypatch.setattr("app.api.content_studio.get_settings", lambda: settings)
+        accepted = await studio_material_approve(company.id, post.id, accepted_request, db=db)
+        assert accepted.status_code == 303
+        assert "approval_error" not in accepted.headers["location"]
+        db.refresh(post)
+        assert post.status == ArtifactStatus.APPROVED
+        assert verified_vk_image_approval(db, post, media)
+        assert len(image_requests) == len(vision_requests) == 1
     assert not list(db.scalars(select(Publication).where(
         Publication.product_id == company.id)))
     # The production path never attempts to publish a post in this task.
