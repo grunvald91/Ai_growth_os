@@ -360,6 +360,8 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "whiteboard_renderer": "Видео", "seo_factory": "SEO-завод",
             "business_insights": "Бизнес-анализ",
         }.get(task.assigned_agent, "Задание")
+        if task.assigned_agent == 'whiteboard_renderer' and (task.title or '').startswith('WHITEBOARD-VISUAL-REPAIR:'):
+            kind_name = 'Перерисовка'
         special_summary = None
         display_label = "Нужно решение" if needs_decision else title
         if task.assigned_agent == "seo_factory":
@@ -690,11 +692,13 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         Task.status == TaskStatus.WAITING_APPROVAL,
     ).order_by(Task.created_at.desc()).limit(5)))
     for task in awaiting:
+        is_repair = (task.title or '').startswith('WHITEBOARD-VISUAL-REPAIR:')
         notes.append({
             "kind": "review",
-            "text": "Подтвердите создание простого видео (платные API)",
+            "text": ('Подтвердите перерисовку изображений (без новой озвучки)'
+                     if is_repair else 'Подтвердите создание простого видео (платные API)'),
             "resource_kind": "video",
-            "resource_title": "Создание простого видео",
+            "resource_title": 'Перерисовка рисунков' if is_repair else 'Создание простого видео',
             "resource_status": "Требует подтверждения",
             "url": f"/studio/products/{product_id}/whiteboard/{task.id}",
             "id": str(task.id), "created_at": created_stamp(task),
@@ -1146,7 +1150,9 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
                        "и не разрешение на публикацию. Проверьте реальную статью и её статус "
                        "в SEO-заводе; из этой карточки ничего не публикуется.")
     elif key == "waiting_approval" and task.assigned_agent == "whiteboard_renderer":
-        explanation = "Нужно подтвердить создание видео. Платные вызовы требуют отдельного согласия."
+        explanation = ('Нужно подтвердить отдельные платные вызовы для новых рисунков. '
+                       'Исходная озвучка сохраняется.' if (task.title or '').startswith('WHITEBOARD-VISUAL-REPAIR:')
+                       else 'Нужно подтвердить создание видео. Платные вызовы требуют отдельного согласия.')
     else:
         explanation = description
     failure_note = (

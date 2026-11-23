@@ -24,6 +24,13 @@ from .science import FactReviewer, requires_science_review
 from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, safe_error, scoped_settings
 
 
+class CachedAudioOnlySpeech:
+    """Non-network placeholder. Repair jobs are never allowed to request TTS."""
+
+    async def synthesize(self, *args, **kwargs):
+        raise PermissionError('New speech generation is forbidden during image regeneration')
+
+
 def build_pipeline(settings, payload, store):
     if payload.image_provider != 'claudehub' or payload.models.image != 'gemini-3.1-flash-image':
         raise ReadinessError('image_provider_required')
@@ -47,7 +54,9 @@ def build_pipeline(settings, payload, store):
     return WhiteboardPipeline(
         storyboard=LLMStoryboardProvider(service, model=payload.models.storyboard),
         images=ClaudeHubGeminiImageProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.image),
-        speech=OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech, proxy_url=settings.whiteboard_proxy_url),
+        speech=(CachedAudioOnlySpeech() if payload.repair_regenerate_images else
+                OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech,
+                                         proxy_url=settings.whiteboard_proxy_url)),
         regions=regions,
         renderer=MarkerSweepRenderer(), sanitizer=privacy, checkpoints=store,
         visual_review=payload.visual_review, max_api_calls=payload.max_api_calls,
@@ -182,7 +191,11 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
             job_settings = scoped_settings(settings, payload.models, payload.request.voice)
-            await (readiness or preflight)(job_settings, payload.models, payload.request.voice)
+            if readiness is None:
+                await preflight(job_settings, payload.models, payload.request.voice,
+                                skip_speech=payload.repair_regenerate_images)
+            else:
+                await readiness(job_settings, payload.models, payload.request.voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
                                     visual_review=payload.visual_review,
                                     image_provider='claudehub' if payload.image_provider == 'claudehub' else None)

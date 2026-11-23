@@ -146,7 +146,8 @@ class WhiteboardPipeline:
                 InvalidAuthorDecision, VISUAL_DECISION_FALLBACK_REASON)
             from pydantic import ValidationError
             from .runtime import ReadinessError
-            if total - 1 + 2 + len(storyboard.scenes) > self.max_api_calls:
+            if (not getattr(self, 'cached_audio_only', False)
+                    and total - 1 + 2 + len(storyboard.scenes) > self.max_api_calls):
                 raise ReadinessError('review_budget')
             total += 2
             originals = []

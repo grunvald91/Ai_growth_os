@@ -72,6 +72,7 @@ def job_state(db, product_id, task_id):
             'image_provider': payload.image_provider,
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
+            'repair_regenerate_images': payload.repair_regenerate_images,
             'request_digest': digest(source.content), 'approval_status': approval.status,
             'resumable': can_resume(task.status, json.loads(state.content), payload),
             'top_up': can_top_up(task.status, json.loads(state.content), payload),
@@ -122,7 +123,9 @@ async def _approve(db, product_id, task_id, body, actor, settings):
     task = owner_task(db, product_id, task_id)
     _, saved, _, payload = records(db, task)
     try:
-        await preflight(scoped_settings(settings, payload.models, payload.request.voice), payload.models, payload.request.voice)
+        await preflight(scoped_settings(settings, payload.models, payload.request.voice),
+                        payload.models, payload.request.voice,
+                        **({'skip_speech': True} if payload.repair_regenerate_images else {}))
     except ReadinessError as exc:
         # Short transaction after network I/O. Do not overwrite cancellation.
         task = owner_task(db, product_id, task_id, lock=True)
@@ -238,11 +241,15 @@ def job_html(state, product_id, *, error=None):
     code = state.get('error')
     warning = error or MESSAGES.get(code)
     completed = state['status'] == 'completed'
+    repair_label = 'Перерисовка изображений' if state.get('visual_repair_from') else 'Простое видео'
     body = (f'<section class="sg-surface wb-job{" wb-result" if completed else ""}">'
-            '<header class="wb-job-head"><p class="wb-eyebrow">Простое видео</p>'
+            f'<header class="wb-job-head"><p class="wb-eyebrow">{repair_label}</p>'
             f'<h2>{esc(state["request"]["topic"])}</h2>'
             f'<p role="status" class="wb-status{" wb-status-ready" if completed else ""}">'
             f'{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p></header>')
+    # A rejected repair POST must not hide its error inside collapsed technical details.
+    if completed and warning:
+        body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if completed:
         # The actual playable file must be the focal point, not the log or API metadata.
         length_label = '1 мин · 6 сцен' if state['request'].get('scenes', 3) == 6 else '30 сек · 3 сцены'
@@ -289,7 +296,7 @@ def job_html(state, product_id, *, error=None):
                  f'<progress aria-label="Завершённые этапы создания видео" value="{done}" max="{total}" style="width:100%"></progress>')
     if state.get('failed_stage') in stages:
         body += f'<p>Ошибка на этапе: {esc(stages[state["failed_stage"]])}</p>'
-    if warning:
+    if warning and not completed:
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if state['status'] == 'queued' and state.get('retry_at'):
         reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
@@ -352,10 +359,21 @@ def job_html(state, product_id, *, error=None):
     if state.get('image_provider') == 'claudehub':
         body += '<p>Новые рисунки и перерисовки: Gemini 3.1 Flash Image через API ClaudeHub. Автоматической замены модели или провайдера нет.</p>'
     if state.get('visual_repair_from'):
-        body += ('<p><strong>Переделка рисунков с исходной озвучкой.</strong> Сценарий, голос и аудиофайлы сохраняются. '
-                 'Новая озвучка запрещена. Раскрытие рисунков привязано к длительности исходных реплик.</p>'
-                 f'<p>Из исходного задания перенесено вызовов: {state["inherited_calls"]}. '
-                 f'На визуальную правку осталось не более {state["max_api_calls"] - state["inherited_calls"]} вызовов в общем лимите.</p>')
+        source_link = f'/studio/products/{product_id}/whiteboard/{state["visual_repair_from"]}'
+        body += ('<p><strong>Перерисовка без новой озвучки.</strong> Новые изображения создаются отдельно. '
+                 'Сценарий и оригинальные MP3 сохраняются побайтно. Новая озвучка запрещена.</p>'
+                 f'<p><a href="{source_link}">Исходный ролик</a> · '
+                 f'В исходном задании было {state["inherited_calls"]} API-вызовов.</p>')
+        if state.get('repair_regenerate_images'):
+            body += (f'<p><strong>Отдельный лимит перерисовки:</strong> до '
+                     f'{state["max_api_calls"]} новых API-вызовов после подтверждения; '
+                     'старые вызовы не списываются из нового лимита.</p>')
+        else:
+            body += (f'<p>Осталось до {max(0, state["max_api_calls"] - state["inherited_calls"])} '
+                     'вызовов из старого общего лимита.</p>')
+        if state['status'] == 'waiting_approval':
+            body += ('<p class="sg-warning" role="status"><strong>Задание на перерисовку создано.</strong> '
+                     'Для запуска новых рисунков подтвердите дополнительные платные вызовы ниже.</p>')
     review = state.get('visual_review_result')
     if isinstance(review, dict):
         if review.get('author_decision_fallback'):
@@ -390,8 +408,8 @@ def job_html(state, product_id, *, error=None):
                  f'<form method="post" action="{base}/approve" class="sg-form">'
                  f'<input type="hidden" name="request_digest" value="{state["request_digest"]}">'
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
-                 f'Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов</span></label>'
-                 '<button class="btn primary" type="submit">Подтвердить и сгенерировать</button></form>')
+                 f'Разрешаю {"перерисовку" if state.get("visual_repair_from") else "генерацию видео"}: до {state["max_api_calls"]} API-вызовов</span></label>'
+                 f'<button class="btn primary" type="submit">{"Подтвердить перерисовку" if state.get("visual_repair_from") else "Подтвердить и сгенерировать"}</button></form>')
     if state['status'] in {'queued', 'running', 'waiting_approval'}:
         body += (f'<form method="post" action="{base}/cancel"><button class="btn secondary">Остановить задание</button></form>')
     if state['status'] in {'queued', 'running'}:
@@ -401,7 +419,14 @@ def job_html(state, product_id, *, error=None):
         if not state.get('visual_repair_from'):
             body += (f'<form method="post" action="{base}/repair" class="sg-form wb-repair">'
                      '<button type="submit" class="btn secondary">Переделать рисунки</button>'
-                     '<small>Сценарий и озвучка сохранятся. Платные вызовы — только после подтверждения.</small></form>')
+                     '<small role="status" aria-live="polite">Откроется отдельное задание с явным статусом и подтверждением дополнительных вызовов. Сценарий и MP3 сохранятся.</small></form>'
+                     '<script>(()=>{const form=document.querySelector(".wb-repair");'
+                     'if(!form)return;form.addEventListener("submit",()=>{'
+                     'const button=form.querySelector("button");'
+                     'if(button){button.disabled=true;button.textContent="Создаём задание…";}'
+                     'const status=form.querySelector("[role=status]");'
+                     'if(status)status.textContent="Проверяем сохранённые файлы и создаём заявку на перерисовку…";'
+                     '});})();</script>')
     body += f'<p class="wb-return"><a href="/studio/products/{product_id}/whiteboard">К списку видео</a></p></section>'
     return body
 
@@ -539,8 +564,22 @@ def history_html(states, product_id):
     body = '<section class="sg-surface wb-library" aria-labelledby="wb-library-title"><div class="wb-library-head"><h2 id="wb-library-title">Мои видео</h2><span class="wb-library-count">' + str(len(states)) + '</span></div><div id="whiteboard-jobs" aria-live="polite">'
     for state in states:
         url = f'{base}/{state["task_id"]}'
-        body += (f'<article class="wb-library-item"><p class="wb-library-title"><span class="wb-list-icon" aria-hidden="true">▶</span><a href="{url}">{esc(state["request"]["topic"])}</a></p>'
-                 f'<p class="wb-library-status">{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p>')
+        repair = bool(state.get('visual_repair_from'))
+        kind = 'Перерисовка · ' if repair else ''
+        stage = state.get('stage') or ''
+        repair_stage = {'image': 'новые рисунки', 'visual_review': 'проверка критика',
+                        'visual_decision': 'разбор замечаний', 'image_revision': 'исправление рисунка',
+                        'regions': 'области рисования', 'audio_reuse': 'готовое аудио',
+                        'rendering': 'сборка MP4'}.get(stage)
+        status_label = STATUS_NAMES.get(state['status'], state['status'])
+        if repair and state['status'] == 'running' and repair_stage:
+            status_label += ' · ' + repair_stage
+        body += (f'<article class="wb-library-item"><p class="wb-library-title"><span class="wb-list-icon" aria-hidden="true">▶</span><a href="{url}">{esc(kind + state["request"]["topic"])}</a></p>'
+                 f'<p class="wb-library-status">{esc(status_label)}</p>')
+        if repair and state['status'] == 'waiting_approval':
+            body += f'<p><a class="btn primary" href="{url}">Подтвердить перерисовку</a></p>'
+        if repair and state['status'] == 'failed':
+            body += f'<p><a class="btn secondary" href="{url}">Посмотреть причину ошибки</a></p>'
         if state['status'] == 'completed':
             body += (f'<p><a class="btn primary" href="{url}">Посмотреть видео</a> '
                      f'<a class="btn secondary" href="{url}/files/video.mp4?download=true" download>Скачать MP4</a></p>')
@@ -555,6 +594,9 @@ def history_html(states, product_id):
       const base = ''' + json.dumps(base) + ''';
       const endpoint = ''' + json.dumps(f'/studio/products/{product_id}/whiteboard/jobs.json') + ''';
       const names = ''' + json.dumps(STATUS_NAMES, ensure_ascii=False) + ''';
+      const repairStages = {image:'новые рисунки',visual_review:'проверка критика',
+        visual_decision:'разбор замечаний',image_revision:'исправление рисунка',
+        regions:'области рисования',audio_reuse:'готовое аудио',rendering:'сборка MP4'};
       const counter = document.querySelector('.wb-library-count');
       async function refresh() {
         if (document.hidden) return;
@@ -572,12 +614,21 @@ def history_html(states, product_id):
             const title = document.createElement('p'); title.className = 'wb-library-title';
             const link = document.createElement('a');
             link.href = base + '/' + state.task_id;
-            link.textContent = state.request.topic;
+            const repair = !!state.visual_repair_from;
+            link.textContent = (repair ? 'Перерисовка · ' : '') + state.request.topic;
             const glyph = document.createElement('span'); glyph.className = 'wb-list-icon'; glyph.textContent = '▶'; glyph.setAttribute('aria-hidden', 'true');
             title.append(glyph, link); article.append(title);
             const status = document.createElement('p'); status.className = 'wb-library-status';
-            status.textContent = names[state.status] || 'Обновление статуса';
+            status.textContent = (names[state.status] || 'Обновление статуса') +
+              (repair && state.status === 'running' && repairStages[state.stage] ? ' · ' + repairStages[state.stage] : '');
             article.append(status);
+            if (repair && (state.status === 'waiting_approval' || state.status === 'failed')) {
+              const actions = document.createElement('p');
+              const action = document.createElement('a'); action.href = link.href;
+              action.className = 'btn ' + (state.status === 'waiting_approval' ? 'primary' : 'secondary');
+              action.textContent = state.status === 'waiting_approval' ? 'Подтвердить перерисовку' : 'Посмотреть причину ошибки';
+              actions.append(action); article.append(actions);
+            }
             if (state.status === 'completed') {
               const actions = document.createElement('p');
               const view = document.createElement('a');
