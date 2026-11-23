@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 import hashlib
 
 from sqlalchemy import case, exists, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer, load_only
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.api.studio_resource_widgets import resource_widget
@@ -165,6 +165,53 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
     return title[:125] or "Подготовка материала"
 
 
+def owner_failure_reason(runs: list[AgentRun]) -> str:
+    """Explain only recognized failure codes, never show raw provider errors.
+
+    AgentRun.error may contain internal paths, request fragments or tokens.
+    Unknown codes are explicitly unknown rather than guessed or echoed.
+    """
+    last_error = next(
+        (str(run.error).strip() for run in reversed(runs)
+         if run.status == "failed" and run.error and str(run.error).strip()),
+        "",
+    )
+    if not last_error:
+        return "Подробная причина не сохранена в журнале выполнения."
+    # Match complete code tokens, not arbitrary substrings of error messages.
+    code_parts = last_error.casefold().split(":")[:3]
+    code = ":".join(code_parts)
+    if last_error == "One or more image frames could not be generated":
+        return "Не удалось создать одно или несколько изображений."
+    if any(marker in code_parts for marker in (
+        "timeouterror", "readtimeout", "connecttimeout", "upstream_timeout",
+    )):
+        return "Превышено время ожидания ответа сервиса."
+    if any(marker in code_parts for marker in (
+        "connecterror", "connectionerror", "networkerror", "network_failure",
+    )):
+        return "Не удалось установить соединение с сервисом."
+    if any(marker in code_parts for marker in (
+        "provider_request_failed", "provider_http_error", "httpstatuserror",
+        "provider_transient",
+    )):
+        return "Не удалось выполнить запрос к сервису обработки."
+    if code.startswith("local_render_failed:"):
+        return "Не удалось собрать видеофайл."
+    if "context_preparation_failed" in code_parts:
+        return "Не удалось подготовить исходные данные для генерации."
+    if any(marker in code_parts for marker in (
+        "invalid_article_output", "invalid_article_package",
+        "invalid_derivative_assembly", "model_unusable_response",
+        "providermalformedresponseerror", "provideremptyresponseerror",
+        "creative_failed:validationerror", "creative_failed:jsondecodeerror",
+        "quick_post_failed:validationerror", "quick_post_failed:jsondecodeerror",
+        "editorial_plan_failed:validation",
+    )):
+        return "Результат генерации не прошёл проверку формата или содержимого."
+    return "Точная причина ошибки не определена по сохранённому журналу."
+
+
 def task_public_description(task: Task) -> str:
     """Show truthful Russian owner copy without rewriting historical task keys."""
     if task.assigned_agent == "company_intake":
@@ -217,14 +264,25 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
         by_request.setdefault(record.task_id, record)
     runs = list(db.scalars(select(AgentRun).where(
         AgentRun.task_id.in_(ids),
-    ).order_by(AgentRun.started_at, AgentRun.id)))
+    ).options(load_only(
+        AgentRun.id, AgentRun.task_id, AgentRun.agent_name,
+        AgentRun.status, AgentRun.started_at, AgentRun.error,
+    )).order_by(AgentRun.started_at, AgentRun.id)))
     by_runs = {}
     for run in runs:
         by_runs.setdefault(run.task_id, []).append(run)
+    # A task list needs artifact metadata, never an entire article/video brief.
+    # Fetch the small number of reports/plans that need JSON separately.
     results = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id.in_(ids),
         Artifact.kind.in_(RESULT_KINDS | JOB_REPORT_KINDS),
-    ).order_by(Artifact.created_at.desc(), Artifact.id.desc())))
+    ).options(defer(Artifact.content))
+     .order_by(Artifact.created_at.desc(), Artifact.id.desc())))
+    payload_ids = [art.id for art in results
+                   if art.kind in {"editorial_plan", "seo_factory_report"}]
+    payloads = dict(db.execute(select(Artifact.id, Artifact.content).where(
+        Artifact.product_id == product_id, Artifact.id.in_(payload_ids),
+    )).all()) if payload_ids else {}
     by_results = {}
     for result in results:
         by_results.setdefault(result.task_id, []).append(result)
@@ -281,13 +339,17 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             if art.kind != "editorial_plan":
                 continue
             try:
-                draft_plan = json.loads(art.content or "{}").get("approval_state") == "draft"
+                draft_plan = json.loads(payloads.get(art.id) or "{}").get("approval_state") == "draft"
             except (ValueError, TypeError, AttributeError):
                 pass
             if draft_plan:
                 break
         needs_decision = key == "waiting_approval" or pending_artifacts or draft_plan
         recent_runs = by_runs.get(task.id, [])
+        if key == "failed" and task.assigned_agent != "seo_factory":
+            special_failure = owner_failure_reason(recent_runs)
+        else:
+            special_failure = None
         active_run = next((run for run in reversed(recent_runs)
                            if run.status == "running"), None)
         stage_name = STAGE_NAMES.get(active_run.agent_name, "Работа ИИ-команды") if active_run else None
@@ -313,7 +375,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
                     if art.kind != "seo_factory_report":
                         continue
                     try:
-                        report_data = json.loads(art.content or "{}")
+                        report_data = json.loads(payloads.get(art.id) or "{}")
                     except (TypeError, ValueError):
                         continue
                     if isinstance(report_data, dict) and type(report_data.get("articles_queued")) is int:
@@ -359,7 +421,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "needs_decision": needs_decision,
             "kind_label": kind_name,
             "current_stage": stage_name,
-            "display_summary": special_summary,
+            "display_summary": special_summary or special_failure,
             "result_count": len(items),
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
@@ -506,12 +568,17 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
         "ready": Task.status == TaskStatus.COMPLETED,
         "problems": Task.status.in_((TaskStatus.FAILED, TaskStatus.CANCELLED)),
     }
-    counts = {
-        name: int(db.scalar(select(func.count(Task.id)).where(
-            *base, *((predicate,) if predicate is not None else ()),
-        )) or 0)
-        for name, predicate in predicates.items()
-    }
+    # One aggregate scan instead of five separate count queries per page/poll.
+    totals = db.execute(select(
+        func.count(Task.id),
+        func.sum(case((active, 1), else_=0)),
+        func.sum(case((attention, 1), else_=0)),
+        func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)),
+        func.sum(case((Task.status.in_((TaskStatus.FAILED, TaskStatus.CANCELLED)), 1),
+                      else_=0)),
+    ).where(*base)).one()
+    counts = dict(zip(("all", "active", "approval", "ready", "problems"),
+                      (int(value or 0) for value in totals)))
     total = counts[tab]
     max_page = max(1, (total + page_size - 1) // page_size)
     page = min(page, max_page)
@@ -554,7 +621,8 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     candidates = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
         Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
-    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
+    ).options(defer(Artifact.content))
+     .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
     for row in candidates:
         is_animator = row.kind == "whiteboard_video"
         readable_title = readable_artifact_title(row)
@@ -581,7 +649,8 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         Artifact.status == ArtifactStatus.DRAFT,
         Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
         Artifact.created_at >= datetime.now(timezone.utc) - timedelta(days=3),
-    ).order_by(Artifact.created_at.desc()).limit(4)))
+    ).options(defer(Artifact.content))
+     .order_by(Artifact.created_at.desc()).limit(4)))
     known = {note["id"] for note in notes}
     for draft in recent_drafts:
         if str(draft.id) not in known:
@@ -1080,6 +1149,11 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         explanation = "Нужно подтвердить создание видео. Платные вызовы требуют отдельного согласия."
     else:
         explanation = description
+    failure_note = (
+        '<p class="sg-work-failure" role="alert"><b>Что произошло:</b> '
+        + safe(owner_failure_reason(runs)) + '</p>'
+        if key == "failed" else ""
+    )
     refresh = ('<p class="sg-work-refresh" role="status">Состояние обновляется каждые 15 секунд. '
                'Эту страницу можно закрыть и вернуться позже.</p>'
                if key in {"queued", "running"} else "")
@@ -1139,6 +1213,6 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
-        + fail + sections + refresh + next_action
+        + failure_note + fail + sections + refresh + next_action
         + f'<p><a class="sg-mini-link" href="{base}/work">← Все задания</a></p></section>'
     )

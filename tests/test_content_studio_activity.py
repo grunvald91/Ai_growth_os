@@ -1084,3 +1084,151 @@ def test_retry_disclosure_has_accessible_label_and_touch_targets():
     assert ".sg-work-retry-consent" in CSS
     assert "min-height:44px" in CSS
     assert "accent-color:var(--s-accent" in CSS
+
+@pytest.mark.parametrize("error,expected", [
+    ("quick_post_failed:ReadTimeout:private-token", "Превышено время ожидания ответа сервиса."),
+    ("creative_failed:ConnectError", "Не удалось установить соединение с сервисом."),
+    ("upstream_failed:provider_request_failed:post_writer_editor", "Не удалось выполнить запрос к сервису обработки."),
+    ("assembly_failed:invalid_article_output:marketing_editor", "Результат генерации не прошёл проверку формата или содержимого."),
+    ("local_render_failed:RuntimeError", "Не удалось собрать видеофайл."),
+    ("One or more image frames could not be generated", "Не удалось создать одно или несколько изображений."),
+    ("creative_failed:SecretCustomException:https://private.example/api", "Точная причина ошибки не определена по сохранённому журналу."),
+    ("creative_failed:NotConnectionError:secret", "Точная причина ошибки не определена по сохранённому журналу."),
+])
+def test_owner_failure_reason_is_conservative_and_never_echoes_provider_error(error, expected):
+    from app.api.content_studio_activity import owner_failure_reason
+    run = AgentRun(task_id=uuid4(), agent_name="creative_director",
+                   status="failed", error=error)
+    assert owner_failure_reason([run]) == expected
+    assert owner_failure_reason([]) == "Подробная причина не сохранена в журнале выполнения."
+    # An earlier failed step must not contaminate a successfully completed task.
+    assert owner_failure_reason([AgentRun(task_id=uuid4(), agent_name="post_strategist",
+                                           status="completed", error=error)]) == (
+        "Подробная причина не сохранена в журнале выполнения."
+    )
+
+
+def test_task_failure_explanation_is_private_and_updates_after_recovery(owner_studio):
+    client, db, company, foreign = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="POST: Сезонная акция", status=TaskStatus.FAILED)
+    db.add(task)
+    db.flush()
+    private_error = "quick_post_failed:ReadTimeout:secret-api-key-do-not-show"
+    db.add(AgentRun(task_id=task.id, agent_name="post_writer_editor",
+                    status="failed", error=private_error))
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    detail = client.get(f"{base}/tasks/{task.id}")
+    assert detail.status_code == 200
+    assert "Что произошло:" in detail.text
+    assert "Превышено время ожидания ответа сервиса." in detail.text
+    assert "secret-api-key-do-not-show" not in detail.text
+    problems = client.get(base + "/work?tab=problems")
+    assert problems.status_code == 200
+    assert "Превышено время ожидания ответа сервиса." in problems.text
+    assert "secret-api-key-do-not-show" not in problems.text
+    activity = client.get(base + "/activity.json").json()
+    assert private_error not in str(activity)
+    assert "Превышено время ожидания ответа сервиса." in str(activity)
+    assert client.get(f"/studio/products/{foreign.id}/tasks/{task.id}").status_code == 404
+    assert private_error not in client.get(
+        f"/studio/products/{foreign.id}/work?tab=problems"
+    ).text
+    task.status = TaskStatus.COMPLETED
+    db.commit()
+    recovered = client.get(f"{base}/tasks/{task.id}").text
+    assert "Что произошло:" not in recovered
+    assert "Превышено время ожидания ответа сервиса." not in recovered
+    assert "Превышено время ожидания ответа сервиса." not in client.get(
+        base + "/work?tab=ready"
+    ).text
+
+
+def test_unknown_failure_remains_unknown_without_leaking_details(owner_studio):
+    client, db, company, _ = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_creative",
+                title="CREATIVE: Открытка", status=TaskStatus.FAILED)
+    db.add(task)
+    db.flush()
+    db.add(AgentRun(task_id=task.id, agent_name="creative_director",
+                    status="failed", error="creative_failed:PrivateBackendError:secret/path"))
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    for url in (f"{base}/tasks/{task.id}", base + "/work?tab=problems"):
+        html = client.get(url).text
+        assert "Точная причина ошибки не определена по сохранённому журналу." in html
+        assert "PrivateBackendError" not in html
+        assert "secret/path" not in html
+
+
+def test_tasks_board_uses_one_aggregate_for_all_status_counters(owner_studio):
+    from sqlalchemy import event
+    from app.api.content_studio_activity import work_page
+    _, db, company, _ = owner_studio
+    db.add_all([
+        Task(product_id=company.id, assigned_agent="content_factory",
+             title="CONTENT: Выполняется", status=TaskStatus.RUNNING),
+        Task(product_id=company.id, assigned_agent="content_factory",
+             title="CONTENT: Ошибка", status=TaskStatus.FAILED),
+        Task(product_id=company.id, assigned_agent="content_factory",
+             title="CONTENT: Готово", status=TaskStatus.COMPLETED),
+    ])
+    db.commit()
+    sql = []
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        sql.append(statement.lower())
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        data = work_page(db, company.id)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert data["counts"] == {
+        "all": 3, "active": 1, "approval": 1, "ready": 1, "problems": 1,
+    }
+    # Prior implementation ran five separate status count queries.
+    counted = [statement for statement in sql
+               if "count(" in statement and "from tasks" in statement]
+    assert len(counted) == 1, counted
+
+
+def test_notifications_only_scope_keeps_status_counts_without_full_feed(owner_studio, monkeypatch):
+    from app.api import content_studio
+    client, db, company, foreign = owner_studio
+    active = Task(product_id=company.id, assigned_agent="content_factory",
+                  title="CONTENT: Запись", status=TaskStatus.RUNNING)
+    failed = Task(product_id=company.id, assigned_agent="content_factory",
+                  title="CONTENT: Ошибка", status=TaskStatus.FAILED)
+    db.add_all([active, failed])
+    db.commit()
+    # This endpoint must not rehydrate dozens of jobs to fetch a small
+    # notification dropdown. The regular activity endpoint is unchanged.
+    def should_not_load_full_feed(*args, **kwargs):
+        raise AssertionError("Tasks board unexpectedly loaded full activity feed")
+    monkeypatch.setattr(content_studio, "work_items", should_not_load_full_feed)
+    url = f"/studio/products/{company.id}/activity.json?scope=notifications"
+    response = client.get(url)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["jobs"] == []
+    assert data["active_count"] == 1
+    assert any(item["id"] == str(failed.id) for item in data["notices"])
+    assert response.headers["cache-control"] == "private, no-store"
+    other = client.get(f"/studio/products/{foreign.id}/activity.json?scope=notifications")
+    assert other.status_code == 200
+    assert other.json()["active_count"] == 0
+    assert other.json()["notices"] == []
+
+
+def test_tasks_poll_does_not_refetch_same_board_during_initial_paint():
+    from app.api.content_studio_work_ui import JS
+    from app.api.content_studio import studio_page_shell
+    assert "poll({includeBoard:false});" in JS
+    assert "if(workBoard&&includeBoard)" in JS
+    assert "feedUrl.searchParams.set('scope','notifications')" in JS
+    assert "window.setInterval(poll,20000)" in JS
+    # Both the full Studio shell and classic dashboard must load fresh assets.
+    from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
+    assert "sg-work-failure" in STUDIO_CSS
+    assert "poll({includeBoard:false})" in STUDIO_JS
