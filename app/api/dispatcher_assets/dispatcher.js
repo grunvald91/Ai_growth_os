@@ -1106,7 +1106,7 @@
     var audience=document.getElementById('sg-create-audience');
     var brief=document.getElementById('sg-create-brief');
     var imageModel=document.getElementById('sg-create-image-model');
-    var vkImageModel=document.getElementById('sg-create-vk-image-model');
+    var vkImageModel=document.getElementById('sg-create-vk-model-choice');
     var vkRatio=document.getElementById('sg-create-vk-image-ratio');
     var aspect=document.getElementById('sg-create-aspect');
     var a=audience ? audience.value.trim() : '';
