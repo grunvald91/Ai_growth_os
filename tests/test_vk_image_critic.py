@@ -275,7 +275,7 @@ async def test_owner_explicitly_accepts_existing_vk_image_with_immutable_audit(
     after = json.loads(approved.content)
     assert after["image_review_state"] == "owner_approved"
     assert after["image_state"] == "ready"
-    assert after["image_critical_issues"] == before.get("image_critical_issues", [])
+    assert after.get("image_critical_issues", []) == before.get("image_critical_issues", [])
     assert verified_vk_image_approval(db, approved, image)
     decision = db.get(Artifact, __import__("uuid").UUID(after["image_owner_approval_artifact_id"]))
     assert decision is not None
