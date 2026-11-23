@@ -160,7 +160,7 @@ async def test_community_token_upload_error_fails_before_post(tmp_path):
             raise PlatformError("VK error 27")
 
     photo = tmp_path / "input.png"
-    photo.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
+    photo.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
     with pytest.raises(VKPhotoUploadError, match="ключом"):
         await upload_wall_photo(BlockedAdapter(), "community-token", "123456", photo)
 
