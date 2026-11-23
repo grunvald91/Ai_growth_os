@@ -226,3 +226,45 @@ async def test_redraw_stale_form_and_approved_post_are_rejected(db, tmp_path):
         queue_vk_image_redraw(
             db, product.id, post.id, source_version=post.version,
             source_digest=source_fingerprint(post))
+
+
+@pytest.mark.asyncio
+async def test_redraw_is_consumed_by_real_content_worker_without_rewriting_post(
+    db, tmp_path, monkeypatch,
+):
+    from contextlib import contextmanager
+    from app.content.worker import run_content_once
+    from app.api.content_studio import material_detail_page
+
+    product, origin, post, old_image, settings = await _blocked(db, tmp_path)
+    page = material_detail_page(db, product, post, root=tmp_path)
+    assert "Переделать картинку" in page
+    assert 'name="paid_confirmed"' in page
+    old_text = json.loads(post.content)["body"]
+    job = queue_vk_image_redraw(
+        db, product.id, post.id, source_version=post.version,
+        source_digest=source_fingerprint(post), feedback="Другая композиция",
+    )
+    async def fake_image(*args, **kwargs):
+        return _png((110, 80, 100))
+    async def fake_critic(self, picture, *, company_name, title, body):
+        return VKImageReview(summary="Готова новая картинка.")
+    monkeypatch.setattr("app.content.vk_image_regen.request_image", fake_image)
+    monkeypatch.setattr(
+        "app.content.vk_image_critic.VKImageVisionReviewer.review", fake_critic)
+
+    @contextmanager
+    def factory():
+        yield db
+
+    assert await run_content_once(factory, settings) == 1
+    db.refresh(job)
+    db.refresh(post)
+    assert job.status == TaskStatus.COMPLETED
+    content = json.loads(post.content)
+    assert content["body"] == old_text
+    assert content["image_state"] == "ready"
+    assert "image_redraw_task_id" not in content
+    page = material_detail_page(db, product, post, root=tmp_path)
+    assert "Утвердить материал" in page
+    assert "Переделать картинку" in page
