@@ -1617,7 +1617,8 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
     )
 
 
-def material_detail_page(db: Session, product: Product, record: Artifact, *, root=None) -> str:
+def material_detail_page(db: Session, product: Product, record: Artifact, *, root=None,
+                         approval_error: str | None = None) -> str:
     value = parse_json(record)
     kind_label = artifact_kind_label(record, value)
     generic_warnings = value.get("quality_warnings") or []
@@ -1712,7 +1713,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         if record.kind == "channel_text":
             if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
                 state = value.get("image_state")
-                if state in {"ready", "blocked", "review_unavailable", "awaiting_review"} and record.task_id and value.get("image_artifact_id"):
+                if record.task_id and value.get("image_artifact_id"):
                     try:
                         image_id = UUID(str(value["image_artifact_id"]))
                         image = db.scalar(select(Artifact).where(
@@ -1736,22 +1737,25 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                     else:
                         review_html += gallery_html(product.id, record.task_id, [image])
                         if state == "ready":
-                            review_html += ('<p class="sg-footnote">'
+                            review_html += ('<p class="sg-footnote" role="status">'
                                             'Визуальный критик проверил изображение: критичных ошибок нет.</p>')
                         elif state == "blocked":
                             issue_lines = value.get("image_critical_issues") or []
+                            summary = str(value.get("image_review_summary") or
+                                          "Обнаружено серьёзное несоответствие.")
                             review_html += (
-                                '<section class="sg-surface" role="alert">'
+                                '<section class="sg-vk-image-verdict" role="alert">'
                                 '<h3>Критик заблокировал изображение</h3>'
-                                '<p>Обнаружено серьёзное несоответствие. '
-                                'Текст сохранён, изображение нельзя публиковать.</p>'
-                                + '<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
-                                                   for x in issue_lines[:4]) + '</ul>'
+                                '<p>' + esc(summary) + '</p>'
+                                + ('<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
+                                                    for x in issue_lines[:4]) + '</ul>'
+                                   if issue_lines else '')
+                                + '<p>Текст сохранён. Публикация этой картинки запрещена.</p>'
                                 + '</section>')
-                        elif state in {"review_unavailable", "awaiting_review"}:
+                        elif state in {"review_unavailable", "awaiting_review", "failed", "pending"}:
                             review_html += (
                                 '<p class="sg-warning" role="alert">'
-                                'Визуальный критик ещё не подтвердил качество. '
+                                'Изображение сохранено, но проверка или генерация не завершена. '
                                 'Публикация изображения заблокирована.</p>')
                 elif state in {"stale", "failed", "pending"}:
                     reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
@@ -1787,13 +1791,13 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
           <div class="material-detail-body">
             <div class="detail-meta"><span class="chip blue">{esc(kind_label)}</span><span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
             <h2>{esc(display_material_title(record, value))}</h2>
+            {review_html}
             <div class="article-text {'sg-post-preview' if record.kind == 'channel_text' else ''}">
               {f'<div class="sg-native-post-label">Предпросмотр текста · {esc(platform_label(value.get("channel")))}</div>' if record.kind == 'channel_text' else ''}
               <div id="material-copy">{esc(text)}</div>
             </div>
           </div>
         </section>
-        {review_html}
         """
         if record.kind == "article":
             start = content.index('<div class="article-text ')
@@ -1827,11 +1831,22 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                     '<button class="btn primary" type="submit">Сохранить новую версию</button></form></details>'
                 )
         if status == ArtifactStatus.AWAITING_APPROVAL:
-            form_actions += (
-                f'<form method="post" action="/studio/products/{product.id}/review/{record.id}/approve">'
-                + ('<label><input type="checkbox" name="facts_confirmed" value="yes" required> Я проверил указанные числа, цены и результаты по источникам</label>' if value.get("fact_check_required") else '') +
-                '<button class="btn primary" type="submit">✓ Утвердить материал</button></form>'
+            pending_vk_image = (
+                record.kind == "channel_text" and value.get("channel") == "vk"
+                and value.get("image_model", "none") != "none"
+                and value.get("image_state") != "ready"
             )
+            if pending_vk_image:
+                form_actions += (
+                    '<p class="sg-warning" role="status">Утверждение недоступно: '
+                    'изображение не прошло проверку. Посмотрите картинку и замечания выше.</p>'
+                )
+            else:
+                form_actions += (
+                    f'<form method="post" action="/studio/products/{product.id}/review/{record.id}/approve">'
+                    + ('<label><input type="checkbox" name="facts_confirmed" value="yes" required> Я проверил указанные числа, цены и результаты по источникам</label>' if value.get("fact_check_required") else '') +
+                    '<button class="btn primary" type="submit">✓ Утвердить материал</button></form>'
+                )
         if record.kind == "channel_text" and status in {
             ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED
         } and value.get("body") and value.get("channel") in {
@@ -1865,6 +1880,15 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
             '<p>Проверяйте конкретную версию. Утверждение ещё не означает публикацию.</p>'
             + form_actions + '</section>'
         )
+    approval_messages = {
+        "image": "Изображение не прошло проверку критиком или недоступно. Посмотрите картинку и замечания ниже.",
+        "facts": "Перед утверждением проверьте числа, цены и результаты и подтвердите проверку.",
+        "conflict": "Утвердить эту версию не удалось. Проверьте состояние материала и попробуйте снова.",
+    }
+    if approval_error in approval_messages:
+        content = ('<section class="sg-surface sg-vk-image-verdict" role="alert">'
+                   '<h3>Материал не утверждён</h3><p>'
+                   + esc(approval_messages[approval_error]) + '</p></section>' + content)
     return studio_page_shell(
         product, active="materials", title=display_material_title(record, value),
         subtitle=f"{kind_label} · просмотр, проверка и версии.",
@@ -2164,7 +2188,8 @@ def studio_materials(product_id: UUID, kind: str = "all", q: str = "", page: int
 
 
 @router.get("/studio/products/{product_id}/materials/{artifact_id}", response_class=HTMLResponse)
-def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = Depends(get_db),
+def studio_material_detail(product_id: UUID, artifact_id: UUID,
+                           approval_error: str | None = None, db: Session = Depends(get_db),
                            settings=Depends(get_settings)):
     product = db.get(Product, product_id)
     if product is None:
@@ -2179,7 +2204,7 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID, db: Session = De
             f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
         )
     response = HTMLResponse(material_detail_page(
-        db, product, record, root=settings.products_root))
+        db, product, record, root=settings.products_root, approval_error=approval_error))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -2947,7 +2972,16 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
             action_type="studio:approve_material", via="studio",
         )
     except ReviewError as exc:
-        raise HTTPException(exc.status, exc.message) from None
+        # Browser forms must return to the Studio view, not expose FastAPI's raw JSON
+        # exception page. Nothing is approved or published on a failed review.
+        message = exc.message.lower()
+        reason = ("image" if "изображен" in message or "критик" in message
+                  else "facts" if "числа" in message or "цены" in message
+                  else "conflict")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/materials/{artifact_id}?approval_error={reason}",
+            status_code=303,
+        )
     return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
 
 
