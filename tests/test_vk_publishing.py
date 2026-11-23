@@ -1043,7 +1043,7 @@ def test_vk_page_explains_separate_photo_access_and_keeps_user_key_private(db, t
     assert 'https://dev.vk.ru/ru/api/access-token/user-token' in settings_markup
     assert 'https://dev.vk.ru/ru/admin/create-app' in settings_markup
     assert 'name="access_token" type="text"' not in settings_markup
-    assert "ключ сообщества" in settings_markup.lower()
+    assert "сообщества из" in settings_markup.lower()
     assert "community-token" not in settings_markup
     assert "vk1.a." not in settings_markup
 
