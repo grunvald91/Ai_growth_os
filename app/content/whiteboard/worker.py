@@ -182,7 +182,11 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
             job_settings = scoped_settings(settings, payload.models, payload.request.voice)
-            await (readiness or preflight)(job_settings, payload.models, payload.request.voice)
+            if readiness is None:
+                await preflight(job_settings, payload.models, payload.request.voice,
+                                skip_speech=payload.repair_regenerate_images)
+            else:
+                await readiness(job_settings, payload.models, payload.request.voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
                                     visual_review=payload.visual_review,
                                     image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
