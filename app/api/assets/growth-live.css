@@ -1126,7 +1126,6 @@ body[data-growth-design="v4"] .sg-create-vk-image-choice label:has(input:checked
   border:2px solid var(--blue);padding:9px 11px;
   background:var(--blue-soft);
 }
-body[data-growth-design="v4"] #sg-create-vk-image-row{display:none!important;}
 body[data-growth-design="v4"] .sg-create-vk-image-primary .sg-create-tip{
   margin:9px 0 0;font-size:.8125rem;line-height:1.5;
 }
