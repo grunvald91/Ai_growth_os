@@ -247,6 +247,9 @@ def job_html(state, product_id, *, error=None):
             f'<h2>{esc(state["request"]["topic"])}</h2>'
             f'<p role="status" class="wb-status{" wb-status-ready" if completed else ""}">'
             f'{esc(STATUS_NAMES.get(state["status"], state["status"]))}</p></header>')
+    # A rejected repair POST must not hide its error inside collapsed technical details.
+    if completed and warning:
+        body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if completed:
         # The actual playable file must be the focal point, not the log or API metadata.
         length_label = '1 мин · 6 сцен' if state['request'].get('scenes', 3) == 6 else '30 сек · 3 сцены'
@@ -293,7 +296,7 @@ def job_html(state, product_id, *, error=None):
                  f'<progress aria-label="Завершённые этапы создания видео" value="{done}" max="{total}" style="width:100%"></progress>')
     if state.get('failed_stage') in stages:
         body += f'<p>Ошибка на этапе: {esc(stages[state["failed_stage"]])}</p>'
-    if warning:
+    if warning and not completed:
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if state['status'] == 'queued' and state.get('retry_at'):
         reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
