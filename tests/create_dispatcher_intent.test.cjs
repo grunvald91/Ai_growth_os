@@ -26,7 +26,7 @@ function setup(format, options = {}) {
     "sg-create-brief": "",
     "sg-create-image-model": "auto",
     "sg-create-aspect": "",
-    "sg-create-vk-image-model": "auto",
+    "sg-create-vk-model-choice": "auto",
     "sg-create-vk-image-ratio": "4:5"
   };
   Object.assign(fieldValues, options);
@@ -94,6 +94,13 @@ test("static image keeps aspect ratio, model, and destination", () => {
   assert.equal(request.creation.image_model, "openai");
   assert.equal(request.creation.platform, "instagram_reels");
   assert.equal(request.creation.editorial_brief, "Не использовать неподтверждённые цифры");
+});
+
+test("VK post reads the one model selector (including text-only)", () => {
+  assert.equal(setup("post", {"sg-create-vk-model-choice": "none"})
+    .creationRequest("Тема поста").creation.image_model, "none");
+  assert.equal(setup("post", {"sg-create-vk-model-choice": "gemini"})
+    .creationRequest("Тема поста").creation.image_model, "gemini");
 });
 
 test("simple video never inherits invisible image/audience settings", () => {
