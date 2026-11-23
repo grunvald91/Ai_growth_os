@@ -207,7 +207,7 @@ test("voice validation preserves recognized text instead of sending invalid sele
 test("VK post creation sends image model and selected square format", () => {
   const request = setup("post", {
     "sg-create-platform": "vk",
-    "sg-create-vk-image-model": "gemini",
+    "sg-create-vk-model-choice": "gemini",
     "sg-create-vk-image-ratio": "1:1"
   }).creationRequest("Зачем нужна CRM?");
   assert.equal(request.creation.format, "post");
@@ -219,14 +219,14 @@ test("VK post creation sends image model and selected square format", () => {
 test("other channels and text-only VK never accidentally request paid media", () => {
   const telegram = setup("post", {
     "sg-create-platform": "telegram",
-    "sg-create-vk-image-model": "gemini",
+    "sg-create-vk-model-choice": "gemini",
     "sg-create-vk-image-ratio": "1:1"
   }).creationRequest("Как сделать запись проще");
   assert.equal(telegram.creation.image_model, null);
   assert.equal(telegram.creation.aspect_ratio, null);
   const noImage = setup("post", {
     "sg-create-platform": "vk",
-    "sg-create-vk-image-model": "none"
+    "sg-create-vk-model-choice": "none"
   }).creationRequest("Как сделать запись проще");
   assert.equal(noImage.creation.image_model, "none");
 });
