@@ -5,7 +5,7 @@ import json
 import pytest
 from sqlalchemy import select
 
-from app.content.whiteboard.jobs import records, owner_task, job_directory
+from app.content.whiteboard.jobs import records, owner_task, job_directory, resume_job
 from app.content.whiteboard.repair import queue_visual_repair
 from app.content.whiteboard.runtime import ReadinessError
 from app.content.whiteboard.worker import run_whiteboard_once
@@ -135,3 +135,28 @@ async def test_visual_repair_has_a_new_separately_approved_budget_despite_spent_
         assert payload.inherited_calls==13 and payload.max_api_calls==13
         assert json.loads(state.content)['attempts_started']==0
         assert approval.status=='pending'
+
+
+@pytest.mark.asyncio
+async def test_failed_new_repair_is_reopened_from_saved_checkpoints_instead_of_requeued(environment):
+    factory, settings, product, _ = environment
+    source = new_job(environment, maximum=25)
+    approve(environment, source)
+    await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready)
+    with factory() as db:
+        repair = queue_visual_repair(db, settings, product, source).id
+    approve(environment, repair)
+    with factory() as db:
+        task = owner_task(db, product, repair)
+        _, state, _, payload = records(db, task)
+        assert payload.repair_regenerate_images
+        value = json.loads(state.content)
+        value.update(calls=1, attempts_started=1, error='provider_server_error',
+                     stage='image', failed_stage='image')
+        state.content = json.dumps(value)
+        task.status = TaskStatus.FAILED
+        db.commit()
+        assert queue_visual_repair(db, settings, product, source).id == repair
+        resumed = resume_job(db, product, repair, confirmed=True, decided_by='owner')
+        assert resumed.status == TaskStatus.QUEUED
+        assert json.loads(records(db, resumed)[1].content)['calls'] == 1
