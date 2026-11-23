@@ -448,6 +448,98 @@ async def active_token(settings, channel):
     return result["access_token"]
 
 
+def photo_upload_connection(db, product_id, group):
+    """An independently verified, encrypted user credential for VK wall photos."""
+    for row in db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "vk_photo_upload_connection",
+        Artifact.status == ArtifactStatus.APPROVED,
+    ).order_by(Artifact.created_at.desc()).limit(5)):
+        try:
+            data = json.loads(row.content)
+            if data.get("group_id") == group:
+                return row
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+async def connect_photo_user_key(db, settings, product_id, token, *, adapter=None):
+    """Verify actual USER admin and upload permission without publishing a post.
+
+    Keep this credential separate from the community wall and comment tokens.
+    Only accept an owner-supplied credential from their own official VK app.
+    """
+    channel = connected(db, product_id)
+    if channel is None:
+        raise ValueError("Сначала подключите сообщество для публикаций")
+    if (not isinstance(token, str) or not token or len(token) > 8000
+            or any(ord(ch) < 33 for ch in token) or token.startswith("vk2.a.")):
+        raise ValueError("Нужен действующий пользовательский ключ VK API, не токен VK ID")
+    store = VKStore(settings.products_root)
+    if channel.is_community_token and secrets.compare_digest(store.load_token(channel.id), token):
+        raise ValueError("Ключ сообщества не может подтверждать пользовательский доступ к фото")
+    adapter = adapter or VKAdapter(CommentGateway(), "vk")
+    try:
+        # The group's token may pass manager() by a community-key fallback.
+        # Explicit user-level is_admin prevents treating that as user OAuth.
+        found = await adapter.call(
+            "groups.getById", token, group_id=channel.account_id,
+            fields="is_admin,admin_level",
+        )
+        groups = found.get("groups", []) if isinstance(found, dict) else found
+        if not isinstance(groups, list) or not any(
+                isinstance(item, dict)
+                and str(item.get("id")) == channel.account_id
+                and item.get("is_admin") == 1
+                and int(item.get("admin_level") or 0) >= 2
+                for item in groups):
+            raise ValueError("Not an admin user token")
+        from app.content.vk_photo_upload import _upload_destination
+        upload = await adapter.call(
+            "photos.getWallUploadServer", token, group_id=int(channel.account_id),
+        )
+        _upload_destination(upload["upload_url"])
+    except (ValueError, TypeError, KeyError):
+        raise ValueError(
+            "VK не подтвердил пользовательские права на группу и загрузку фото. "
+            "Нужен действующий ключ вашего VK-приложения с разрешениями photos и wall."
+        ) from None
+
+    product = db.scalar(select(Product).where(
+        Product.id == product_id).with_for_update())
+    if product is None:
+        raise LookupError("Компания не найдена")
+    current = connected(db, product_id)
+    if current is None or current.account_id != channel.account_id:
+        raise ValueError("Подключённое сообщество изменилось")
+    if db.scalar(select(Publication.id).where(
+        Publication.product_id == product_id, Publication.channel == "vk",
+        Publication.status == "sending").limit(1)):
+        raise ValueError("Дождитесь завершения текущей публикации")
+    previous = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product_id,
+        Artifact.kind == "vk_photo_upload_connection",
+        Artifact.status == ArtifactStatus.APPROVED,
+    ).with_for_update()))
+    row = Artifact(
+        product_id=product_id, kind="vk_photo_upload_connection",
+        title="Пользовательский доступ VK к фотографиям",
+        status=ArtifactStatus.APPROVED,
+        content=json.dumps({"group_id": channel.account_id,
+                            "auth_type": "user_api_token"}, ensure_ascii=False),
+    )
+    db.add(row)
+    db.flush()
+    store.save_token(row.id, token)
+    for old in previous:
+        old.status = ArtifactStatus.REJECTED
+    db.commit()
+    for old in previous:
+        store.forget(old.id)
+    return row
+
+
 async def photo_token_for_connected_group(db, settings, channel, group, adapter, wall_token):
     """Prefer a separately linked classic user token for photo uploads.
 
@@ -459,6 +551,18 @@ async def photo_token_for_connected_group(db, settings, channel, group, adapter,
     """
     if not channel.is_community_token:
         return wall_token
+    independent = photo_upload_connection(db, channel.product_id, group)
+    if independent is not None:
+        from app.content.vk_photo_upload import VKPhotoUploadError
+        try:
+            user_token = VKStore(settings.products_root).load_token(independent.id)
+            await adapter.manager(group, user_token)
+            return user_token
+        except (ValueError, OSError, RuntimeError):
+            raise VKPhotoUploadError(
+                "Пользовательский доступ к фотографиям VK устарел. "
+                "Переподключите его в настройках сообщества."
+            ) from None
     account = db.scalar(select(CommentChannel).where(
         CommentChannel.product_id == channel.product_id,
         CommentChannel.platform == "vk",
@@ -470,9 +574,14 @@ async def photo_token_for_connected_group(db, settings, channel, group, adapter,
     try:
         user_token = await active_token(settings, account)
         if (not isinstance(user_token, str) or not user_token
-                or user_token.startswith("vk2.a.")):
+                or user_token.startswith("vk2.a.")
+                or secrets.compare_digest(user_token, wall_token)):
             return wall_token
-        await adapter.manager(group, user_token)
+        user_group = await adapter.manager(group, user_token)
+        if (not isinstance(user_group, dict)
+                or user_group.get("is_admin") != 1
+                or int(user_group.get("admin_level") or 0) < 2):
+            return wall_token
         return user_token
     except (ValueError, OSError, RuntimeError):
         # Not a compatible verified user token; leave group-key behavior intact.
@@ -794,8 +903,13 @@ async def deliver_once(session_factory, settings, *, sender=None, now=None):
                     expected_sha256=data.get("image_sha256"),
                 )
             options = {"attachments": attachment} if attachment is not None else {}
+            # Schema 5.199 documents user authorization for wall.post. If the
+            # image was uploaded by a verified admin USER key, use the same
+            # authorized key to publish the attachment. Text-only keeps the
+            # proven community-key route.
+            publish_token = photo_token if photo_path is not None else token
             wall_post_started = True
-            response = await adapter.call("wall.post", token, owner_id=-int(group),
+            response = await adapter.call("wall.post", publish_token, owner_id=-int(group),
                     from_group=1, message=text, guid=str(publication_id), **options)
             post_id = response.get("post_id") if isinstance(response, dict) else None
         else:
