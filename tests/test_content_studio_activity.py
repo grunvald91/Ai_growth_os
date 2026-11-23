@@ -1243,9 +1243,11 @@ def test_tasks_server_timing_headers_are_safe_and_scoped(owner_studio):
     db.commit()
     base = f"/studio/products/{company.id}"
     page = client.get(base + "/work?partial=1")
+    full_page = client.get(base + "/work")
     activity = client.get(base + "/activity.json?scope=notifications")
     for response, fields in (
-        (page, ("tasks_db", "tasks_html")),
+        (page, ("tasks_db", "tasks_html", "tasks_shell")),
+        (full_page, ("tasks_db", "tasks_html", "tasks_shell")),
         (activity, ("tasks_feed", "tasks_notices")),
     ):
         assert response.status_code == 200
