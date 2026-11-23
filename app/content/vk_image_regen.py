@@ -40,8 +40,8 @@ def queue_vk_image_redraw(
     ).with_for_update().execution_options(populate_existing=True))
     if post is None:
         raise LookupError("Пост не найден")
-    if post.status != ArtifactStatus.AWAITING_APPROVAL:
-        raise ValueError("Перегенерация доступна только до утверждения поста")
+    if post.status != ArtifactStatus.AWAITING_APPROVAL or post.task_id is None:
+        raise ValueError("Перегенерация доступна только для готового поста до утверждения")
     value = json.loads(post.content)
     if value.get("channel") != "vk" or value.get("image_model", "none") == "none":
         raise ValueError("У этого поста нет генерации картинки ВКонтакте")
@@ -131,8 +131,15 @@ def restore_vk_redraw_failure(db, task_id: UUID, error_code: str):
     value = json.loads(post.content)
     if value.get("image_redraw_task_id") != str(task_id):
         return
-    value["image_state"] = data.get("original_image_state", "failed")
-    value["image_review_state"] = data.get("original_review_state", "unavailable")
+    if value.get("image_artifact_id") == data.get("original_image_artifact_id"):
+        value["image_state"] = data.get("original_image_state", "failed")
+        value["image_review_state"] = data.get("original_review_state", "unavailable")
+    else:
+        # The new PNG was durably saved before its critique failed. It must
+        # remain visible with UNKNOWN verdict, not masquerade as the old
+        # critic-rejected picture or inherit its approval.
+        value["image_state"] = "review_unavailable"
+        value["image_review_state"] = "unavailable"
     value.pop("image_redraw_task_id", None)
     value["image_regeneration_error_code"] = error_code[:100]
     post.content = json.dumps(value, ensure_ascii=False)
