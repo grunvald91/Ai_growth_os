@@ -23,7 +23,8 @@ from app.models.domain import Artifact, Publication
 from app.vk_service import platform_service_token, group_app_verified
 from app.social_vk import (
     OAUTH_COOKIE, OAUTH_PATH, VKStore, approved_posts, begin_oauth,
-    cancel, connected, connect_community, finish_oauth, read_oauth_cookie, schedule,
+    cancel, connected, connect_community, connect_photo_user_key,
+    photo_upload_connection, finish_oauth, read_oauth_cookie, schedule,
     community_reference, resolve_community, resolve_publisher_community, verify_community_key, VKKeyVerificationError, client_id, redirect_uri,
     GROUP_OAUTH_COOKIE, GROUP_OAUTH_PATH, community_oauth_config,
     begin_community_oauth, read_community_oauth_cookie, finish_community_oauth,
@@ -126,6 +127,7 @@ def feedback(key):
     return {"connected": "Сообщество VK подключено. Проверьте первую публикацию.",
             "scheduled": "Публикация поставлена в очередь.",
             "photo_checked": "VK разрешил запрос сервера загрузки фото. Полная публикация с фотографией подтверждается только после отправки тестового поста.",
+            "photo_connected": "Пользовательский доступ к фотографиям сохранён и проверен. Теперь можно отправить один утверждённый пост с изображением.",
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
@@ -181,6 +183,7 @@ def connection_error(key):
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
         "photo_check_failed": "Подключение к VK активно, но право загрузки фото не подтверждено. Ключ сообщества может разрешать публикацию текста, но не фото. Для фото может понадобиться отдельный пользовательский доступ с правами photos и wall.",
+        "photo_connect_failed": "Не удалось подтвердить пользовательский доступ к фото. Нужен ключ вашего собственного приложения VK API с правами photos и wall, принадлежащий администратору этого сообщества. Токен VK ID и ключ сообщества для этого не подходят.",
         "publish_not_confirmed": "Подтвердите отправку поста в подключённое сообщество ВКонтакте.",
         "publish_not_ready": "Публикация пока недоступна: проверьте подключение, состояние картинки и согласование поста.",
         "publish_duplicate": "Этот материал уже поставлен в очередь либо опубликован. Проверьте историю VK.",
@@ -261,6 +264,29 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
             f'<form method="post" action="/studio/products/{product_id}/vk/check-photo">'
             '<button type="submit" class="btn secondary small">Проверить доступ к фото</button>'
             '<small>Проверка без публикации поста и без загрузки файла.</small></form>'
+        )
+        photo_connection = photo_upload_connection(db, product_id, channel.account_id)
+        current += (
+            '<details class="sg-surface">'
+            '<summary>Фото: ' + (
+                'доступ подключён ✓' if photo_connection else 'настроить доступ к загрузке'
+            ) + '</summary>'
+            '<p class="sg-footnote">Для изображения VK API требует пользовательский ключ '
+            'с разрешениями photos и wall. Ключ сообщества для публикации текста остаётся '
+            'подключённым отдельно. Используйте только ключ вашего собственного VK-приложения '
+            'и не получайте его через сторонние сервисы.</p>'
+            f'<form method="post" action="/studio/products/{product_id}/vk/photo-key" '
+            'class="sg-fields sg-compact-form">'
+            '<label class="sg-field"><span>Пользовательский ключ VK API для фото</span>'
+            '<input name="access_token" type="password" autocomplete="off" '
+            'maxlength="8000" required placeholder="Ключ пользователя с photos и wall"></label>'
+            '<button class="btn secondary" type="submit">'
+            + ('Обновить доступ к фото' if photo_connection else 'Подключить фото')
+            + '</button></form>'
+            '<p class="sg-footnote">Проверка не публикует пост и не загружает изображение. '
+            '<a href="https://dev.vk.com/ru/api/upload/wall-photo" '
+            'target="_blank" rel="noopener noreferrer">Официальный порядок загрузки VK</a>.</p>'
+            '</details>'
         )
         if channel.is_community_token and channel.expires_at:
             current += '<p class="sg-footnote">Доступ VK ограничен по сроку. Для продления подключите сообщество заново до окончания действия ключа.</p>'
@@ -560,6 +586,27 @@ async def vk_callback(request: Request, state: str = "", code: str = "", device_
     return response
 
 
+@router.post("/studio/products/{product_id}/vk/photo-key")
+async def vk_connect_photo_key(product_id: UUID, request: Request,
+                               db: Session = Depends(get_db),
+                               settings=Depends(get_settings)):
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    try:
+        await connect_photo_user_key(
+            db, settings, product_id, fields.get("access_token", ""),
+        )
+    except (ValueError, LookupError, OSError):
+        db.rollback()
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=photo_connect_failed",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/studio/products/{product_id}/vk?done=photo_connected", status_code=303,
+    )
+
+
 @router.post("/studio/products/{product_id}/vk/check-photo")
 async def vk_check_photo(product_id: UUID, db: Session = Depends(get_db),
                          settings=Depends(get_settings)):
@@ -687,6 +734,14 @@ async def vk_disconnect(product_id: UUID, db: Session = Depends(get_db),
         for publisher in publishers:
             publisher.status = "rejected"
             VKStore(settings.products_root).forget(publisher.id)
+        photos = list(db.scalars(select(Artifact).where(
+            Artifact.product_id == product_id,
+            Artifact.kind == "vk_photo_upload_connection",
+            Artifact.status == "approved",
+        )))
+        for photo in photos:
+            photo.status = "rejected"
+            VKStore(settings.products_root).forget(photo.id)
     for pub in db.scalars(select(Publication).where(
         Publication.product_id == product_id, Publication.channel == "vk",
         Publication.status == "scheduled")):
