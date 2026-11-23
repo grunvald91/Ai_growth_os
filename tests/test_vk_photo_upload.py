@@ -403,3 +403,48 @@ async def test_vk_photo_check_failure_does_not_claim_publishing_success(db, tmp_
             db, settings, company.id, adapter=DeniedAdapter())
     assert not list(db.scalars(select(Publication).where(
         Publication.product_id == company.id)))
+
+
+@pytest.mark.asyncio
+async def test_owner_accepted_critic_blocked_image_is_queued_and_published_with_photo(
+    db, tmp_path, monkeypatch,
+):
+    from app.content.review import approve_material
+
+    company, post, image, path = image_post(
+        db, tmp_path, slug="vk-owner-photo-publish", verdict="blocked",
+    )
+    post.status = ArtifactStatus.AWAITING_APPROVAL
+    db.commit()
+    initial = json.loads(post.content)
+    settings = Settings(
+        _env_file=None, products_root=tmp_path, content_vk_autopost_enabled=True,
+    )
+    approved = approve_material(
+        db, tmp_path, company.id, post.id, image_confirmed=True,
+        expected_image_sha256=initial["image_sha256"],
+        expected_post_sha256=_post_digest(initial),
+    )
+    assert approved.status == ArtifactStatus.APPROVED
+    assert json.loads(approved.content)["image_review_state"] == "owner_approved"
+    connect_community(db, settings, company.id, "123456", "community-token")
+    pub = schedule(
+        db, company.id, post.id, datetime.now(timezone.utc) + timedelta(seconds=2),
+        products_root=tmp_path,
+    )
+    uploads = []
+    async def mocked_upload(adapter, token, group, picture, *, expected_sha256=None):
+        uploads.append((picture, expected_sha256))
+        return "photo-123456_173"
+    async def mocked_vk(self, method, token, **params):
+        assert method == "wall.post"
+        assert params["attachments"] == "photo-123456_173"
+        assert params["message"] == initial["body"]
+        return {"post_id": 173}
+    monkeypatch.setattr("app.social_vk.upload_wall_photo", mocked_upload)
+    monkeypatch.setattr(VKAdapter, "call", mocked_vk)
+    assert await deliver_once(lambda: sessions(db), settings,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=5)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert uploads == [(path, initial["image_sha256"])]
