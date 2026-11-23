@@ -419,7 +419,14 @@ def job_html(state, product_id, *, error=None):
         if not state.get('visual_repair_from'):
             body += (f'<form method="post" action="{base}/repair" class="sg-form wb-repair">'
                      '<button type="submit" class="btn secondary">Переделать рисунки</button>'
-                     '<small>Откроется отдельное задание с явным статусом и подтверждением дополнительных вызовов. Сценарий и MP3 сохранятся.</small></form>')
+                     '<small role="status" aria-live="polite">Откроется отдельное задание с явным статусом и подтверждением дополнительных вызовов. Сценарий и MP3 сохранятся.</small></form>'
+                     '<script>(()=>{const form=document.querySelector(".wb-repair");'
+                     'if(!form)return;form.addEventListener("submit",()=>{'
+                     'const button=form.querySelector("button");'
+                     'if(button){button.disabled=true;button.textContent="Создаём задание…";}'
+                     'const status=form.querySelector("[role=status]");'
+                     'if(status)status.textContent="Проверяем сохранённые файлы и создаём заявку на перерисовку…";'
+                     '});})();</script>')
     body += f'<p class="wb-return"><a href="/studio/products/{product_id}/whiteboard">К списку видео</a></p></section>'
     return body
 
