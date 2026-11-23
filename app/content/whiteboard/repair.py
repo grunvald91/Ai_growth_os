@@ -8,7 +8,8 @@ from sqlalchemy import select
 from app.models.domain import Task, TaskStatus, Product, Artifact, ArtifactStatus, Approval
 from .checkpoints import CheckpointStore
 from .contracts import WhiteboardStoryboard
-from .jobs import AGENT, ACTION, JobRequest, digest, records, owner_task, job_directory, started_attempts
+from .jobs import (AGENT, ACTION, JobRequest, can_resume, can_top_up, digest,
+                   records, owner_task, job_directory, started_attempts)
 from .runtime import ReadinessError, CLAUDEHUB_VISION_MODEL
 from .science import FactReview, ScienceSources, evidence_supported, requires_science_review
 
@@ -45,6 +46,18 @@ def queue_visual_repair(db, settings, product_id, source_id):
         .order_by(Task.created_at.desc(), Task.id.desc()))
     if active:
         return active
+    # Prefer resuming paid, verified checkpoints instead of buying the same images again.
+    failed = db.scalar(
+        select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
+                           Task.title.like(prefix + '%'), Task.status == TaskStatus.FAILED)
+        .order_by(Task.created_at.desc(), Task.id.desc()))
+    if failed:
+        _, saved, consent, old_payload = records(db, failed)
+        saved_state = json.loads(saved.content)
+        if (consent.status == 'approved' and old_payload.repair_regenerate_images
+                and (can_resume(failed.status, saved_state, old_payload)
+                     or can_top_up(failed.status, saved_state, old_payload))):
+            return failed
     story = WhiteboardStoryboard.model_validate_json(store.load('storyboard', limit=64_000))
     audio_hashes = []
     for index, scene in enumerate(story.scenes):
