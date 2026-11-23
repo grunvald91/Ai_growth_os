@@ -1008,7 +1008,11 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
                       name="Our test VK community")
     owner_connected = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert "Комментарии: не подключены." in owner_connected
-    assert owner_connected.count('<a href="/studio/tune/vk"') >= 2
+    assert owner_connected.count('<a href="/studio/tune/vk"') >= 1
+    assert f'/studio/products/{product.id}/vk/settings' in owner_connected
+    assert f'/studio/products/{product.id}/vk/disconnect' not in owner_connected
+    assert f'/studio/products/{product.id}/vk/community-key' not in owner_connected
+    assert f'/studio/products/{product.id}/vk/connect-comments' not in owner_connected
     customer_connected = vk_page(product.id, customer, db=db, settings=settings).body.decode()
     assert "/studio/tune/vk" not in customer_connected
 
@@ -1031,6 +1035,9 @@ def test_vk_page_explains_separate_photo_access_and_keeps_user_key_private(db, t
     assert f'/studio/products/{product.id}/vk/photo-key' not in markup
     assert f'/studio/products/{product.id}/vk/check-photo' not in markup
     assert 'Пользовательский ключ VK API для фото' not in markup
+    assert 'name="access_token" type="password"' not in markup
+    assert f'/studio/products/{product.id}/vk/community-key' not in markup
+    assert f'/studio/products/{product.id}/vk/disconnect' not in markup
     assert "community-token" not in markup
     response = vk_photo_settings_page(product.id, request, db=db, settings=settings)
     assert response.headers["cache-control"] == "private, no-store"
@@ -1042,6 +1049,8 @@ def test_vk_page_explains_separate_photo_access_and_keeps_user_key_private(db, t
     assert 'https://dev.vk.ru/ru/admin/apps-list' in settings_markup
     assert 'https://dev.vk.ru/ru/api/access-token/user-token' in settings_markup
     assert 'https://dev.vk.ru/ru/admin/create-app' in settings_markup
+    assert f'/studio/products/{product.id}/vk/disconnect' in settings_markup
+    assert 'Я хочу отключить ВКонтакте от ServGo' in settings_markup
     assert 'name="access_token" type="text"' not in settings_markup
     assert "сообщества из" in settings_markup.lower()
     assert "community-token" not in settings_markup
