@@ -356,3 +356,50 @@ async def test_photo_upload_rechecks_digest_to_reject_file_swap(tmp_path):
 
     with pytest.raises(VKPhotoUploadError, match="изменилось"):
         await upload_wall_photo(Adapter(), "secret", "123456", path, expected_sha256=known_good)
+
+
+@pytest.mark.asyncio
+async def test_vk_photo_access_preflight_is_read_only_and_bound_to_group(db, tmp_path):
+    from app.social_vk import verify_photo_upload_access
+
+    company = Product(name="Мастерская", slug="vk-photo-check-owner")
+    db.add(company)
+    db.commit()
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    connect_community(db, settings, company.id, "123456", "group-secret")
+    calls = []
+
+    class SafeAdapter:
+        async def call(self, method, token, **params):
+            calls.append((method, token, params))
+            assert method == "photos.getWallUploadServer"
+            return {"upload_url": "https://pu.vk.ru/group/photo-upload?sig=123"}
+
+    assert await verify_photo_upload_access(
+        db, settings, company.id, adapter=SafeAdapter()) is True
+    assert calls == [(
+        "photos.getWallUploadServer", "group-secret", {"group_id": 123456},
+    )]
+    assert not list(db.scalars(select(Publication).where(
+        Publication.product_id == company.id)))
+
+
+@pytest.mark.asyncio
+async def test_vk_photo_check_failure_does_not_claim_publishing_success(db, tmp_path):
+    from app.social_vk import verify_photo_upload_access
+
+    company = Product(name="Другая мастерская", slug="vk-photo-check-denied")
+    db.add(company)
+    db.commit()
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    connect_community(db, settings, company.id, "123456", "group-secret")
+
+    class DeniedAdapter:
+        async def call(self, method, token, **params):
+            raise ValueError("Sensitive response must not leak")
+
+    with pytest.raises(ValueError, match="право загружать фото"):
+        await verify_photo_upload_access(
+            db, settings, company.id, adapter=DeniedAdapter())
+    assert not list(db.scalars(select(Publication).where(
+        Publication.product_id == company.id)))
