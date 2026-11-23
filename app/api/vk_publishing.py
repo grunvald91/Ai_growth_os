@@ -125,6 +125,7 @@ def esc(value):
 def feedback(key):
     return {"connected": "Сообщество VK подключено. Проверьте первую публикацию.",
             "scheduled": "Публикация поставлена в очередь.",
+            "photo_checked": "VK разрешил запрос сервера загрузки фото. Полная публикация с фотографией подтверждается только после отправки тестового поста.",
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
@@ -179,6 +180,7 @@ def connection_error(key):
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
+        "photo_check_failed": "Подключение к VK активно, но право загрузки фото не подтверждено. Ключ сообщества может разрешать публикацию текста, но не фото. Для фото может понадобиться отдельный пользовательский доступ с правами photos и wall.",
         "group_oauth_input": "Не удалось начать авторизацию сообщества VK. Проверьте ссылку или воспользуйтесь подключением по ключу.",
         "group_oauth_not_configured": "Авторизация через VK сейчас недоступна. Пока можно подключить ключ сообщества вручную.",
     }.get(key, "")
@@ -249,6 +251,11 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id
                              and (not channel.is_community_token or platform_service_token(settings)))
+        current += (
+            f'<form method="post" action="/studio/products/{product_id}/vk/check-photo">'
+            '<button type="submit" class="btn secondary small">Проверить доступ к фото</button>'
+            '<small>Проверка без публикации поста и без загрузки файла.</small></form>'
+        )
         if channel.is_community_token and channel.expires_at:
             current += '<p class="sg-footnote">Доступ VK ограничен по сроку. Для продления подключите сообщество заново до окончания действия ключа.</p>'
         if replies_ready:
@@ -545,6 +552,23 @@ async def vk_callback(request: Request, state: str = "", code: str = "", device_
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     return response
+
+
+@router.post("/studio/products/{product_id}/vk/check-photo")
+async def vk_check_photo(product_id: UUID, db: Session = Depends(get_db),
+                         settings=Depends(get_settings)):
+    from app.social_vk import verify_photo_upload_access
+    _owner_product(db, product_id)
+    try:
+        await verify_photo_upload_access(db, settings, product_id)
+    except ValueError:
+        db.rollback()
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=photo_check_failed", status_code=303,
+        )
+    return RedirectResponse(
+        f"/studio/products/{product_id}/vk?done=photo_checked", status_code=303,
+    )
 
 
 @router.post("/studio/products/{product_id}/vk/schedule")
