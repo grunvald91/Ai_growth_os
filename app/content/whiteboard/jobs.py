@@ -22,6 +22,7 @@ AGENT = 'whiteboard_renderer'
 ACTION = 'paid_whiteboard_video_generation'
 # The most API calls one video job may be approved for (the one-minute video needs more).
 MAX_API_CALLS = 60
+TOP_UP_TOTAL = 25  # Maximum additional owner-authorized calls for a job.
 
 
 def required_calls(request: WhiteboardRequest, *, visual_review: bool = False) -> int:
@@ -46,7 +47,7 @@ class JobRequest(Contract):
     repair_manifest_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     # Historical usage is audit-only for a repair. The source may include up to
     # TOP_UP_TOTAL owner-approved extra calls beyond the initial MAX_API_CALLS.
-    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS + 25)
+    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS + TOP_UP_TOTAL)
     # New repairs receive their own separately approved budget; the original calls are audit-only.
     repair_regenerate_images: bool = False
 
@@ -201,7 +202,6 @@ def resume_delay(code, value) -> int:
     return PROVIDER_RESUME_DELAY if provider else OTHER_RESUME_DELAY
 ERROR_HISTORY_LIMIT = 50
 TOP_UP_STEP = 10       # extra calls one owner confirmation may add
-TOP_UP_TOTAL = 25      # extra calls a job may receive in total
 
 
 def call_limit(value, payload) -> int:
