@@ -1762,7 +1762,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                 '<p class="sg-warning" role="alert">'
                                 + ('Переделка картинки выполняется. Старый PNG сохранён.'
                                    if state == "regenerating" else
-                                   'Изображение сохранено, но критик не подтвердил его качество.')
+                                   'Изображение сохранено, но визуальный критик ещё не подтвердил качество.')
                                 + ' Публикация пока недоступна.</p>')
                 elif state in {"stale", "failed", "pending"}:
                     reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
