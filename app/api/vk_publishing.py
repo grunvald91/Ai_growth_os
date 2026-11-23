@@ -254,8 +254,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                    ('<span class="sg-channel-status">Ключ сообщества · можно проверить текстовую публикацию</span></div>'
                     if channel.is_community_token else
                     '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
-                   f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
-                   '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
+                   '')
         reply_channel = CommentService(db, settings).channel(product_id, "vk")
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id
@@ -273,10 +272,6 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                           if channel.is_community_token and not platform_service_token(settings) else "")
             current += ('<p class="sg-footnote">Комментарии: не подключены.'
                         + owner_help + '</p>')
-        if channel.is_community_token and platform_service_token(settings) and not replies_ready:
-            current += (f'<form method="post" action="/studio/products/{product_id}/vk/connect-comments">'
-                        '<button class="btn secondary" type="submit">Подключить чтение комментариев</button>'
-                        '</form>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     group_oauth_ready = _can_begin_community_oauth(settings, request)
@@ -667,6 +662,37 @@ def vk_photo_settings_page(product_id: UUID, request: Request,
   </details>
 </section>
 """
+    if channel is not None:
+        reply_channel = CommentService(db, settings).channel(product_id, "vk")
+        replies_ready = bool(
+            reply_channel and reply_channel.status == "connected"
+            and reply_channel.account_id == channel.account_id
+            and (not channel.is_community_token or platform_service_token(settings))
+        )
+        comments_form = (
+            f'<form method="post" action="/studio/products/{product_id}/vk/connect-comments">'
+            '<button class="btn secondary" type="submit">Подключить чтение комментариев</button>'
+            '</form>'
+            if channel.is_community_token and platform_service_token(settings)
+            and not replies_ready else
+            '<p class="sg-footnote">Чтение комментариев: '
+            + ('подключено.' if replies_ready else 'недоступно в текущем подключении.')
+            + '</p>'
+        )
+        body += (
+            '<section class="sg-surface">'
+            '<details><summary>Другие настройки сообщества</summary>'
+            + comments_form +
+            '<details><summary>Отключить сообщество ВКонтакте</summary>'
+            '<p class="sg-footnote">Отключение также отменит назначенные публикации '
+            'и удалит сохранённый доступ к фотографиям. Уже опубликованные посты не удаляются.</p>'
+            f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
+            '<label><input type="checkbox" name="confirmed" value="yes" required>'
+            'Я хочу отключить ВКонтакте от ServGo</label>'
+            '<button type="submit" class="btn secondary">Отключить VK</button>'
+            '</form></details>'
+            '</details></section>'
+        )
     response = HTMLResponse(studio_page_shell(
         product, active="channels", title="Настройки ВКонтакте",
         subtitle="Разовое подключение и проверка доступа к фотографиям.",
