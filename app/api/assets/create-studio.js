@@ -10,13 +10,10 @@
   const platformRow=document.getElementById('sg-create-platform-row');
   const countRow=document.getElementById('sg-create-count-row');
   const modelRow=document.getElementById('sg-create-model-row');
-  const vkImageRow=document.getElementById('sg-create-vk-image-row');
   const vkImageSlot=document.getElementById('sg-create-vk-image-slot');
-  if(vkImageSlot && vkImageRow)vkImageSlot.appendChild(vkImageRow);
   const vkRatioRow=document.getElementById('sg-create-vk-ratio-row');
   const vkReviewTip=document.getElementById('sg-create-vk-review-tip');
   const vkImageRadios=screen.querySelectorAll('[name="vk_image_enabled"]');
-  const vkImageModel=document.getElementById('sg-create-vk-image-model');
   const vkModelChoice=document.getElementById('sg-create-vk-model-choice');
   const vkModelChoiceRow=document.getElementById('sg-create-vk-model-choice-row');
   const summary=document.getElementById('sg-create-review-summary');
@@ -113,12 +110,20 @@
     if(key==='story' && count.value)line+=' · '+count.value+' экранов';
     summary.textContent=line;
   }
+  let lastVkModel='auto';
   function syncVkImage(){
     const show=root.getAttribute('data-create-format')==='post' && platform.value==='vk';
     const withImage=show && imageEnabled();
-    // Keep a single source of truth for the existing dispatcher payload.
-    if(vkImageModel)vkImageModel.value=withImage ? vkModelChoice.value : 'none';
-    if(vkImageRow)vkImageRow.hidden=true; // compatibility-only select
+    // One control owns both the UI selection and the dispatcher payload.
+    // Preserve the chosen model across image/text toggles.
+    if(vkModelChoice){
+      if(withImage){
+        if(vkModelChoice.value==='none')vkModelChoice.value=lastVkModel;
+      }else if(vkModelChoice.value!=='none'){
+        lastVkModel=vkModelChoice.value;
+        vkModelChoice.value='none';
+      }
+    }
     const vkImageShell=document.getElementById('sg-create-vk-image-primary');
     if(vkImageShell)vkImageShell.hidden=!show;
     if(vkModelChoiceRow)vkModelChoiceRow.hidden=!withImage;
