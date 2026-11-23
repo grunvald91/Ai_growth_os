@@ -1261,3 +1261,47 @@ def test_tasks_server_timing_headers_are_safe_and_scoped(owner_studio):
     foreign_page = client.get(f"/studio/products/{outsider.id}/work?partial=1")
     assert foreign_page.status_code == 200
     assert str(task.id) not in foreign_page.text
+
+
+def test_search_artifact_text_is_uncorrelated_and_tenant_scoped(owner_studio):
+    from sqlalchemy import event
+    from app.api.content_studio_activity import work_page
+    client, db, company, outsider = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="CONTENT: Без темы", status=TaskStatus.COMPLETED)
+    foreign = Task(product_id=outsider.id, assigned_agent="content_factory",
+                   title="CONTENT: Без темы", status=TaskStatus.COMPLETED)
+    db.add_all([task, foreign])
+    db.flush()
+    db.add_all([
+        Artifact(product_id=company.id, task_id=task.id, kind="content_request",
+                 title="Запрос", content=json.dumps({"topic": "Кириллица Семейный"}),
+                 status="draft"),
+        Artifact(product_id=outsider.id, task_id=foreign.id, kind="content_request",
+                 title="Запрос", content=json.dumps({"topic": "Кириллица Семейный"}),
+                 status="draft"),
+    ])
+    db.commit()
+    statements = []
+
+    def collect(_conn, _cursor, statement, _parameters, _context, _many):
+        if "sg_casefold(artifacts.content)" in statement.lower():
+            statements.append(statement.lower())
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", collect)
+    try:
+        ours = work_page(db, company.id, query="сЕмЕйНыЙ")
+        theirs = work_page(db, outsider.id, query="сЕмЕйНыЙ")
+        absent = work_page(db, company.id, query="неизвестная тема")
+    finally:
+        event.remove(engine, "before_cursor_execute", collect)
+
+    assert ours["total"] == 1
+    assert ours["items"][0]["id"] == str(task.id)
+    assert theirs["total"] == 1 and theirs["items"][0]["id"] == str(foreign.id)
+    assert absent["total"] == 0
+    assert statements
+    assert all("tasks.id in (select artifacts.task_id" in statement
+               for statement in statements)
+    assert all("artifacts.product_id" in statement for statement in statements)
