@@ -184,6 +184,7 @@ def connection_error(key):
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
         "photo_check_failed": "Подключение к VK активно, но право загрузки фото не подтверждено. Ключ сообщества может разрешать публикацию текста, но не фото. Для фото может понадобиться отдельный пользовательский доступ с правами photos и wall.",
         "photo_connect_failed": "Не удалось подтвердить пользовательский доступ к фото. Нужен ключ вашего собственного приложения VK API с правами photos и wall, принадлежащий администратору этого сообщества. Токен VK ID и ключ сообщества для этого не подходят.",
+        "disconnect_not_confirmed": "Подтвердите отключение сообщества в настройках.",
         "publish_not_confirmed": "Подтвердите отправку поста в подключённое сообщество ВКонтакте.",
         "publish_not_ready": "Публикация пока недоступна: проверьте подключение, состояние картинки и согласование поста.",
         "publish_duplicate": "Этот материал уже поставлен в очередь либо опубликован. Проверьте историю VK.",
@@ -828,9 +829,16 @@ async def vk_reconcile(product_id: UUID, request: Request, db: Session = Depends
 
 
 @router.post("/studio/products/{product_id}/vk/disconnect")
-async def vk_disconnect(product_id: UUID, db: Session = Depends(get_db),
+async def vk_disconnect(product_id: UUID, request: Request,
+                        db: Session = Depends(get_db),
                         settings=Depends(get_settings)):
     _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    if fields.get("confirmed") != "yes":
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk/settings?error=disconnect_not_confirmed",
+            status_code=303,
+        )
     sending = db.scalar(select(Publication.id).where(
         Publication.product_id == product_id, Publication.channel == "vk",
         Publication.status == "sending").limit(1))
