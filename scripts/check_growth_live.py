@@ -412,6 +412,44 @@ def main():
                 page.locator('[name="vk_image_enabled"][value="no"]').check()
                 page.locator('[name="vk_image_enabled"][value="yes"]').check()
                 expect(page.locator('#sg-create-vk-model-choice')).to_have_value('gemini')
+                # Simulate overlapping topic lookups and a format switch.
+                # The old response must not replace the newer one or reopen a hidden panel.
+                suggestions_race=page.evaluate("""async () => {
+                  const nativeFetch=window.fetch;
+                  const pending=[];
+                  const button=document.querySelector('[data-sg-suggest]');
+                  const topics=document.querySelector('#sg-create-suggestions');
+                  window.fetch=(url,options)=>{
+                    if(String(url).includes('/create/topics.json?format=')){
+                      return new Promise(resolve=>pending.push({resolve,signal:options?.signal}));
+                    }
+                    return nativeFetch(url,options);
+                  };
+                  const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
+                  try{
+                    button.click();
+                    button.click();
+                    if(pending.length!==2 || !pending[0].signal.aborted)return false;
+                    pending[1].resolve({ok:true,json:async()=>({topics:[{topic:'Новая тема'}]})});
+                    await settle();
+                    pending[0].resolve({ok:true,json:async()=>({topics:[{topic:'Устаревшая тема'}]})});
+                    await settle();
+                    const newestOnly=topics.textContent.includes('Новая тема') &&
+                      !topics.textContent.includes('Устаревшая тема');
+                    button.click();
+                    document.querySelector('[data-sg-format="story"]').click();
+                    if(pending.length!==3 || !pending[2].signal.aborted)return false;
+                    pending[2].resolve({ok:true,json:async()=>({topics:[{topic:'Чужая тема'}]})});
+                    await settle();
+                    const switchClears=topics.hidden && !topics.textContent.includes('Чужая тема');
+                    document.querySelector('[data-sg-format="post"]').click();
+                    return newestOnly && switchClears;
+                  }finally{
+                    window.fetch=nativeFetch;
+                  }
+                }""")
+                assert suggestions_race, 'stale-topic-suggestions'
+
                 expect(page.locator('#sg-create-format-help')).to_contain_text('площадки')
                 page.locator('[data-sg-format="story"]').click()
                 expect(page.locator('#sg-create-count-row')).to_be_visible()
