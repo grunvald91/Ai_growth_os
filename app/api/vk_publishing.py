@@ -181,6 +181,12 @@ def connection_error(key):
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
         "photo_check_failed": "Подключение к VK активно, но право загрузки фото не подтверждено. Ключ сообщества может разрешать публикацию текста, но не фото. Для фото может понадобиться отдельный пользовательский доступ с правами photos и wall.",
+        "publish_not_confirmed": "Подтвердите отправку поста в подключённое сообщество ВКонтакте.",
+        "publish_not_ready": "Публикация пока недоступна: проверьте подключение, состояние картинки и согласование поста.",
+        "publish_duplicate": "Этот материал уже поставлен в очередь либо опубликован. Проверьте историю VK.",
+        "publish_bad_time": "Укажите корректное время публикации в будущем.",
+        "publish_disabled": "Автопубликация ВКонтакте отключена на сервере. Проверьте настройки работника.",
+
         "group_oauth_input": "Не удалось начать авторизацию сообщества VK. Проверьте ссылку или воспользуйтесь подключением по ключу.",
         "group_oauth_not_configured": "Авторизация через VK сейчас недоступна. Пока можно подключить ключ сообщества вручную.",
     }.get(key, "")
@@ -289,7 +295,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
   + '</p>' if settings_link else
   '<p class="sg-footnote">Подключение одним нажатием пока недоступно. Используйте ключ сообщества ниже.</p>'))
     enabled = bool(settings.content_vk_autopost_enabled)
-    can_schedule = bool(channel and posts)
+    can_schedule = bool(channel and posts and enabled)
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
     body = f"""
@@ -577,7 +583,13 @@ async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(
     _owner_product(db, product_id)
     fields = await _studio_form(request)
     if fields.get("confirmed") != "yes":
-        raise HTTPException(422, "Подтвердите публикацию")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=publish_not_confirmed", status_code=303,
+        )
+    if not settings.content_vk_autopost_enabled:
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=publish_disabled", status_code=303,
+        )
     try:
         post_id = UUID(fields.get("post_id", ""))
         if fields.get("mode") == "now":
@@ -589,7 +601,14 @@ async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(
         schedule(db, product_id, post_id, when, products_root=settings.products_root)
     except (ValueError, LookupError, TypeError) as exc:
         db.rollback()
-        raise HTTPException(409, str(exc)) from None
+        message = str(exc).lower()
+        code = ("publish_duplicate" if "уже назначена" in message else
+                "publish_bad_time" if ("дата" in message or "время" in message or
+                                       "isoformat" in message) else
+                "publish_not_ready")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error={code}", status_code=303,
+        )
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=scheduled", status_code=303)
 
 
