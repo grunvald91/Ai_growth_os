@@ -298,7 +298,7 @@ def test_blocked_image_cannot_be_scheduled_even_if_post_status_is_approved(db, t
 
 
 @pytest.mark.asyncio
-async def test_separately_connected_legacy_user_token_uploads_photo_but_group_key_posts(
+async def test_separately_connected_legacy_user_token_uploads_photo_and_posts_with_user_auth(
     db, tmp_path, monkeypatch,
 ):
     company, post, image, path = image_post(db, tmp_path, slug="dual-credentials")
@@ -317,7 +317,7 @@ async def test_separately_connected_legacy_user_token_uploads_photo_but_group_ke
     async def manager(self, account, token):
         assert account == "123456" and token == "vk1.a.classic-user-key"
         calls.append("manager")
-        return {"id": 123456}
+        return {"id": 123456, "is_admin": 1, "admin_level": 3}
 
     async def upload(adapter, token, group, picture, *, expected_sha256=None):
         assert token == "vk1.a.classic-user-key"
@@ -327,7 +327,7 @@ async def test_separately_connected_legacy_user_token_uploads_photo_but_group_ke
 
     async def post(self, method, token, **params):
         assert method == "wall.post"
-        assert token == "community-token"
+        assert token == "vk1.a.classic-user-key"
         assert params["attachments"] == "photo923_174"
         calls.append("post")
         return {"post_id": 333}
@@ -504,3 +504,109 @@ async def test_vk_invalid_local_photo_makes_no_provider_request(tmp_path):
             pytest.fail("VK API must not be called with invalid local image")
     with pytest.raises(VKPhotoUploadError, match="корректным PNG"):
         await upload_wall_photo(Adapter(), "user-token", "123456", photo)
+
+
+@pytest.mark.asyncio
+async def test_own_photo_user_key_can_be_connected_without_replacing_wall_access(
+    db, tmp_path, monkeypatch,
+):
+    from app.social_vk import (
+        connect_photo_user_key, photo_upload_connection, verify_photo_upload_access,
+    )
+    company, post, image, path = image_post(
+        db, tmp_path, slug="vk-dedicated-photos",
+    )
+    settings = Settings(_env_file=None, products_root=tmp_path, content_vk_autopost_enabled=True)
+    connect_community(db, settings, company.id, "123456", "community-token")
+    operations = []
+
+    class PhotoAdapter:
+        async def call(self, method, token, **params):
+            assert token == "vk1.a.user-photos-wall"
+            operations.append(method)
+            if method == "groups.getById":
+                assert params["group_id"] == "123456"
+                return {"groups": [{"id": 123456, "is_admin": 1, "admin_level": 3}]}
+            if method == "photos.getWallUploadServer":
+                assert params == {"group_id": 123456}
+                return {"upload_url": "https://pu.vk.ru/c1/upload.php"}
+            raise AssertionError(method)
+
+        async def manager(self, group, token):
+            assert group == "123456"
+            assert token == "vk1.a.user-photos-wall"
+            operations.append("manager")
+            return {"id": 123456, "is_admin": 1, "admin_level": 3}
+
+    adapter = PhotoAdapter()
+    record = await connect_photo_user_key(
+        db, settings, company.id, "vk1.a.user-photos-wall", adapter=adapter,
+    )
+    assert photo_upload_connection(db, company.id, "123456").id == record.id
+    assert VKStore(settings.products_root).load_token(record.id) == "vk1.a.user-photos-wall"
+    assert operations == ["groups.getById", "photos.getWallUploadServer"]
+    from app.social_vk import connected, photo_token_for_connected_group
+    ch = connected(db, company.id)
+    assert ch.is_community_token
+    assert VKStore(settings.products_root).load_token(ch.id) == "community-token"
+    assert await photo_token_for_connected_group(
+        db, settings, ch, "123456", adapter, "community-token",
+    ) == "vk1.a.user-photos-wall"
+    assert operations[-1] == "manager"
+    assert await verify_photo_upload_access(
+        db, settings, company.id, adapter=adapter,
+    ) is True
+    assert "wall.post" not in operations
+
+
+@pytest.mark.asyncio
+async def test_reject_photo_key_from_non_admin_or_wrong_community(
+    db, tmp_path,
+):
+    from app.social_vk import connect_photo_user_key, photo_upload_connection
+    company = Product(name="Фото", slug="vk-photo-nonadmin")
+    db.add(company)
+    db.commit()
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    connect_community(db, settings, company.id, "123456", "community-token")
+    class Adapter:
+        async def call(self, method, token, **params):
+            return {"groups": [{"id": 654321, "is_admin": 1, "admin_level": 3}]}
+    with pytest.raises(ValueError, match="права"):
+        await connect_photo_user_key(
+            db, settings, company.id, "vk1.a.other-group", adapter=Adapter(),
+        )
+    assert photo_upload_connection(db, company.id, "123456") is None
+    with pytest.raises(ValueError, match="Ключ сообщества"):
+        await connect_photo_user_key(
+            db, settings, company.id, "community-token", adapter=Adapter(),
+        )
+    assert photo_upload_connection(db, company.id, "123456") is None
+
+
+@pytest.mark.asyncio
+async def test_photo_connection_rotation_revokes_old_token(
+    db, tmp_path,
+):
+    from app.social_vk import connect_photo_user_key, photo_upload_connection
+    company = Product(name="Фото ротация", slug="vk-photo-rotate")
+    db.add(company)
+    db.commit()
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    connect_community(db, settings, company.id, "123456", "community-token")
+    class Adapter:
+        async def call(self, method, token, **params):
+            if method == "groups.getById":
+                return {"groups": [{"id": 123456, "is_admin": 1, "admin_level": 3}]}
+            return {"upload_url": "https://pu.vk.com/upload.php"}
+    first = await connect_photo_user_key(
+        db, settings, company.id, "vk1.a.first", adapter=Adapter(),
+    )
+    second = await connect_photo_user_key(
+        db, settings, company.id, "vk1.a.second", adapter=Adapter(),
+    )
+    assert first.id != second.id
+    assert photo_upload_connection(db, company.id, "123456").id == second.id
+    assert VKStore(settings.products_root).load_token(second.id) == "vk1.a.second"
+    with pytest.raises((ValueError, OSError)):
+        VKStore(settings.products_root).load_token(first.id)
