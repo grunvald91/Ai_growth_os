@@ -150,9 +150,10 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     if expect_state == "blocked":
         assert "ситуация, противоположная" in inbox
         assert "ситуация, противоположная" in html
-        assert "изображение не прошло проверку" in html
+        assert "Утвердить картинку и пост" in html
     if expect_state == "review_unavailable":
         assert "не подтвердил качество" in html
+        assert "Утвердить картинку и пост" in html
     if expect_state == "ready":
         assert "критичных ошибок нет" in html
 
@@ -164,12 +165,17 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
         approved = approve_material(db, tmp_path, company.id, post.id, facts_confirmed=True)
         assert approved.status == ArtifactStatus.APPROVED
     else:
-        with pytest.raises(ReviewError, match="Визуальный критик"):
+        with pytest.raises(ReviewError, match="Изображение не согласовано"):
             approve_material(db, tmp_path, company.id, post.id, facts_confirmed=True)
         assert post.status == ArtifactStatus.AWAITING_APPROVAL
         # A failed browser form submission must return to the branded detail page,
         # not render FastAPI's raw JSON on an empty dark tab.
-        req = Request({"type": "http", "method": "POST", "path": "/"})
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+        req = Request({
+            "type": "http", "method": "POST", "path": "/",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+        }, receive=receive)
         redirect = await studio_material_approve(company.id, post.id, req, db=db)
         assert redirect.status_code == 303
         assert redirect.headers["location"].endswith(
@@ -179,6 +185,32 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
         assert failed_page.status_code == 200
         assert "Материал не утверждён" in failed_page.body.decode("utf-8")
         assert image_uri in failed_page.body.decode("utf-8")
+        # A deliberate owner click must approve the ORIGINAL media without any
+        # additional image or critic billing, and keep the reviewer audit intact.
+        from urllib.parse import urlencode
+        from app.content.vk_image_critic import _post_digest
+        accepted_form = urlencode({
+            "image_confirmed": "yes",
+            "facts_confirmed": "yes",
+            "expected_image_sha256": payload["image_sha256"],
+            "expected_post_sha256": _post_digest(payload),
+        }).encode("utf-8")
+
+        async def accepted_receive():
+            return {"type": "http.request", "body": accepted_form, "more_body": False}
+
+        accepted_request = Request({
+            "type": "http", "method": "POST", "path": "/",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+        }, receive=accepted_receive)
+        monkeypatch.setattr("app.api.content_studio.get_settings", lambda: settings)
+        accepted = await studio_material_approve(company.id, post.id, accepted_request, db=db)
+        assert accepted.status_code == 303
+        assert "approval_error" not in accepted.headers["location"]
+        db.refresh(post)
+        assert post.status == ArtifactStatus.APPROVED
+        assert verified_vk_image_approval(db, post, media)
+        assert len(image_requests) == len(vision_requests) == 1
     assert not list(db.scalars(select(Publication).where(
         Publication.product_id == company.id)))
     # The production path never attempts to publish a post in this task.

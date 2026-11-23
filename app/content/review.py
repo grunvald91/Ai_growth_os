@@ -42,6 +42,9 @@ def needs_fact_check(row: Artifact) -> bool:
 
 def approve_material(db: Session, products_root: Path, product_id: UUID, artifact_id: UUID, *,
                      facts_confirmed: bool = False, actor: str = "local-owner",
+                     image_confirmed: bool = False,
+                     expected_image_sha256: str | None = None,
+                     expected_post_sha256: str | None = None,
                      action_type: str = "studio:approve_material",
                      via: str = "studio") -> Artifact:
     """Approve once and record the owner's decision in the same transaction.
@@ -79,9 +82,19 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
                 validate_telegram_text(source["body"])
             except ValueError as exc:
                 raise ReviewError(422, str(exc)) from None
+        pending = db.scalar(select(Task.id).where(
+            Task.product_id == product_id, Task.assigned_agent == "content_editor",
+            Task.title == "EDIT: " + str(row.id), Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),
+        ).limit(1))
+        if pending:
+            raise ReviewError(409, "Доработка ещё выполняется — подтвердите новую версию")
         if source.get("channel") == "vk" and source.get("image_model", "none") != "none":
-            from app.content.vk_image_critic import verified_vk_image_approval
+            from app.content.vk_image_critic import (
+                _post_digest, verified_vk_image_approval,
+            )
             from app.content.brand_story_pipeline import verified_gallery_image
+            from app.services.artifacts import ArtifactService
+            import hashlib
             try:
                 image_id = UUID(str(source["image_artifact_id"]))
                 image = db.scalar(select(Artifact).where(
@@ -90,20 +103,51 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
                     Artifact.task_id == row.task_id,
                     Artifact.kind == "generated_image",
                 ))
-                if image is None or not verified_vk_image_approval(db, row, image):
-                    raise ValueError("No validated visual critique for this post")
-                verified_gallery_image(db, products_root, product_id, row.task_id, image)
+                if image is None:
+                    raise LookupError("Image missing")
+                valid = verified_vk_image_approval(db, row, image)
+                if not valid:
+                    if (not image_confirmed or
+                            source.get("image_state") not in {"blocked", "review_unavailable"} or
+                            source.get("image_review_state") not in {"blocked", "unavailable"}):
+                        raise ValueError("Image requires owner choice or new image")
+                    if (source.get("image_sha256") != expected_image_sha256 or
+                            _post_digest(source) != expected_post_sha256):
+                        raise ValueError("Image or text changed while owner was reviewing")
+                path = verified_gallery_image(db, products_root, product_id, row.task_id, image)
+                if hashlib.sha256(path.read_bytes()).hexdigest() != source.get("image_sha256"):
+                    raise ValueError("Image hash mismatch")
+                if not valid:
+                    critic_state = source["image_state"]
+                    decision = ArtifactService(db).create(
+                        product_id=product_id, task_id=row.task_id,
+                        kind="vk_image_owner_approval", title="Решение владельца о картинке VK",
+                        content=json.dumps({
+                            "decision": "approved",
+                            "post_artifact_id": str(row.id),
+                            "image_artifact_id": str(image.id),
+                            "image_sha256": source["image_sha256"],
+                            "post_sha256": _post_digest(source),
+                            "critic_state_before_override": critic_state,
+                            "critic_artifact_id": source.get("image_review_artifact_id"),
+                            "actor": actor[:200],
+                        }, ensure_ascii=False),
+                        status="draft",
+                    )
+                    source["image_review_state"] = "owner_approved"
+                    source["image_state"] = "ready"
+                    source["image_owner_approval_artifact_id"] = str(decision.id)
+                    row.content = json.dumps(source, ensure_ascii=False)
+                    db.flush()
+                    if not verified_vk_image_approval(db, row, image):
+                        raise ValueError("Owner decision could not be verified")
+                    action_type = "studio:approve_vk_owner_image"
             except (KeyError, ValueError, TypeError, LookupError, OSError):
+                db.rollback()
                 raise ReviewError(
-                    409, "Визуальный критик не подтвердил изображение. "
-                         "Исправьте серьёзные ошибки или завершите проверку до согласования."
+                    409, "Изображение не согласовано: выберите сохранённую картинку "
+                         "в полном просмотре или создайте новую."
                 ) from None
-        pending = db.scalar(select(Task.id).where(
-            Task.product_id == product_id, Task.assigned_agent == "content_editor",
-            Task.title == "EDIT: " + str(row.id), Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),
-        ).limit(1))
-        if pending:
-            raise ReviewError(409, "Доработка ещё выполняется — подтвердите новую версию")
     row.status = ArtifactStatus.APPROVED
     row.version += 1
     db.add(Approval(

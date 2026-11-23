@@ -1710,6 +1710,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
     else:
         text = artifact_text(record, value)
         review_html = ""
+        image_is_available = False
         if record.kind == "channel_text":
             if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
                 state = value.get("image_state")
@@ -1735,10 +1736,13 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                         'Изображение недоступно или повреждено. '
                                         'Публикацию нужно проверить.</p>')
                     else:
+                        image_is_available = True
                         review_html += gallery_html(product.id, record.task_id, [image])
                         if state == "ready":
-                            review_html += ('<p class="sg-footnote" role="status">'
-                                            'Визуальный критик проверил изображение: критичных ошибок нет.</p>')
+                            verdict = ('Изображение утверждено владельцем после замечаний критика.'
+                                       if value.get("image_review_state") == "owner_approved"
+                                       else 'Визуальный критик проверил изображение: критичных ошибок нет.')
+                            review_html += '<p class="sg-footnote" role="status">' + verdict + '</p>'
                         elif state == "blocked":
                             issue_lines = value.get("image_critical_issues") or []
                             summary = str(value.get("image_review_summary") or
@@ -1750,7 +1754,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                 + ('<ul>' + ''.join('<li>' + esc(str(x)) + '</li>'
                                                     for x in issue_lines[:4]) + '</ul>'
                                    if issue_lines else '')
-                                + '<p>Текст сохранён. Публикация этой картинки запрещена.</p>'
+                                + '<p>Изображение можно выбрать вручную после просмотра замечаний.</p>'
                                 + '</section>')
                         elif state in {"review_unavailable", "awaiting_review", "failed", "pending"}:
                             review_html += (
@@ -1837,10 +1841,31 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                 and value.get("image_state") != "ready"
             )
             if pending_vk_image:
-                form_actions += (
-                    '<p class="sg-warning" role="status">Утверждение недоступно: '
-                    'изображение не прошло проверку. Посмотрите картинку и замечания выше.</p>'
+                owner_choice_possible = (
+                    value.get("image_state") in {"blocked", "review_unavailable"}
+                    and bool(value.get("image_artifact_id")) and bool(value.get("image_sha256"))
+                    and bool(record.task_id) and image_is_available
                 )
+                if owner_choice_possible:
+                    from app.content.vk_image_critic import _post_digest
+                    form_actions += (
+                        '<form class="sg-inline-form" method="post" action="'
+                        f'/studio/products/{product.id}/review/{record.id}/approve">'
+                        f'<input type="hidden" name="expected_image_sha256" value="{esc(value["image_sha256"])}">'
+                        f'<input type="hidden" name="expected_post_sha256" value="{esc(_post_digest(value))}">'
+                        '<label><input type="checkbox" name="image_confirmed" value="yes" required> '
+                        'Я просмотрел картинку и замечания критика и хочу использовать именно её</label>'
+                        + ('<label><input type="checkbox" name="facts_confirmed" value="yes" required> '
+                           'Я проверил числа, цены и результаты</label>' if value.get("fact_check_required") else '')
+                        + '<button class="btn primary" type="submit">✓ Утвердить картинку и пост</button>'
+                        '<p class="sg-footnote">Решение сохраняется в истории. '
+                        'Утверждение не публикует пост автоматически.</p></form>'
+                    )
+                else:
+                    form_actions += (
+                        '<p class="sg-warning" role="status">Картинку ещё нельзя утвердить: '
+                        'файл отсутствует, повреждён или проверка пока выполняется.</p>'
+                    )
             else:
                 form_actions += (
                     f'<form method="post" action="/studio/products/{product.id}/review/{record.id}/approve">'
@@ -2962,12 +2987,26 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
     _owner_product(db, product_id)
     current = db.get(Artifact, artifact_id)
     facts_confirmed = False
-    if current is not None and current.product_id == product_id and needs_fact_check(current):
-        facts_confirmed = (await _studio_form(request)).get("facts_confirmed") == "yes"
+    image_confirmed = False
+    expected_image_sha256 = None
+    expected_post_sha256 = None
+    if current is not None and current.product_id == product_id:
+        is_vk_image = (
+            current.kind == "channel_text" and parse_json(current).get("channel") == "vk"
+            and parse_json(current).get("image_model", "none") != "none"
+        )
+        if needs_fact_check(current) or is_vk_image:
+            fields = await _studio_form(request)
+            facts_confirmed = fields.get("facts_confirmed") == "yes"
+            image_confirmed = fields.get("image_confirmed") == "yes"
+            expected_image_sha256 = fields.get("expected_image_sha256")
+            expected_post_sha256 = fields.get("expected_post_sha256")
     try:
         approve_material(
             db, get_settings().products_root, product_id, artifact_id,
             facts_confirmed=facts_confirmed,
+            image_confirmed=image_confirmed, expected_image_sha256=expected_image_sha256,
+            expected_post_sha256=expected_post_sha256,
             actor=getattr(request.state, "studio_login", None) or "local-owner",
             action_type="studio:approve_material", via="studio",
         )
