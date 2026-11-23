@@ -17,7 +17,7 @@ async def run_content_once(session_factory, settings):
     with session_factory() as db:
         from app.seo.queue import SEO_TASK_PREFIX, exhausted_products, SeoQuotaDeferred
         from app.seo.activation import enabled_product_ids, require_enabled
-        query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative']),
+        query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative', 'content_image_regen']),
             Task.status == TaskStatus.QUEUED)
         # Never run paid SEO content work for a company that did not opt in.
         enabled = enabled_product_ids(db)
@@ -72,6 +72,36 @@ async def run_content_once(session_factory, settings):
         if task is None:
             return 0
         task_id, agent, product_id = task.id, task.assigned_agent, task.product_id
+        if agent == 'content_image_regen':
+            from app.content.vk_image_regen import (
+                run_vk_image_redraw, restore_vk_redraw_failure,
+            )
+            claimed = db.execute(update(Task).where(
+                Task.id == task_id, Task.product_id == product_id,
+                Task.status == TaskStatus.QUEUED,
+            ).values(status=TaskStatus.RUNNING))
+            if claimed.rowcount != 1:
+                db.rollback()
+                return 0
+            db.commit()
+            try:
+                await run_vk_image_redraw(db, settings, task_id=task_id)
+                db.get(Task, task_id).status = TaskStatus.COMPLETED
+                db.commit()
+            except (Exception, asyncio.CancelledError) as exc:
+                db.rollback()
+                restore_vk_redraw_failure(db, task_id, type(exc).__name__)
+                db.execute(update(Task).where(
+                    Task.id == task_id, Task.product_id == product_id,
+                    Task.status == TaskStatus.RUNNING,
+                ).values(status=TaskStatus.FAILED))
+                db.commit()
+                logging.getLogger(__name__).warning(
+                    "VK redraw failed (task=%s, code=%s)", task_id, type(exc).__name__,
+                )
+                if isinstance(exc, asyncio.CancelledError):
+                    raise
+            return 1
         if agent == 'content_factory':
             request = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == 'content_request'))
             try:

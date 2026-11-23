@@ -125,6 +125,7 @@ def esc(value):
 def feedback(key):
     return {"connected": "Сообщество VK подключено. Проверьте первую публикацию.",
             "scheduled": "Публикация поставлена в очередь.",
+            "photo_checked": "VK разрешил запрос сервера загрузки фото. Полная публикация с фотографией подтверждается только после отправки тестового поста.",
             "cancelled": "Запланированная публикация отменена.",
             "checked": "Результат ручной проверки сохранён.",
             "disconnected": "VK отключён, будущие публикации отменены.",
@@ -179,6 +180,13 @@ def connection_error(key):
         "vk_not_configured": "VK ID пока не настроен на сервере ServGo. Нужны ID приложения VK и разрешённый HTTPS-адрес возврата.",
         "vk_id_input": "Проверьте ссылку на сообщество и настройки VK ID. Адрес вида vk.com/название подходит.",
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
+        "photo_check_failed": "Подключение к VK активно, но право загрузки фото не подтверждено. Ключ сообщества может разрешать публикацию текста, но не фото. Для фото может понадобиться отдельный пользовательский доступ с правами photos и wall.",
+        "publish_not_confirmed": "Подтвердите отправку поста в подключённое сообщество ВКонтакте.",
+        "publish_not_ready": "Публикация пока недоступна: проверьте подключение, состояние картинки и согласование поста.",
+        "publish_duplicate": "Этот материал уже поставлен в очередь либо опубликован. Проверьте историю VK.",
+        "publish_bad_time": "Укажите корректное время публикации в будущем.",
+        "publish_disabled": "Автопубликация ВКонтакте отключена на сервере. Проверьте настройки работника.",
+
         "group_oauth_input": "Не удалось начать авторизацию сообщества VK. Проверьте ссылку или воспользуйтесь подключением по ключу.",
         "group_oauth_not_configured": "Авторизация через VK сейчас недоступна. Пока можно подключить ключ сообщества вручную.",
     }.get(key, "")
@@ -186,12 +194,15 @@ def connection_error(key):
 
 @router.get("/studio/products/{product_id}/vk", response_class=HTMLResponse)
 def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
-            db: Session = Depends(get_db),
+            post_id: UUID | None = None, db: Session = Depends(get_db),
             settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     channel = connected(db, product_id)
     posts = approved_posts(db, product_id)
-    options = "".join(f'<option value="{p.id}">{esc(p.title[:85])}</option>' for p in posts)
+    options = "".join(
+        f'<option value="{p.id}"{" selected" if p.id == post_id else ""}>{esc(p.title[:85])}</option>'
+        for p in posts
+    )
     rows = db.scalars(select(Publication).where(
         Publication.product_id == product_id, Publication.channel == "vk",
     ).order_by(Publication.created_at.desc()).limit(30))
@@ -246,6 +257,11 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id
                              and (not channel.is_community_token or platform_service_token(settings)))
+        current += (
+            f'<form method="post" action="/studio/products/{product_id}/vk/check-photo">'
+            '<button type="submit" class="btn secondary small">Проверить доступ к фото</button>'
+            '<small>Проверка без публикации поста и без загрузки файла.</small></form>'
+        )
         if channel.is_community_token and channel.expires_at:
             current += '<p class="sg-footnote">Доступ VK ограничен по сроку. Для продления подключите сообщество заново до окончания действия ключа.</p>'
         if replies_ready:
@@ -279,7 +295,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
   + '</p>' if settings_link else
   '<p class="sg-footnote">Подключение одним нажатием пока недоступно. Используйте ключ сообщества ниже.</p>'))
     enabled = bool(settings.content_vk_autopost_enabled)
-    can_schedule = bool(channel and posts)
+    can_schedule = bool(channel and posts and enabled)
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
     body = f"""
@@ -332,7 +348,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
   <button name="mode" value="now" class="btn primary" type="submit"
    {"disabled" if not can_schedule else ""}>Опубликовать сейчас</button>
  </form>
- <p class="sg-footnote">Пока доступна только публикация текста. Для проверки выберите один утверждённый тестовый пост. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
+ <p class="sg-footnote">Отправляются утверждённые посты VK — с проверенной картинкой или без неё. Перед отправкой изображение проверяется снова. Если ключ не разрешает загрузку фотографии, текст отдельно не публикуется, а ошибка отображается в истории. Неизвестный результат отправки не повторяется автоматически.</p>
 </section>
 <section class="sg-surface">
  <h2>История VK</h2><ul class="sg-publication-list">
@@ -544,13 +560,36 @@ async def vk_callback(request: Request, state: str = "", code: str = "", device_
     return response
 
 
+@router.post("/studio/products/{product_id}/vk/check-photo")
+async def vk_check_photo(product_id: UUID, db: Session = Depends(get_db),
+                         settings=Depends(get_settings)):
+    from app.social_vk import verify_photo_upload_access
+    _owner_product(db, product_id)
+    try:
+        await verify_photo_upload_access(db, settings, product_id)
+    except ValueError:
+        db.rollback()
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=photo_check_failed", status_code=303,
+        )
+    return RedirectResponse(
+        f"/studio/products/{product_id}/vk?done=photo_checked", status_code=303,
+    )
+
+
 @router.post("/studio/products/{product_id}/vk/schedule")
 async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(get_db),
                       settings=Depends(get_settings)):
     _owner_product(db, product_id)
     fields = await _studio_form(request)
     if fields.get("confirmed") != "yes":
-        raise HTTPException(422, "Подтвердите публикацию")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=publish_not_confirmed", status_code=303,
+        )
+    if not settings.content_vk_autopost_enabled:
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error=publish_disabled", status_code=303,
+        )
     try:
         post_id = UUID(fields.get("post_id", ""))
         if fields.get("mode") == "now":
@@ -562,7 +601,14 @@ async def vk_schedule(product_id: UUID, request: Request, db: Session = Depends(
         schedule(db, product_id, post_id, when, products_root=settings.products_root)
     except (ValueError, LookupError, TypeError) as exc:
         db.rollback()
-        raise HTTPException(409, str(exc)) from None
+        message = str(exc).lower()
+        code = ("publish_duplicate" if "уже назначена" in message else
+                "publish_bad_time" if ("дата" in message or "время" in message or
+                                       "isoformat" in message) else
+                "publish_not_ready")
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk?error={code}", status_code=303,
+        )
     return RedirectResponse(f"/studio/products/{product_id}/vk?done=scheduled", status_code=303)
 
 

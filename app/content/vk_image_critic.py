@@ -236,18 +236,19 @@ async def review_vk_post_image(db, settings, *, product, task, post,
         raise ValueError("Изображение изменилось после генерации")
     digest = _post_digest(meta)
     provider, model = critic_profile(settings)
-    existing = list(db.scalars(select(Artifact).where(
+    all_reviews = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id, Artifact.task_id == task.id,
         Artifact.kind == "vk_image_critique",
     )))
+    existing = [entry for entry in all_reviews
+                if json.loads(entry.content).get("image_sha256") == picture_sha
+                and json.loads(entry.content).get("post_sha256") == digest]
     if len(existing) > 1:
-        raise ValueError("Обнаружены дублирующиеся заключения критика")
+        raise ValueError("Обнаружены дублирующиеся заключения для этой версии картинки")
     if existing:
         result = json.loads(existing[0].content)
-        if (result.get("image_sha256") != picture_sha or
-                result.get("post_sha256") != digest or
-                result.get("policy") != REVIEW_POLICY):
-            raise ValueError("Заключение относится к другой версии поста")
+        if result.get("policy") != REVIEW_POLICY:
+            raise ValueError("Заключение критика относится к другой политике")
         decision = result.get("decision")
         if decision not in {"approved", "blocked"}:
             raise ValueError("Некорректное сохранённое решение критика")
@@ -257,10 +258,15 @@ async def review_vk_post_image(db, settings, *, product, task, post,
         post.content = json.dumps(meta, ensure_ascii=False)
         db.commit()
         return decision
-    attempts = list(db.scalars(select(Artifact).where(
+    all_attempts = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id, Artifact.task_id == task.id,
         Artifact.kind == "vk_image_critique_intent",
     )))
+    attempts = [entry for entry in all_attempts
+                if json.loads(entry.content).get("image_sha256") == picture_sha
+                and json.loads(entry.content).get("post_sha256") == digest]
+    if len(attempts) > 1:
+        raise ValueError("Обнаружены дублирующиеся попытки проверки картинки")
     if attempts:
         meta["image_review_state"] = "unavailable"
         meta["image_state"] = "review_unavailable"

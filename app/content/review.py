@@ -106,6 +106,13 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
                 if image is None:
                     raise LookupError("Image missing")
                 valid = verified_vk_image_approval(db, row, image)
+                # A form opened on the older picture may not approve a newer
+                # critic-approved picture merely because the URL is the same.
+                if image_confirmed and (
+                    source.get("image_sha256") != expected_image_sha256 or
+                    _post_digest(source) != expected_post_sha256
+                ):
+                    raise ValueError("Stale visual approval form")
                 if not valid:
                     if (not image_confirmed or
                             source.get("image_state") not in {"blocked", "review_unavailable"} or
