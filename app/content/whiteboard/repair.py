@@ -1,7 +1,7 @@
 """Owner-approved visual-only repair: immutable story and cached MP3s, never TTS."""
 import hashlib
 import json
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 
@@ -29,41 +29,64 @@ def source_store(db, settings, product_id, source_id):
 
 
 def queue_visual_repair(db, settings, product_id, source_id):
+    """Queue a fresh, visible visual regeneration with a separate paid approval.
+
+    The source MP3s/storyboard are immutable; source call history does not consume
+    the new job's allowance. Repeated clicks on an active request are idempotent.
+    A finished or failed repair does not permanently disable future repairs.
+    """
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     source, value, original, store = source_store(db, settings, product_id, source_id)
-    title = 'WHITEBOARD-VISUAL-REPAIR: ' + str(source_id)
-    # One repair per original, including closed/failed jobs; no concealed paid restart.
-    existing = db.scalar(select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT, Task.title == title))
-    if existing:
-        return existing
-    if original.max_api_calls - started_attempts(value) < 8:
-        raise ReadinessError('repair_budget')
+    prefix = 'WHITEBOARD-VISUAL-REPAIR: ' + str(source_id)
+    active = db.scalar(
+        select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
+                           Task.title.like(prefix + '%'),
+                           Task.status.in_([TaskStatus.WAITING_APPROVAL, TaskStatus.QUEUED, TaskStatus.RUNNING]))
+        .order_by(Task.created_at.desc(), Task.id.desc()))
+    if active:
+        return active
     story = WhiteboardStoryboard.model_validate_json(store.load('storyboard', limit=64_000))
     audio_hashes = []
     for index, scene in enumerate(story.scenes):
         store.load(f'scene-{index:02}-image')
         for beat in range(len(scene.beats)):
             audio = store.load(f'scene-{index:02}-beat-{beat:02}-speech', limit=10_000_000)
-            audio_hashes.append({'scene_index': index, 'beat_index': beat, 'sha256': hashlib.sha256(audio).hexdigest()})
-    payload = JobRequest(request=original.request, models=original.models.model_copy(update={'image':'gemini-3.1-flash-image'}),
-        max_api_calls=original.max_api_calls, visual_review=True, visual_repair_from=UUID(str(source_id)),
-        image_provider='claudehub',
-        repair_source_digest=digest(source.content), repair_manifest_sha256=hashlib.sha256((store.directory/'manifest.json').read_bytes()).hexdigest(),
+            audio_hashes.append({'scene_index': index, 'beat_index': beat,
+                                 'sha256': hashlib.sha256(audio).hexdigest()})
+    # 1 new image + 1 new region plan + at most 1 revision per scene,
+    # and 1 critic + 1 author decision. 3-scene jobs use the v1 minimum of 13.
+    repair_limit = max(13, 3 * len(story.scenes) + 2)
+    payload = JobRequest(
+        request=original.request,
+        models=original.models.model_copy(update={'image': 'gemini-3.1-flash-image'}),
+        max_api_calls=repair_limit, visual_review=True, visual_repair_from=UUID(str(source_id)),
+        image_provider='claudehub', repair_regenerate_images=True,
+        repair_source_digest=digest(source.content),
+        repair_manifest_sha256=hashlib.sha256((store.directory / 'manifest.json').read_bytes()).hexdigest(),
         inherited_calls=value['calls'])
     content = payload.model_dump_json()
-    task = Task(product_id=product_id, assigned_agent=AGENT, title=title, priority=50,
-        status=TaskStatus.WAITING_APPROVAL, description='Переделать рисунки, сохранив исходную озвучку: '+original.request.topic)
-    db.add(task);db.flush()
+    task = Task(product_id=product_id, assigned_agent=AGENT,
+                title=prefix + ':' + uuid4().hex[:12], priority=50,
+                status=TaskStatus.WAITING_APPROVAL,
+                description='Перерисовать изображения без повторной озвучки: ' + original.request.topic)
+    db.add(task)
+    db.flush()
     artifact = Artifact(product_id=product_id, task_id=task.id, kind='whiteboard_request',
-        title='Визуальная правка без повторной озвучки', content=content, status=ArtifactStatus.AWAITING_APPROVAL)
-    db.add(artifact);db.flush()
-    db.add(Artifact(product_id=product_id, task_id=task.id, kind='whiteboard_job_state', title='Ход визуальной правки',
-        content=json.dumps({'calls':value['calls'], 'attempts_started':started_attempts(value),
-            'stage':'waiting_approval', 'error':None,
-            'cost_usd':None, 'cost_known':False, 'request_digest':digest(content),
-            'audio_reused_from':str(source_id), 'audio_sha256':audio_hashes, 'additional_speech_calls':0})))
+                        title='Перерисовка с исходным аудио', content=content,
+                        status=ArtifactStatus.AWAITING_APPROVAL)
+    db.add(artifact)
+    db.flush()
+    db.add(Artifact(product_id=product_id, task_id=task.id, kind='whiteboard_job_state',
+                    title='Ход перерисовки',
+                    content=json.dumps({'calls': 0, 'attempts_started': 0,
+                        'stage': 'waiting_approval', 'error': None,
+                        'cost_usd': None, 'cost_known': False, 'request_digest': digest(content),
+                        'audio_reused_from': str(source_id), 'audio_sha256': audio_hashes,
+                        'source_calls': value['calls'], 'source_attempts_started': started_attempts(value),
+                        'additional_speech_calls': 0})))
     db.add(Approval(product_id=product_id, artifact_id=artifact.id, action_type=ACTION,
-        risk_level='YELLOW', status='pending', requested_by='owner', reason='sha256:'+digest(content)))
+                    risk_level='YELLOW', status='pending',
+                    requested_by='owner', reason='sha256:' + digest(content)))
     db.commit()
     return task
 
@@ -113,8 +136,10 @@ async def prime_visual_repair(session_factory, settings, product_id, payload, de
                                      source_job_id=payload.visual_repair_from,
                                      source_model_id=original.models.regions)
         for index,scene in enumerate(story.scenes):
-            for name,limit in [(f'scene-{index:02}-image',12_000_000),
-                               *[(f'scene-{index:02}-beat-{beat:02}-speech',10_000_000) for beat in range(len(scene.beats))]]:
+            # A genuine repair must generate NEW images, not cache the old ones.
+            # Legacy approved repairs keep their original import behavior.
+            for name,limit in ([ ] if payload.repair_regenerate_images else [(f'scene-{index:02}-image',12_000_000)]) + [
+                               (f'scene-{index:02}-beat-{beat:02}-speech',10_000_000) for beat in range(len(scene.beats))]:
                 data = store.load(name,limit=limit)
                 async def saved():return data
                 await destination.bytes_stage(name,saved,limit=limit)
