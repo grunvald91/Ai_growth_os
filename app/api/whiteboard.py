@@ -358,9 +358,9 @@ def job_html(state, product_id, *, error=None):
     if state.get('visual_repair_from'):
         source_link = f'/studio/products/{product_id}/whiteboard/{state["visual_repair_from"]}'
         body += ('<p><strong>Перерисовка без новой озвучки.</strong> Новые изображения создаются отдельно. '
-                 'Сценарий и оригинальные MP3 сохраняются побайтно; новую озвучку не заказываем. '</p>'
+                 'Сценарий и оригинальные MP3 сохраняются побайтно; новую озвучку не заказываем.</p>'
                  f'<p><a href="{source_link}">Исходный ролик</a> · '
-                 f'В исходном задании было {state["inherited_calls"]} API-вызовов. '</p>')
+                 f'В исходном задании было {state["inherited_calls"]} API-вызовов.</p>')
         if state.get('repair_regenerate_images'):
             body += (f'<p><strong>Отдельный лимит перерисовки:</strong> до '
                      f'{state["max_api_calls"]} новых API-вызовов после подтверждения; '
@@ -370,7 +370,7 @@ def job_html(state, product_id, *, error=None):
                      'вызовов из старого общего лимита.</p>')
         if state['status'] == 'waiting_approval':
             body += ('<p class="sg-warning" role="status"><strong>Задание на перерисовку создано.</strong> '
-                     'Для запуска новых рисунков подтвердите дополнительные платные вызовы ниже. '</p>')
+                     'Для запуска новых рисунков подтвердите дополнительные платные вызовы ниже.</p>')
     review = state.get('visual_review_result')
     if isinstance(review, dict):
         if review.get('author_decision_fallback'):
