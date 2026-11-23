@@ -542,16 +542,17 @@ JS = r"""
    if(pendingBoard && window.scrollY<=120 &&
        !workList?.contains(document.activeElement))applyBoard(pendingBoard);
  },{passive:true});
- async function poll(){
+ async function poll({includeBoard=true}={}){
    if(document.hidden||ongoing)return;
    ongoing=true;
    try{
      // The fragment endpoint includes the selected page, query, date range
      // and exact status counts. It must not rely on the recent 45-job feed.
-     if(workBoard){
+     if(workBoard&&includeBoard){
        try{await refreshBoard();}catch(_){/* list refresh failure must not block notifications */}
      }
      const feedUrl=new URL(endpoint,window.location.origin);
+     if(workBoard)feedUrl.searchParams.set('scope','notifications');
      if(detail?.dataset.sgTask &&
         /^[0-9a-f-]{36}$/i.test(detail.dataset.sgTask)){
        feedUrl.searchParams.set('task_id',detail.dataset.sgTask);
@@ -620,7 +621,9 @@ JS = r"""
    }finally{readAll.disabled=false;}
  });
  if(workBoard)localizeWorkTimes(workBoard);
- poll();
+ // The initial HTML already contains the current task board. Do not fetch
+ // and parse the same full board again during first paint.
+ poll({includeBoard:false});
  window.setInterval(poll,20000);
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
 })();
