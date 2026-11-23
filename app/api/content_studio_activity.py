@@ -165,6 +165,51 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
     return title[:125] or "Подготовка материала"
 
 
+def owner_failure_reason(runs: list[AgentRun]) -> str:
+    """Explain only recognized failure codes, never show raw provider errors.
+
+    AgentRun.error may contain internal paths, request fragments or tokens.
+    Unknown codes are explicitly unknown rather than guessed or echoed.
+    """
+    last_error = next(
+        (str(run.error).strip() for run in reversed(runs)
+         if run.status == "failed" and run.error and str(run.error).strip()),
+        "",
+    )
+    if not last_error:
+        return "Подробная причина не сохранена в журнале выполнения."
+    code = ":".join(last_error.casefold().split(":")[:3])
+    if last_error == "One or more image frames could not be generated":
+        return "Не удалось создать одно или несколько изображений."
+    if any(marker in code for marker in (
+        "timeouterror", "readtimeout", "connecttimeout", "upstream_timeout",
+    )):
+        return "Превышено время ожидания ответа сервиса."
+    if any(marker in code for marker in (
+        "connecterror", "connectionerror", "networkerror", "network_failure",
+    )):
+        return "Не удалось установить соединение с сервисом."
+    if any(marker in code for marker in (
+        "provider_request_failed", "provider_http_error", "httpstatuserror",
+        "provider_transient",
+    )):
+        return "Сервис обработки вернул ошибку."
+    if code.startswith("local_render_failed:"):
+        return "Не удалось собрать видеофайл."
+    if "context_preparation_failed" in code:
+        return "Не удалось подготовить исходные данные для генерации."
+    if any(marker in code for marker in (
+        "invalid_article_output", "invalid_article_package",
+        "invalid_derivative_assembly", "model_unusable_response",
+        "providermalformedresponseerror", "provideremptyresponseerror",
+        "creative_failed:validationerror", "creative_failed:jsondecodeerror",
+        "quick_post_failed:validationerror", "quick_post_failed:jsondecodeerror",
+        "editorial_plan_failed:validation",
+    )):
+        return "Результат генерации не прошёл проверку формата или содержимого."
+    return "Точная причина ошибки не определена по сохранённому журналу."
+
+
 def task_public_description(task: Task) -> str:
     """Show truthful Russian owner copy without rewriting historical task keys."""
     if task.assigned_agent == "company_intake":
@@ -288,6 +333,10 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
                 break
         needs_decision = key == "waiting_approval" or pending_artifacts or draft_plan
         recent_runs = by_runs.get(task.id, [])
+        if key == "failed" and task.assigned_agent != "seo_factory":
+            special_failure = owner_failure_reason(recent_runs)
+        else:
+            special_failure = None
         active_run = next((run for run in reversed(recent_runs)
                            if run.status == "running"), None)
         stage_name = STAGE_NAMES.get(active_run.agent_name, "Работа ИИ-команды") if active_run else None
@@ -359,7 +408,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             "needs_decision": needs_decision,
             "kind_label": kind_name,
             "current_stage": stage_name,
-            "display_summary": special_summary,
+            "display_summary": special_summary or special_failure,
             "result_count": len(items),
             "artifacts": [{
                 "id": str(art.id), "kind": art.kind,
@@ -1080,6 +1129,11 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         explanation = "Нужно подтвердить создание видео. Платные вызовы требуют отдельного согласия."
     else:
         explanation = description
+    failure_note = (
+        '<p class="sg-work-failure" role="alert"><b>Что произошло:</b> '
+        + safe(owner_failure_reason(runs)) + '</p>'
+        if key == "failed" else ""
+    )
     refresh = ('<p class="sg-work-refresh" role="status">Состояние обновляется каждые 15 секунд. '
                'Эту страницу можно закрыть и вернуться позже.</p>'
                if key in {"queued", "running"} else "")
@@ -1139,6 +1193,6 @@ def task_detail_html(product_id: UUID, task: Task, runs: list[AgentRun],
         f'<section class="sg-surface sg-work-detail" data-sg-task="{task.id}" data-sg-state="{key}" data-sg-stage="{safe(stage_sig)}">'
         f'<span class="sg-work-status sg-work-{tone}">'
         f'{safe(label)}</span><h2>{safe(task_title(task, request))}</h2><p>{safe(explanation)}</p>'
-        + fail + sections + refresh + next_action
+        + failure_note + fail + sections + refresh + next_action
         + f'<p><a class="sg-mini-link" href="{base}/work">← Все задания</a></p></section>'
     )
