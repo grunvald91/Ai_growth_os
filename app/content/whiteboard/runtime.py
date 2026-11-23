@@ -132,9 +132,10 @@ def safe_error(exc) -> str:
     return 'generation_failed'
 
 
-async def preflight(settings, models: WhiteboardModels, voice: str, *, client=None, claudehub_client=None):
+async def preflight(settings, models: WhiteboardModels, voice: str, *, client=None, claudehub_client=None, skip_speech=False):
     """Only GETs. Fail before any paid call, using the actual adapter's HTTP client."""
-    if not settings.openrouter_api_key or not settings.xai_api_key:
+    if (not settings.xai_api_key or
+            (not settings.openrouter_api_key and not (skip_speech and regions_on_claudehub(models)))):
         raise ReadinessError('configuration_missing')
     try:
         if configured_models(settings) != models or voice != settings.whiteboard_voice:
@@ -151,7 +152,7 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
             raise ReadinessError('openrouter_key_invalid')
         if response.status_code != 200:
             raise ReadinessError('openrouter_unavailable' if response.status_code in TRANSIENT_STATUSES else 'openrouter_catalog_error')
-        catalogues = [('models?output_modalities=speech', models.speech)]
+        catalogues = [] if skip_speech else [('models?output_modalities=speech', models.speech)]
         if not regions_on_claudehub(models):
             catalogues.append(('models', models.regions))
         if models.image != 'gemini-3.1-flash-image':
@@ -208,6 +209,9 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
                 async with httpx.AsyncClient(base_url=settings.xai_base_url.rstrip('/')+'/', timeout=15,
                         follow_redirects=False, trust_env=False) as connection:
                     await check_claudehub(connection)
+        # The stored speech tracks cannot need a new TTS model or OpenRouter key.
+        if skip_speech and regions_on_claudehub(models):
+            return {'ready': True, 'code': 'ready'}
         if client is not None:
             return await check(client)
         async with httpx.AsyncClient(base_url='https://openrouter.ai/api/v1/', timeout=15, follow_redirects=False,
