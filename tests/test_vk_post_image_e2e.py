@@ -145,9 +145,9 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     if expect_state == "blocked":
         assert "ситуация, противоположная" in inbox
         assert "ситуация, противоположная" in html
-        assert "Изображение не прошло проверку" in html
+        assert "изображение не прошло проверку" in html
     if expect_state == "review_unavailable":
-        assert "Изображение сохранено, но проверка или генерация не завершена" in html
+        assert "не подтвердил качество" in html
     if expect_state == "ready":
         assert "критичных ошибок нет" in html
 
