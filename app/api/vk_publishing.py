@@ -186,12 +186,15 @@ def connection_error(key):
 
 @router.get("/studio/products/{product_id}/vk", response_class=HTMLResponse)
 def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
-            db: Session = Depends(get_db),
+            post_id: UUID | None = None, db: Session = Depends(get_db),
             settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
     channel = connected(db, product_id)
     posts = approved_posts(db, product_id)
-    options = "".join(f'<option value="{p.id}">{esc(p.title[:85])}</option>' for p in posts)
+    options = "".join(
+        f'<option value="{p.id}"{" selected" if p.id == post_id else ""}>{esc(p.title[:85])}</option>'
+        for p in posts
+    )
     rows = db.scalars(select(Publication).where(
         Publication.product_id == product_id, Publication.channel == "vk",
     ).order_by(Publication.created_at.desc()).limit(30))
@@ -332,7 +335,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
   <button name="mode" value="now" class="btn primary" type="submit"
    {"disabled" if not can_schedule else ""}>Опубликовать сейчас</button>
  </form>
- <p class="sg-footnote">Пока доступна только публикация текста. Для проверки выберите один утверждённый тестовый пост. Неудачная или неизвестная отправка не запускается повторно автоматически.</p>
+ <p class="sg-footnote">Отправляются утверждённые посты VK — с проверенной картинкой или без неё. Перед отправкой изображение проверяется снова. Если ключ не разрешает загрузку фотографии, текст отдельно не публикуется, а ошибка отображается в истории. Неизвестный результат отправки не повторяется автоматически.</p>
 </section>
 <section class="sg-surface">
  <h2>История VK</h2><ul class="sg-publication-list">
