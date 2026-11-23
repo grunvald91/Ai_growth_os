@@ -208,9 +208,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
-    assert '/studio/assets/create-studio.js?v=single-vk-model-20261123' in page.text
+    assert '/studio/assets/create-studio.js?v=create-topic-race-a11y-20261123' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-single-vk-model-20261123' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-topic-race-a11y-20261123' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -287,7 +287,7 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'id="sg-create-vk-image-slot"' in html
     assert 'id="sg-create-format-help"' in html
     assert 'data-sg-description="' in html
-    assert 'single-vk-model-20261123' in html
+    assert 'create-topic-race-a11y-20261123' in html
     assert 'growth-live.css?v=30-single-vk-model' in html
     assert "vkImageSlot.appendChild(vkReviewTip)" in js
     assert "vkImageRow" not in js
@@ -296,7 +296,8 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     dispatcher = client.get('/studio/assets/dispatcher.js').text
     assert "event.isComposing || event.keyCode === 229" in dispatcher
     assert "function markCreateTopicInvalid(invalid)" in dispatcher
-    assert "sg-create-context dp-voice-note" in dispatcher
+    assert "describedBy.push('sg-create-voice-hint')" in dispatcher
+    assert "if(invalid)describedBy.push('dp-voice-note')" in dispatcher
 
 
 def test_create_has_only_dispatcher_submit_and_reusable_details(live):
