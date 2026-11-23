@@ -32,7 +32,7 @@ async def test_visual_only_repair_generates_new_images_without_story_or_tts_and_
         assert queue_visual_repair(db,settings,product,source_id).id==repair_id
     with client() as browser:
         page=browser.get(f'/studio/products/{product}/whiteboard/{repair_id}')
-        assert 'Новая озвучка запрещена' in page.text and 'Из исходного задания перенесено вызовов: 13' in page.text
+        assert 'Новая озвучка запрещена' in page.text and 'В исходном задании было 13 API-вызовов' in page.text
     approve(environment,repair_id)
     seen=[]
     report=review(*(issue(i) for i in range(3)))
@@ -84,7 +84,7 @@ async def test_missing_original_audio_blocks_before_any_new_provider(environment
     await run_whiteboard_once(factory,settings,factory=never,readiness=ready)
     with factory() as db:
         t=owner_task(db,product,repair);assert t.status==TaskStatus.FAILED
-        assert json.loads(records(db,t)[1].content)['calls']==13
+        assert json.loads(records(db,t)[1].content)['calls']==0
 
 
 @pytest.mark.asyncio
