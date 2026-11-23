@@ -1,0 +1,101 @@
+name: Studio Tasks production performance (read-only)
+
+# The job is intentionally separate from deploy: an unavailable perf probe must
+# not roll back a healthy release. It runs only after the production deploy job.
+on:
+  workflow_run:
+    workflows: ["Deploy Growth (production)"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-tasks-prod-perf
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: >-
+      ${{ github.repository == 'grunvald91/Ai_growth_os' &&
+          ((github.event_name == 'workflow_run' &&
+            github.event.workflow_run.conclusion == 'success' &&
+            github.event.workflow_run.head_repository.full_name == github.repository) ||
+           (github.event_name == 'workflow_dispatch' &&
+            github.actor == github.repository_owner)) }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    steps:
+      - name: Measure live SQL and HTML in running container (no data export)
+        env:
+          SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+          HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+          # Same pinned fingerprint as deploy-growth.yml.
+          HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SSHPASS:-}" ]; then
+            echo "::warning::PERF_PROBE_SKIPPED reason=read_only_ssh_credentials_unavailable"
+            exit 0
+          fi
+          if ! command -v sshpass >/dev/null 2>&1; then
+            sudo timeout 45 apt-get -qq update >/dev/null
+            sudo timeout 45 apt-get -y -qq install sshpass >/dev/null
+          fi
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > "$RUNNER_TEMP/hostkeys" || true
+          : > ~/.ssh/known_hosts
+          while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            printf '%s\n' "$line" > "$RUNNER_TEMP/onekey"
+            if ssh-keygen -lf "$RUNNER_TEMP/onekey" 2>/dev/null |
+                grep -Fq "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < "$RUNNER_TEMP/hostkeys"
+          [ -s ~/.ssh/known_hosts ] || {
+            echo "::error::PERF_PROBE_FAILED reason=pinned_host_key_mismatch"
+            exit 1
+          }
+          # No command includes user IDs, credentials, or task content.
+          # The Python module prints ONLY aggregate numbers, never SQL text.
+          if ! output="$(sshpass -e ssh -o StrictHostKeyChecking=yes               -o ConnectTimeout=20 -o BatchMode=no "root@$HOST"               'docker exec ai-growth-os-api-1 python -m app.ops.studio_tasks_perf --samples 3' 2>/dev/null)"; then
+            echo "::error::PERF_PROBE_FAILED reason=server_probe_unavailable_or_error"
+            exit 1
+          fi
+          # Whitelist the report fields again at the GitHub boundary. Never echo
+          # raw container stdout even if a dependency unexpectedly printed PII.
+          PERF_JSON="$output" python3 - <<'PY'
+          import json, math, os, sys
+          try:
+              raw = os.environ["PERF_JSON"].strip().splitlines()
+              value = json.loads(raw[-1])
+              if value.get("schema") != 1 or value.get("read_only") is not True:
+                  raise ValueError("invalid_schema")
+              if value.get("status") == "no_tasks":
+                  print("STUDIO_TASKS_PROD_PERF status=no_tasks read_only=true")
+                  sys.exit(0)
+              if value.get("status") != "ok" or not isinstance(value.get("scenarios"), dict):
+                  raise ValueError("invalid_status")
+              expected = {"all", "approval", "search_no_match"}
+              if set(value["scenarios"]) != expected:
+                  raise ValueError("invalid_scenarios")
+              fields = ("samples", "total_p50_ms", "total_p95_ms", "database_p95_ms",
+                        "sql_p95_ms", "render_p95_ms", "sql_calls_max", "html_bytes_max")
+              for label in sorted(expected):
+                  metrics = value["scenarios"][label]
+                  if set(metrics) != set(fields):
+                      raise ValueError("invalid_metric_names")
+                  if not all(type(metrics[key]) in (int, float) and
+                             math.isfinite(metrics[key]) and 0 <= metrics[key] <= 1e9
+                             for key in fields):
+                      raise ValueError("invalid_metrics")
+                  print("STUDIO_TASKS_PROD_PERF scenario=" + label + " " +
+                        " ".join(f"{key}={metrics[key]}" for key in fields))
+          except (IndexError, ValueError, TypeError, KeyError, AttributeError):
+              print("::error::PERF_PROBE_FAILED reason=invalid_sanitized_report")
+              sys.exit(1)
+          PY

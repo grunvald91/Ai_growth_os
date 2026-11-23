@@ -10,6 +10,7 @@ import io
 import zipfile
 import json
 import re
+from time import perf_counter
 from collections import defaultdict
 from datetime import datetime, timezone
 from urllib.parse import parse_qs
@@ -2480,24 +2481,36 @@ def studio_work_page(product_id: UUID, tab: str = "all", q: str = "",
                      page: int = 1, partial: bool = False,
                      db: Session = Depends(get_db)):
     product = _owner_product(db, product_id)
+    started = perf_counter()
     data = work_page(db, product.id, tab=tab, query=q, period=period,
                      kind=kind, page=page)
+    db_ms = (perf_counter() - started) * 1000
+    rendered_at = perf_counter()
     html_body = activity_html(
         product.id, data["items"], tab=data["tab"],
         q=data["q"], period=data["period"], kind=data["kind"], page=data["page"],
         total=data["total"], page_size=data["page_size"], counts=data["counts"],
     )
+    render_ms = (perf_counter() - rendered_at) * 1000
+    shell_at = perf_counter()
     if partial:
         # Growth v4 middleware wraps HTML documents; a dedicated fragment media
         # type keeps this authenticated read-only response free of page chrome.
         result = Response(content=html_body, media_type="application/vnd.servgo.tasks+html")
+        shell_ms = 0.0
     else:
         result = HTMLResponse(studio_page_shell(
             product, active="work", title="Задания",
             subtitle="Что выполняется, что готово и где требуется ваше решение.",
             body=html_body,
         ))
+        shell_ms = (perf_counter() - shell_at) * 1000
     result.headers["Cache-Control"] = "private, no-store"
+    # Visible in the same-origin browser Network panel; no company/task data.
+    result.headers["Server-Timing"] = (
+        f"tasks_db;dur={db_ms:.2f}, tasks_html;dur={render_ms:.2f}, "
+        f"tasks_shell;dur={shell_ms:.2f}"
+    )
     return result
 
 
@@ -2506,6 +2519,7 @@ def studio_activity_json(product_id: UUID, task_id: UUID | None = None,
                          scope: str = "full",
                          db: Session = Depends(get_db), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
+    started = perf_counter()
     # The Tasks board only needs notifications. Avoid hydrating 45 jobs every
     # 20 seconds while the user is viewing the task list.
     if scope == "notifications" and task_id is None:
@@ -2528,8 +2542,10 @@ def studio_activity_json(product_id: UUID, task_id: UUID | None = None,
         ))
         if selected is not None:
             jobs.extend(_work_items_for_tasks(db, product.id, [selected]))
+    activity_ms = (perf_counter() - started) * 1000
     read = read_ids(settings, product.id)
     notes = [note for note in notice_items(db, product.id, limit=40) if note["id"] not in read][:10]
+    notice_ms = (perf_counter() - started) * 1000 - activity_ms
     response = JSONResponse({
         "jobs": jobs,
         "notices": notes,
@@ -2537,6 +2553,9 @@ def studio_activity_json(product_id: UUID, task_id: UUID | None = None,
         "active_count": active_count,
     })
     response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Server-Timing"] = (
+        f"tasks_feed;dur={activity_ms:.2f}, tasks_notices;dur={notice_ms:.2f}"
+    )
     return response
 
 

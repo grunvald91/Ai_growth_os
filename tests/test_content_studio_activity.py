@@ -1232,3 +1232,32 @@ def test_tasks_poll_does_not_refetch_same_board_during_initial_paint():
     from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
     assert "sg-work-failure" in STUDIO_CSS
     assert "poll({includeBoard:false})" in STUDIO_JS
+
+
+def test_tasks_server_timing_headers_are_safe_and_scoped(owner_studio):
+    import re
+    client, db, company, outsider = owner_studio
+    task = Task(product_id=company.id, assigned_agent="content_factory",
+                title="PRIVATE task title", status=TaskStatus.RUNNING)
+    db.add(task)
+    db.commit()
+    base = f"/studio/products/{company.id}"
+    page = client.get(base + "/work?partial=1")
+    full_page = client.get(base + "/work")
+    activity = client.get(base + "/activity.json?scope=notifications")
+    for response, fields in (
+        (page, ("tasks_db", "tasks_html", "tasks_shell")),
+        (full_page, ("tasks_db", "tasks_html", "tasks_shell")),
+        (activity, ("tasks_feed", "tasks_notices")),
+    ):
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "private, no-store"
+        header = response.headers.get("server-timing", "")
+        for name in fields:
+            assert re.search(r"\b" + name + r";dur=\d+\.\d{2}\b", header), header
+        assert str(task.id) not in header
+        assert str(company.id) not in header
+        assert "PRIVATE" not in header
+    foreign_page = client.get(f"/studio/products/{outsider.id}/work?partial=1")
+    assert foreign_page.status_code == 200
+    assert str(task.id) not in foreign_page.text
