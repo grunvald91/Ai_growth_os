@@ -4,6 +4,7 @@ import json
 
 import pytest
 from sqlalchemy import select
+from app.api import whiteboard as api
 
 from app.content.whiteboard.jobs import records, owner_task, job_directory, resume_job
 from app.content.whiteboard.repair import queue_visual_repair
@@ -160,3 +161,37 @@ async def test_failed_new_repair_is_reopened_from_saved_checkpoints_instead_of_r
         resumed = resume_job(db, product, repair, confirmed=True, decided_by='owner')
         assert resumed.status == TaskStatus.QUEUED
         assert json.loads(records(db, resumed)[1].content)['calls'] == 1
+
+
+@pytest.mark.asyncio
+async def test_html_approval_shows_queued_repair_without_starting_paid_calls(environment, monkeypatch):
+    factory, settings, product, _ = environment
+    source = new_job(environment, maximum=25)
+    approve(environment, source)
+    await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=ready)
+    with factory() as db:
+        repair = queue_visual_repair(db, settings, product, source).id
+        _, state, _, payload = records(db, owner_task(db, product, repair))
+        request_digest = json.loads(state.content)['request_digest']
+        assert payload.repair_regenerate_images
+    observed = []
+    async def fake_preflight(*args, **kwargs):
+        observed.append(kwargs.get('skip_speech'))
+        return {'ready': True}
+    monkeypatch.setattr(api, 'preflight', fake_preflight)
+    with client() as browser:
+        response = browser.post(
+            f'/studio/products/{product}/whiteboard/{repair}/approve',
+            data={'request_digest': request_digest, 'confirmed': 'yes'},
+            follow_redirects=False)
+        assert response.status_code == 303
+        page = browser.get(response.headers['location'])
+        assert page.status_code == 200
+        assert 'В очереди' in page.text and 'Перерисовка изображений' in page.text
+    assert observed == [True]
+    with factory() as db:
+        task = owner_task(db, product, repair)
+        assert task.status == TaskStatus.QUEUED
+        _, state, approval, _ = records(db, task)
+        assert approval.status == 'approved'
+        assert json.loads(state.content)['calls'] == 0
