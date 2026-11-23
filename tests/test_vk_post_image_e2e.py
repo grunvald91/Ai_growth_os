@@ -14,7 +14,8 @@ from PIL import Image
 from sqlalchemy import select
 
 from app.api.content_studio import (material_detail_page, studio_task_page,
-                                    studio_material_approve, studio_material_detail)
+                                    studio_material_approve, studio_material_detail,
+                                    studio_creative_image)
 from app.api.content_studio_ui import review_html
 from app.content.quick_post import QuickPostRequest, run_quick_post
 from app.content.service import queue_content
@@ -136,6 +137,10 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     html = material_detail_page(db, company, post, root=tmp_path)
     image_uri = f"/tasks/{task.id}/images/{media.id}"
     assert image_uri in html
+    file_response = studio_creative_image(
+        company.id, task.id, media.id, db=db, settings=settings)
+    assert file_response.status_code == 200
+    assert file_response.path.endswith("frame-01.png")
     assert html.index(image_uri) < html.index('id="material-copy"'), "Image must precede post text"
     assert ('Утвердить материал</button>' in html) is (expect_state == "ready")
     assert ("Критик заблокировал изображение" in html) is (expect_state == "blocked")
