@@ -479,6 +479,42 @@ async def photo_token_for_connected_group(db, settings, channel, group, adapter,
         return wall_token
 
 
+async def verify_photo_upload_access(db, settings, product_id, *, adapter=None):
+    """Read-only VK photo-upload preflight: no image bytes and no wall.post.
+
+    It verifies only the upload server grant, not the whole VK photo-save
+    pipeline, so success must never be labelled as a proven publication.
+    """
+    from app.content.vk_photo_upload import _upload_destination
+    channel = connected(db, product_id)
+    if channel is None:
+        raise ValueError("Сообщество VK не подключено")
+    adapter = adapter or VKAdapter(CommentGateway(), "vk")
+    try:
+        if channel.is_community_token:
+            wall_token = VKStore(settings.products_root).load_token(channel.id)
+        else:
+            wall_token = await active_token(settings, channel)
+            await adapter.manager(channel.account_id, wall_token)
+        photo_token = await photo_token_for_connected_group(
+            db, settings, channel, channel.account_id, adapter, wall_token,
+        )
+        reply = await adapter.call(
+            "photos.getWallUploadServer", photo_token, group_id=int(channel.account_id),
+        )
+        if not isinstance(reply, dict):
+            raise ValueError("Unexpected VK response")
+        _upload_destination(reply["upload_url"])
+    except (Exception,) as exc:
+        # Never leak API keys, provider response bodies or transient upload URLs.
+        raise ValueError(
+            "ВКонтакте не подтвердил право загружать фото в это сообщество. "
+            "Для публикации с картинкой может понадобиться отдельное "
+            "подключение пользователя с правами photos и wall."
+        ) from None
+    return True
+
+
 def connected(db, product_id):
     # Dedicated publisher token takes precedence over legacy comment-token connection.
     row = db.scalar(select(Artifact).where(
