@@ -20,7 +20,60 @@ from app.content.vk_image_regen import (
 )
 from app.core.config import Settings
 from app.models.domain import Artifact, Task, TaskStatus
-from tests.test_vk_image_critic import FakeReviewer, _setup, issue, report
+from app.models.domain import Product
+from app.services.artifacts import ArtifactService
+
+
+def _setup(db, tmp_path):
+    product = Product(name="Тестовая мастерская", slug="vk-redraw-test")
+    db.add(product)
+    db.flush()
+    task = Task(product_id=product.id, assigned_agent="content_factory",
+                title="CONTENT: post:vk:redraw", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    picture = _png()
+    folder = image_folder(tmp_path, product.id, task.id)
+    folder.mkdir(parents=True)
+    (folder / "frame-01.png").write_bytes(picture)
+    digest = hashlib.sha256(picture).hexdigest()
+    image = ArtifactService(db).create(
+        product_id=product.id, task_id=task.id, kind="generated_image",
+        title="VK cover", content=json.dumps({
+            "filename": "frame-01.png", "frame_number": 1,
+            "ratio": "4:5", "model": "gemini-3.1-flash-image", "sha256": digest,
+        }),
+    )
+    post = ArtifactService(db).create(
+        product_id=product.id, task_id=task.id, kind="channel_text",
+        title="Как вернуть клиентов", content=json.dumps({
+            "channel": "vk", "title": "Как вернуть клиентов",
+            "body": "Как мастерская отвечает на пропущенные обращения",
+            "image_model": "gemini", "image_ratio": "4:5",
+            "image_state": "awaiting_review", "image_review_state": "pending",
+            "image_artifact_id": str(image.id), "image_sha256": digest,
+        }), status="awaiting_approval",
+    )
+    db.commit()
+    return product, task, post, image
+
+
+class FakeReviewer:
+    def __init__(self, verdict):
+        self.verdict = verdict
+
+    async def review(self, image, *, company_name, title, body):
+        return self.verdict
+
+
+def issue(*, severity, category):
+    return VKImageIssue(category=category, severity=severity, confidence="high",
+                        evidence="Нарисован предмет, который противоречит смыслу поста")
+
+
+def report(*issues):
+    return VKImageReview(summary="Картинка проверена", issues=list(issues))
+
 
 
 def _png(rgb=(20, 80, 130)):
