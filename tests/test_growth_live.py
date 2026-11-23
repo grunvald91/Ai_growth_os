@@ -198,16 +198,19 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="dp-voice-status"' in page.text
     assert 'id="sg-create-suggestions"' in page.text
     assert 'id="sg-create-count"' in page.text
-    assert 'id="sg-create-vk-image-model"' in page.text
+    assert 'id="sg-create-vk-model-choice"' in page.text
+    assert 'id="sg-create-vk-image-model"' not in page.text
+    assert page.text.count('name="vk_image_model"') == 1
+    assert 'id="sg-create-vk-model-choice" name="vk_image_model" form="dp-form"' in page.text
     assert 'id="sg-create-vk-image-ratio"' in page.text
     assert 'value="4:5"' in page.text and 'value="1:1"' in page.text
     assert 'id="sg-create-platform"' in page.text
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
-    assert '/studio/assets/create-studio.js?v=create-editor-compact-v4-20261121' in page.text
+    assert '/studio/assets/create-studio.js?v=single-vk-model-20261123' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-start-fast-20261121' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-single-vk-model-20261123' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -284,9 +287,11 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'id="sg-create-vk-image-slot"' in html
     assert 'id="sg-create-format-help"' in html
     assert 'data-sg-description="' in html
-    assert 'create-editor-compact-v4-20261121' in html
-    assert 'growth-live.css?v=29-create-voice-hint' in html
-    assert "vkImageSlot.appendChild(vkImageRow)" in js
+    assert 'single-vk-model-20261123' in html
+    assert 'growth-live.css?v=30-single-vk-model' in html
+    assert "vkImageSlot.appendChild(vkReviewTip)" in js
+    assert "vkImageRow" not in js
+    assert "vkImageModel.value" not in js
     assert "event.target instanceof Node && !history.contains(event.target)" not in js
     dispatcher = client.get('/studio/assets/dispatcher.js').text
     assert "event.isComposing || event.keyCode === 229" in dispatcher
@@ -353,9 +358,9 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=29-create-voice-hint' in page.text
+    assert '/studio/assets/growth-live.css?v=30-single-vk-model' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-start-fast-20261121' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-single-vk-model-20261123' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text
