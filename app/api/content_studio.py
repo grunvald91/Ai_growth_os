@@ -1710,6 +1710,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
     else:
         text = artifact_text(record, value)
         review_html = ""
+        image_is_available = False
         if record.kind == "channel_text":
             if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
                 state = value.get("image_state")
@@ -1735,6 +1736,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                         'Изображение недоступно или повреждено. '
                                         'Публикацию нужно проверить.</p>')
                     else:
+                        image_is_available = True
                         review_html += gallery_html(product.id, record.task_id, [image])
                         if state == "ready":
                             verdict = ('Изображение утверждено владельцем после замечаний критика.'
@@ -1842,7 +1844,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                 owner_choice_possible = (
                     value.get("image_state") in {"blocked", "review_unavailable"}
                     and bool(value.get("image_artifact_id")) and bool(value.get("image_sha256"))
-                    and bool(record.task_id)
+                    and bool(record.task_id) and image_is_available
                 )
                 if owner_choice_possible:
                     from app.content.vk_image_critic import _post_digest
