@@ -9,7 +9,7 @@ from app.models.domain import Task, TaskStatus, Product, Artifact, ArtifactStatu
 from .checkpoints import CheckpointStore
 from .contracts import WhiteboardStoryboard
 from .jobs import AGENT, ACTION, JobRequest, digest, records, owner_task, job_directory, started_attempts
-from .runtime import ReadinessError
+from .runtime import ReadinessError, CLAUDEHUB_VISION_MODEL
 from .science import FactReview, ScienceSources, evidence_supported, requires_science_review
 
 
@@ -58,7 +58,8 @@ def queue_visual_repair(db, settings, product_id, source_id):
     repair_limit = max(13, 3 * len(story.scenes) + 2)
     payload = JobRequest(
         request=original.request,
-        models=original.models.model_copy(update={'image': 'gemini-3.1-flash-image'}),
+        models=original.models.model_copy(update={'image': 'gemini-3.1-flash-image',
+                                               'regions': CLAUDEHUB_VISION_MODEL}),
         max_api_calls=repair_limit, visual_review=True, visual_repair_from=UUID(str(source_id)),
         image_provider='claudehub', repair_regenerate_images=True,
         repair_source_digest=digest(source.content),
@@ -121,10 +122,13 @@ async def reuse_verified_science(original_store, destination, *, request, storyb
 async def prime_visual_repair(session_factory, settings, product_id, payload, destination):
     with session_factory() as db:
         source, value, original, store = source_store(db, settings, product_id, payload.visual_repair_from)
+        replacement = {'image': 'gemini-3.1-flash-image'}
+        if payload.repair_regenerate_images:
+            replacement['regions'] = CLAUDEHUB_VISION_MODEL
         if (digest(source.content) != payload.repair_source_digest
                 or hashlib.sha256((store.directory/'manifest.json').read_bytes()).hexdigest() != payload.repair_manifest_sha256
                 or original.request != payload.request
-                or original.models.model_copy(update={'image':'gemini-3.1-flash-image'}) != payload.models
+                or original.models.model_copy(update=replacement) != payload.models
                 or payload.image_provider != 'claudehub'
                 or value['calls'] != payload.inherited_calls):
             raise ReadinessError('repair_source_invalid')
