@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 import hashlib
 
 from sqlalchemy import case, exists, func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer, load_only
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.api.studio_resource_widgets import resource_widget
@@ -264,14 +264,25 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
         by_request.setdefault(record.task_id, record)
     runs = list(db.scalars(select(AgentRun).where(
         AgentRun.task_id.in_(ids),
-    ).order_by(AgentRun.started_at, AgentRun.id)))
+    ).options(load_only(
+        AgentRun.id, AgentRun.task_id, AgentRun.agent_name,
+        AgentRun.status, AgentRun.started_at, AgentRun.error,
+    )).order_by(AgentRun.started_at, AgentRun.id)))
     by_runs = {}
     for run in runs:
         by_runs.setdefault(run.task_id, []).append(run)
+    # A task list needs artifact metadata, never an entire article/video brief.
+    # Fetch the small number of reports/plans that need JSON separately.
     results = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.task_id.in_(ids),
         Artifact.kind.in_(RESULT_KINDS | JOB_REPORT_KINDS),
-    ).order_by(Artifact.created_at.desc(), Artifact.id.desc())))
+    ).options(defer(Artifact.content))
+     .order_by(Artifact.created_at.desc(), Artifact.id.desc())))
+    payload_ids = [art.id for art in results
+                   if art.kind in {"editorial_plan", "seo_factory_report"}]
+    payloads = dict(db.execute(select(Artifact.id, Artifact.content).where(
+        Artifact.product_id == product_id, Artifact.id.in_(payload_ids),
+    )).all()) if payload_ids else {}
     by_results = {}
     for result in results:
         by_results.setdefault(result.task_id, []).append(result)
@@ -328,7 +339,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
             if art.kind != "editorial_plan":
                 continue
             try:
-                draft_plan = json.loads(art.content or "{}").get("approval_state") == "draft"
+                draft_plan = json.loads(payloads.get(art.id) or "{}").get("approval_state") == "draft"
             except (ValueError, TypeError, AttributeError):
                 pass
             if draft_plan:
@@ -364,7 +375,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
                     if art.kind != "seo_factory_report":
                         continue
                     try:
-                        report_data = json.loads(art.content or "{}")
+                        report_data = json.loads(payloads.get(art.id) or "{}")
                     except (TypeError, ValueError):
                         continue
                     if isinstance(report_data, dict) and type(report_data.get("articles_queued")) is int:
@@ -557,12 +568,17 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
         "ready": Task.status == TaskStatus.COMPLETED,
         "problems": Task.status.in_((TaskStatus.FAILED, TaskStatus.CANCELLED)),
     }
-    counts = {
-        name: int(db.scalar(select(func.count(Task.id)).where(
-            *base, *((predicate,) if predicate is not None else ()),
-        )) or 0)
-        for name, predicate in predicates.items()
-    }
+    # One aggregate scan instead of five separate count queries per page/poll.
+    totals = db.execute(select(
+        func.count(Task.id),
+        func.sum(case((active, 1), else_=0)),
+        func.sum(case((attention, 1), else_=0)),
+        func.sum(case((Task.status == TaskStatus.COMPLETED, 1), else_=0)),
+        func.sum(case((Task.status.in_((TaskStatus.FAILED, TaskStatus.CANCELLED)), 1),
+                      else_=0)),
+    ).where(*base)).one()
+    counts = dict(zip(("all", "active", "approval", "ready", "problems"),
+                      (int(value or 0) for value in totals)))
     total = counts[tab]
     max_page = max(1, (total + page_size - 1) // page_size)
     page = min(page, max_page)
@@ -605,7 +621,8 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
     candidates = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product_id, Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
         Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
-    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
+    ).options(defer(Artifact.content))
+     .order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(limit)))
     for row in candidates:
         is_animator = row.kind == "whiteboard_video"
         readable_title = readable_artifact_title(row)
@@ -632,7 +649,8 @@ def notice_items(db: Session, product_id: UUID, limit: int = 8) -> list[dict]:
         Artifact.status == ArtifactStatus.DRAFT,
         Artifact.kind.in_(RESULT_KINDS - {"editorial_plan"}),
         Artifact.created_at >= datetime.now(timezone.utc) - timedelta(days=3),
-    ).order_by(Artifact.created_at.desc()).limit(4)))
+    ).options(defer(Artifact.content))
+     .order_by(Artifact.created_at.desc()).limit(4)))
     known = {note["id"] for note in notes}
     for draft in recent_drafts:
         if str(draft.id) not in known:
