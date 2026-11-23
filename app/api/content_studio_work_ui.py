@@ -180,7 +180,7 @@ CSS = r"""
 .sg-seo-task-stage{margin:10px 0;font-size:14px;
   color:var(--s-text-muted,#587085)}
 .sg-seo-task-muted{margin:15px 0;color:var(--s-text-muted,#587085)}
-.sg-seo-task-error{padding:11px 13px;margin:12px 0;border:1px solid var(--s-line,#DFE7F0);
+.sg-seo-task-error,.sg-work-failure{padding:11px 13px;margin:12px 0;border:1px solid var(--s-line,#DFE7F0);
   border-radius:10px;color:var(--s-text,#263D56);background:var(--s-surface-2,#F6F8FB)}
 .sg-seo-task-actions{display:flex;flex-wrap:wrap;gap:12px;
   align-items:center;margin-top:20px}
