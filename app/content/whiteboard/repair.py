@@ -1,6 +1,7 @@
 """Owner-approved visual-only repair: immutable story and cached MP3s, never TTS."""
 import hashlib
 import json
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -39,13 +40,37 @@ def queue_visual_repair(db, settings, product_id, source_id):
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     source, value, original, store = source_store(db, settings, product_id, source_id)
     prefix = 'WHITEBOARD-VISUAL-REPAIR: ' + str(source_id)
-    active = db.scalar(
+    active_jobs = list(db.scalars(
         select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
                            Task.title.like(prefix + '%'),
                            Task.status.in_([TaskStatus.WAITING_APPROVAL, TaskStatus.QUEUED, TaskStatus.RUNNING]))
-        .order_by(Task.created_at.desc(), Task.id.desc()))
-    if active:
-        return active
+        .order_by(Task.created_at, Task.id)))
+    # Upgrade legacy, unapproved visual repairs instead of reusing an old request
+    # that imports the original pictures and shares the exhausted source budget.
+    # Never supersede a queued/running or already approved paid job.
+    existing = None
+    superseded = False
+    for candidate in active_jobs:
+        if candidate.status == TaskStatus.WAITING_APPROVAL:
+            _, pending_state, consent, pending_payload = records(db, candidate, lock=True)
+            if not pending_payload.repair_regenerate_images and consent.status == 'pending':
+                consent.status = 'rejected'
+                consent.decided_at = datetime.now(timezone.utc)
+                consent.decided_by = 'policy:legacy_repair_upgrade'
+                candidate.status = TaskStatus.CANCELLED
+                prior = json.loads(pending_state.content)
+                prior.update(stage='cancelled', error='cancelled',
+                             superseded_by_new_repair=True)
+                pending_state.content = json.dumps(prior)
+                superseded = True
+                continue
+        # Repeated clicks must be idempotent for the active replacement.
+        existing = candidate
+        break
+    if existing:
+        if superseded:
+            db.commit()
+        return existing
     # Prefer resuming paid, verified checkpoints instead of buying the same images again.
     failed = db.scalar(
         select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
