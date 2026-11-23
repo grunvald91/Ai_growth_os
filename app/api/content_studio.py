@@ -1618,7 +1618,8 @@ def materials_page(db: Session, product: Product, kind: str = "all", q: str = ""
 
 
 def material_detail_page(db: Session, product: Product, record: Artifact, *, root=None,
-                         approval_error: str | None = None) -> str:
+                         approval_error: str | None = None,
+                         redraw_error: str | None = None) -> str:
     value = parse_json(record)
     kind_label = artifact_kind_label(record, value)
     generic_warnings = value.get("quality_warnings") or []
@@ -1756,11 +1757,13 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                    if issue_lines else '')
                                 + '<p>Изображение можно выбрать вручную после просмотра замечаний.</p>'
                                 + '</section>')
-                        elif state in {"review_unavailable", "awaiting_review", "failed", "pending"}:
+                        elif state in {"review_unavailable", "awaiting_review", "failed", "pending", "regenerating"}:
                             review_html += (
                                 '<p class="sg-warning" role="alert">'
-                                'Изображение сохранено, но визуальный критик ещё не подтвердил качество. '
-                                'Публикация изображения заблокирована.</p>')
+                                + ('Переделка картинки выполняется. Старый PNG сохранён.'
+                                   if state == "regenerating" else
+                                   'Изображение сохранено, но критик не подтвердил его качество.')
+                                + ' Публикация пока недоступна.</p>')
                 elif state in {"stale", "failed", "pending"}:
                     reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
                               if state == "stale" else
@@ -1834,6 +1837,36 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                     + controls + '<p>Сохраняется новая версия. Она потребует отдельного утверждения.</p>'
                     '<button class="btn primary" type="submit">Сохранить новую версию</button></form></details>'
                 )
+        if (record.kind == "channel_text" and value.get("channel") == "vk"
+                and value.get("image_model", "none") != "none"
+                and status == ArtifactStatus.AWAITING_APPROVAL):
+            if value.get("image_state") == "regenerating":
+                task_id = value.get("image_redraw_task_id")
+                form_actions += (
+                    '<p class="sg-warning" role="status">Новая картинка создаётся. '
+                    'Текст поста и старое изображение сохранены.</p>'
+                    + (f'<a class="btn secondary" href="/studio/products/{product.id}/tasks/{esc(task_id)}">'
+                       'Посмотреть задание</a>' if task_id else '')
+                )
+            else:
+                form_actions += (
+                    '<form class="sg-inline-form" method="post" action="'
+                    f'/studio/products/{product.id}/review/{record.id}/regenerate-image">'
+                    f'<input type="hidden" name="source_version" value="{record.version}">'
+                    f'<input type="hidden" name="source_digest" value="{source_fingerprint(record)}">'
+                    '<label class="sg-field"><span>Что исправить в картинке? (необязательно)</span>'
+                    '<textarea name="feedback" maxlength="700" rows="2" '
+                    'placeholder="Например: убрать надпись, исправить предмет, сменить композицию"></textarea></label>'
+                    '<label><input type="checkbox" name="paid_confirmed" value="yes" required> '
+                    'Запустить одну платную генерацию и одну проверку критиком</label>'
+                    '<button class="btn secondary" type="submit">↻ Переделать картинку</button>'
+                    '<small>Текст не изменится. Старая картинка останется в истории. '
+                    'Автоматических платных повторов нет.</small></form>'
+                )
+                if value.get("image_regeneration_error_code"):
+                    form_actions += ('<p class="sg-warning" role="alert">'
+                                     'Перегенерация не завершилась. Старая картинка сохранена; '
+                                     'можно повторить вручную.</p>')
         if status == ArtifactStatus.AWAITING_APPROVAL:
             pending_vk_image = (
                 record.kind == "channel_text" and value.get("channel") == "vk"
@@ -1885,6 +1918,28 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                 '<small>ИИ создаст новую версию. Предыдущий текст сохранится.</small></label>'
                 '<button type="submit" class="btn secondary">✦ Попросить ИИ доработать</button></form>'
             )
+        if status == ArtifactStatus.APPROVED and value.get("channel") == "vk":
+            from app.social_vk import connected as vk_connected
+            vk_connection = vk_connected(db, product.id)
+            form_actions += (
+                '<div class="sg-inline-form">'
+                f'<a class="btn secondary" href="/studio/products/{product.id}/vk?post_id={record.id}">'
+                'Запланировать публикацию VK</a></div>'
+            )
+            if vk_connection:
+                form_actions += (
+                    f'<form class="sg-inline-form" method="post" action="/studio/products/{product.id}/vk/schedule">'
+                    f'<input type="hidden" name="post_id" value="{record.id}">'
+                    '<input type="hidden" name="mode" value="now">'
+                    '<label><input type="checkbox" name="confirmed" value="yes" required> '
+                    'Публикую этот пост в подключённом сообществе ВКонтакте</label>'
+                    '<button class="btn primary" type="submit">Опубликовать в ВК автоматически</button>'
+                    '<small>Задание отправится в очередь. История и ошибки — в разделе ВКонтакте. '
+                    'Без повторной отправки при неопределённом ответе VK.</small></form>'
+                )
+            else:
+                form_actions += ('<p class="sg-footnote">Для отправки '
+                                 'подключите сообщество ВКонтакте.</p>')
         if status == ArtifactStatus.APPROVED and value.get("channel") == "telegram":
             form_actions += (
                 f'<div class="sg-inline-form"><a class="btn secondary" '
@@ -1910,6 +1965,15 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         "facts": "Перед утверждением проверьте числа, цены и результаты и подтвердите проверку.",
         "conflict": "Утвердить эту версию не удалось. Проверьте состояние материала и попробуйте снова.",
     }
+    redraw_messages = {
+        "stale": "Пост изменился после открытия страницы. Обновите его и попробуйте снова.",
+        "busy": "Перегенерация не запущена. Проверьте, нет ли уже задания или публикации.",
+        "limit": "Достигнут лимит сохранённых версий. Создайте новый пост.",
+    }
+    if redraw_error in redraw_messages:
+        content = ('<section class="sg-surface sg-vk-image-verdict" role="alert">'
+                   '<h3>Не удалось переделать картинку</h3><p>'
+                   + esc(redraw_messages[redraw_error]) + '</p></section>' + content)
     if approval_error in approval_messages:
         content = ('<section class="sg-surface sg-vk-image-verdict" role="alert">'
                    '<h3>Материал не утверждён</h3><p>'
@@ -2214,7 +2278,8 @@ def studio_materials(product_id: UUID, kind: str = "all", q: str = "", page: int
 
 @router.get("/studio/products/{product_id}/materials/{artifact_id}", response_class=HTMLResponse)
 def studio_material_detail(product_id: UUID, artifact_id: UUID,
-                           approval_error: str | None = None, db: Session = Depends(get_db),
+                           approval_error: str | None = None,
+                           redraw_error: str | None = None, db: Session = Depends(get_db),
                            settings=Depends(get_settings)):
     product = db.get(Product, product_id)
     if product is None:
@@ -2229,7 +2294,8 @@ def studio_material_detail(product_id: UUID, artifact_id: UUID,
             f"/studio/products/{product_id}/whiteboard/{record.task_id}", status_code=303,
         )
     response = HTMLResponse(material_detail_page(
-        db, product, record, root=settings.products_root, approval_error=approval_error))
+        db, product, record, root=settings.products_root,
+        approval_error=approval_error, redraw_error=redraw_error))
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -3026,6 +3092,34 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
                 )
         raise HTTPException(exc.status, exc.message) from None
     return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
+
+
+@router.post("/studio/products/{product_id}/review/{artifact_id}/regenerate-image")
+async def studio_vk_regenerate_image(product_id: UUID, artifact_id: UUID,
+                                     request: Request, db: Session = Depends(get_db)):
+    from app.content.vk_image_regen import queue_vk_image_redraw
+    _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    if fields.get("paid_confirmed") != "yes":
+        raise HTTPException(422, "Подтвердите платные вызовы для новой картинки")
+    try:
+        task = queue_vk_image_redraw(
+            db, product_id, artifact_id, source_version=int(fields.get("source_version", "")),
+            source_digest=fields.get("source_digest", ""),
+            feedback=fields.get("feedback", ""),
+        )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except (ValueError, TypeError) as exc:
+        db.rollback()
+        detail = "stale" if "изменился" in str(exc) else (
+            "limit" if "лимит" in str(exc) else "busy"
+        )
+        return RedirectResponse(
+            f"/studio/products/{product_id}/materials/{artifact_id}?redraw_error={detail}",
+            status_code=303,
+        )
+    return RedirectResponse(f"/studio/products/{product_id}/tasks/{task.id}", status_code=303)
 
 
 @router.post("/studio/products/{product_id}/review/{artifact_id}/revise")
