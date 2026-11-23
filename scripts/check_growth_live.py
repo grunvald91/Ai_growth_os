@@ -391,14 +391,27 @@ def main():
                 # Format-specific controls must be next to the relevant action.
                 page.locator('#sg-create-platform').select_option('vk')
                 expect(page.locator('#sg-create-vk-image-primary')).to_be_visible()
-                expect(page.locator('#sg-create-vk-image-model')).to_have_value('auto')
+                expect(page.locator('#sg-create-vk-model-choice')).to_have_value('auto')
                 expect(page.locator('.sg-create-vk-image-choice')).to_be_visible()
+                assert page.evaluate("""() => {
+                  const control=document.querySelector('#sg-create-vk-model-choice');
+                  const fields=new FormData(document.querySelector('#dp-form'));
+                  return document.querySelectorAll('[name="vk_image_model"]').length===1 &&
+                    control.form?.id==='dp-form' &&
+                    fields.getAll('vk_image_model').length===1 &&
+                    fields.get('vk_image_model')==='auto';
+                }"""), 'duplicate-vk-model'
                 page.locator('[name="vk_image_enabled"][value="no"]').check()
-                expect(page.locator('#sg-create-vk-image-model')).to_have_value('none')
+                expect(page.locator('#sg-create-vk-model-choice')).to_have_value('none')
+                assert page.evaluate("new FormData(document.querySelector('#dp-form')).get('vk_image_model')") == 'none'
                 expect(page.locator('#sg-create-vk-review-tip')).to_be_hidden()
                 page.locator('[name="vk_image_enabled"][value="yes"]').check()
-                expect(page.locator('#sg-create-vk-image-model')).to_have_value('auto')
+                expect(page.locator('#sg-create-vk-model-choice')).to_have_value('auto')
                 expect(page.locator('#sg-create-vk-review-tip')).to_be_visible()
+                page.locator('#sg-create-vk-model-choice').select_option('gemini')
+                page.locator('[name="vk_image_enabled"][value="no"]').check()
+                page.locator('[name="vk_image_enabled"][value="yes"]').check()
+                expect(page.locator('#sg-create-vk-model-choice')).to_have_value('gemini')
                 expect(page.locator('#sg-create-format-help')).to_contain_text('площадки')
                 page.locator('[data-sg-format="story"]').click()
                 expect(page.locator('#sg-create-count-row')).to_be_visible()
