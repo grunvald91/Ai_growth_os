@@ -358,7 +358,7 @@ def job_html(state, product_id, *, error=None):
     if state.get('visual_repair_from'):
         source_link = f'/studio/products/{product_id}/whiteboard/{state["visual_repair_from"]}'
         body += ('<p><strong>Перерисовка без новой озвучки.</strong> Новые изображения создаются отдельно. '
-                 'Сценарий и оригинальные MP3 сохраняются побайтно; новую озвучку не заказываем.</p>'
+                 'Сценарий и оригинальные MP3 сохраняются побайтно. Новая озвучка запрещена.</p>'
                  f'<p><a href="{source_link}">Исходный ролик</a> · '
                  f'В исходном задании было {state["inherited_calls"]} API-вызовов.</p>')
         if state.get('repair_regenerate_images'):
