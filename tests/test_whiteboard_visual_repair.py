@@ -95,6 +95,17 @@ async def test_repair_endpoint_is_owner_scoped_and_creates_only_one_pending_appr
         path=f'/studio/products/{product}/whiteboard/{source}/repair'
         a=browser.post(path,follow_redirects=False);b=browser.post(path,follow_redirects=False)
         assert a.status_code==b.status_code==303 and a.headers['location']==b.headers['location']
+        repair_page=browser.get(a.headers['location'])
+        assert repair_page.status_code==200
+        assert 'Задание на перерисовку создано' in repair_page.text
+        assert 'Подтвердить перерисовку' in repair_page.text
+        assert 'Новая озвучка запрещена' in repair_page.text
+        jobs=browser.get(f'/studio/products/{product}/whiteboard/jobs.json').json()
+        repair_job=next(item for item in jobs if item.get('visual_repair_from'))
+        assert repair_job['repair_regenerate_images'] is True
+        assert repair_job['status']=='waiting_approval' and repair_job['calls']==0
+        index=browser.get(f'/studio/products/{product}/whiteboard')
+        assert 'Перерисовка ·' in index.text and 'Подтвердить перерисовку' in index.text
     with factory() as db:
         tasks=list(db.scalars(select(Task)));assert len(tasks)==2
         pending=next(t for t in tasks if t.id!=source)
