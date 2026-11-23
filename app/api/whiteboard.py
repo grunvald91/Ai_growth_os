@@ -122,7 +122,9 @@ async def _approve(db, product_id, task_id, body, actor, settings):
     task = owner_task(db, product_id, task_id)
     _, saved, _, payload = records(db, task)
     try:
-        await preflight(scoped_settings(settings, payload.models, payload.request.voice), payload.models, payload.request.voice)
+        await preflight(scoped_settings(settings, payload.models, payload.request.voice),
+                        payload.models, payload.request.voice,
+                        skip_speech=payload.repair_regenerate_images)
     except ReadinessError as exc:
         # Short transaction after network I/O. Do not overwrite cancellation.
         task = owner_task(db, product_id, task_id, lock=True)
