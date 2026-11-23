@@ -15,7 +15,7 @@ from test_whiteboard_visual_review import issue,review,decision
 
 
 @pytest.mark.asyncio
-async def test_visual_only_repair_never_calls_story_image_generation_or_tts_and_preserves_audio(environment):
+async def test_visual_only_repair_generates_new_images_without_story_or_tts_and_preserves_audio(environment):
     factory,settings,product,_=environment
     source_id=new_job(environment,maximum=25);approve(environment,source_id)
     await run_whiteboard_once(factory,settings,factory=fake_factory,readiness=ready)
@@ -25,8 +25,9 @@ async def test_visual_only_repair_never_calls_story_image_generation_or_tts_and_
         repair_id=queue_visual_repair(db,settings,product,source_id).id
         _,state,approval,payload=records(db,owner_task(db,product,repair_id))
         assert payload.visual_repair_from==source_id and payload.inherited_calls==13
-        assert json.loads(state.content)['calls']==13 and approval.status=='pending'
-        assert json.loads(state.content)['attempts_started']==13
+        assert payload.repair_regenerate_images and payload.max_api_calls==13
+        assert json.loads(state.content)['calls']==0 and approval.status=='pending'
+        assert json.loads(state.content)['attempts_started']==0
         assert queue_visual_repair(db,settings,product,source_id).id==repair_id
     with client() as browser:
         page=browser.get(f'/studio/products/{product}/whiteboard/{repair_id}')
@@ -38,7 +39,7 @@ async def test_visual_only_repair_never_calls_story_image_generation_or_tts_and_
         p=fake_factory(settings,payload,store);p.visual_review=True;p.max_api_calls=payload.max_api_calls
         initial=p.images
         class Images:
-            async def generate(self,*args):pytest.fail('Original images must be reused before the critic')
+            async def generate(self,*args):seen.append('new image');return await initial.generate(*args)
             async def revise(self,*args):seen.append('redraw');return await initial.generate(*args[:2])
         class Planner:
             async def plan(self,*args):pytest.fail('Original spoken story must never be regenerated')
@@ -57,14 +58,15 @@ async def test_visual_only_repair_never_calls_story_image_generation_or_tts_and_
         p.images=Images();p.storyboard=Planner();p.speech=Speech();p.critic=Critic();p.visual_author=Author();p.renderer=Renderer()
         return p
     await run_whiteboard_once(factory,settings,factory=build,readiness=ready)
-    assert seen==['critic','author','redraw','redraw','redraw']
+    assert seen==['new image','new image','new image','critic','author','redraw','redraw','redraw']
     new=job_directory(settings.products_root,product,repair_id)/'stages'
     assert {p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in new.glob('*speech.data')}==original_hashes
     assert (new/'storyboard.data').read_bytes()==(original/'storyboard.data').read_bytes()
     with factory() as db:
         t=owner_task(db,product,repair_id);assert t.status==TaskStatus.COMPLETED
-        assert json.loads(records(db,t)[1].content)['calls']==21  # inherited 13 + at most 8 visual calls
-        assert queue_visual_repair(db,settings,product,source_id).id==repair_id
+        assert json.loads(records(db,t)[1].content)['calls']==11  # 3 new + 3 regions + critic + author + 3 revisions
+        next_repair=queue_visual_repair(db,settings,product,source_id)
+        assert next_repair.id != repair_id and next_repair.status == TaskStatus.WAITING_APPROVAL
         with pytest.raises(ReadinessError):queue_visual_repair(db,settings,product,repair_id)
     assert len(original_hashes)==6
 
@@ -101,7 +103,7 @@ async def test_repair_endpoint_is_owner_scoped_and_creates_only_one_pending_appr
 
 
 @pytest.mark.asyncio
-async def test_visual_repair_cannot_reuse_refunded_prior_attempts_as_paid_budget(environment):
+async def test_visual_repair_has_a_new_separately_approved_budget_despite_spent_source_attempts(environment):
     factory,settings,product,_=environment
     source=new_job(environment,maximum=25)
     approve(environment,source)
@@ -116,5 +118,9 @@ async def test_visual_repair_cannot_reuse_refunded_prior_attempts_as_paid_budget
         value['attempts_started']=23
         state.content=json.dumps(value)
         db.commit()
-        with pytest.raises(ReadinessError,match='repair_budget'):
-            queue_visual_repair(db,settings,product,source)
+        fresh=queue_visual_repair(db,settings,product,source)
+        assert fresh.status==TaskStatus.WAITING_APPROVAL
+        _,state,approval,payload=records(db,fresh)
+        assert payload.inherited_calls==13 and payload.max_api_calls==13
+        assert json.loads(state.content)['attempts_started']==0
+        assert approval.status=='pending'
