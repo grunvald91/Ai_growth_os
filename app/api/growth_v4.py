@@ -125,15 +125,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <option value="16:9">16:9 · горизонтальный</option>
           </select>
         </label>
-        <label class="sg-create-setting" id="sg-create-vk-image-row" hidden>
-          <span>Картинка для поста ВКонтакте</span>
-          <select id="sg-create-vk-image-model" name="vk_image_model" form="dp-form" aria-label="Генерация изображения к посту VK">
-            <option value="auto">С картинкой · генерация + критик</option>
-            <option value="none">Только текст · без изображения</option>
-            <option value="gemini">С картинкой · Gemini</option>
-            <option value="openai">С картинкой · ChatGPT Image</option>
-          </select>
-        </label>
         <p class="sg-create-tip" id="sg-create-vk-review-tip" hidden>
           После генерации визуальный критик проверит картинку и текст поста.
           Мелкие недочёты допускаются; серьёзные несоответствия блокируют изображение.
@@ -212,8 +203,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
               </div>
               <label class="sg-create-vk-model-choice" id="sg-create-vk-model-choice-row">
                 Модель изображения
-                <select id="sg-create-vk-model-choice" aria-label="Модель изображения к посту">
+                <select id="sg-create-vk-model-choice" name="vk_image_model" form="dp-form" aria-label="Модель изображения к посту">
                   <option value="auto">Автоматически</option>
+                  <option value="none" hidden>Без изображения</option>
                   <option value="gemini">Gemini</option>
                   <option value="openai">ChatGPT Image</option>
                 </select>
@@ -579,8 +571,8 @@ def render_v4(page, request, pid, switch):
     if home:
         extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-start-fast-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=create-editor-compact-v4-20261121"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=voice-start-fast-20261121"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=single-vk-model-20261123"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-single-vk-model-20261123"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -624,7 +616,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=29-create-voice-hint">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=30-single-vk-model">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=19-tasks-theme-and-320">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
