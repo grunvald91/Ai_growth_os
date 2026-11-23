@@ -1755,7 +1755,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                         elif state in {"review_unavailable", "awaiting_review", "failed", "pending"}:
                             review_html += (
                                 '<p class="sg-warning" role="alert">'
-                                'Изображение сохранено, но проверка или генерация не завершена. '
+                                'Изображение сохранено, но визуальный критик ещё не подтвердил качество. '
                                 'Публикация изображения заблокирована.</p>')
                 elif state in {"stale", "failed", "pending"}:
                     reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
@@ -2972,16 +2972,20 @@ async def studio_material_approve(product_id: UUID, artifact_id: UUID, request: 
             action_type="studio:approve_material", via="studio",
         )
     except ReviewError as exc:
-        # Browser forms must return to the Studio view, not expose FastAPI's raw JSON
-        # exception page. Nothing is approved or published on a failed review.
-        message = exc.message.lower()
-        reason = ("image" if "изображен" in message or "критик" in message
-                  else "facts" if "числа" in message or "цены" in message
-                  else "conflict")
-        return RedirectResponse(
-            f"/studio/products/{product_id}/materials/{artifact_id}?approval_error={reason}",
-            status_code=303,
-        )
+        # The VK image veto is an expected editorial outcome, not a technical
+        # error. Return the owner to the material with the image and full reasons.
+        # Keep HTTP 404/422/etc. unchanged for access and fact-check contracts.
+        if (exc.status == 409 and current is not None
+                and current.product_id == product_id and current.kind == "channel_text"):
+            state = parse_json(current)
+            if (state.get("channel") == "vk"
+                    and state.get("image_model", "none") != "none"
+                    and ("критик" in exc.message.lower() or "изображен" in exc.message.lower())):
+                return RedirectResponse(
+                    f"/studio/products/{product_id}/materials/{artifact_id}?approval_error=image",
+                    status_code=303,
+                )
+        raise HTTPException(exc.status, exc.message) from None
     return RedirectResponse(f"/studio/products/{product_id}/materials/{artifact_id}", status_code=303)
 
 
