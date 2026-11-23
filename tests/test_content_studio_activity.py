@@ -1160,3 +1160,75 @@ def test_unknown_failure_remains_unknown_without_leaking_details(owner_studio):
         assert "Точная причина ошибки не определена по сохранённому журналу." in html
         assert "PrivateBackendError" not in html
         assert "secret/path" not in html
+
+
+def test_tasks_board_uses_one_aggregate_for_all_status_counters(owner_studio):
+    from sqlalchemy import event
+    from app.api.content_studio_activity import work_page
+    _, db, company, _ = owner_studio
+    db.add_all([
+        Task(product_id=company.id, assigned_agent="content_factory",
+             title="CONTENT: Выполняется", status=TaskStatus.RUNNING),
+        Task(product_id=company.id, assigned_agent="content_factory",
+             title="CONTENT: Ошибка", status=TaskStatus.FAILED),
+        Task(product_id=company.id, assigned_agent="content_factory",
+             title="CONTENT: Готово", status=TaskStatus.COMPLETED),
+    ])
+    db.commit()
+    sql = []
+    def capture(_conn, _cursor, statement, _params, _context, _many):
+        sql.append(statement.lower())
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        data = work_page(db, company.id)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+    assert data["counts"] == {
+        "all": 3, "active": 1, "approval": 1, "ready": 1, "problems": 1,
+    }
+    # Prior implementation ran five separate status count queries.
+    counted = [statement for statement in sql
+               if "count(" in statement and "from tasks" in statement]
+    assert len(counted) == 1, counted
+
+
+def test_notifications_only_scope_keeps_status_counts_without_full_feed(owner_studio, monkeypatch):
+    from app.api import content_studio
+    client, db, company, foreign = owner_studio
+    active = Task(product_id=company.id, assigned_agent="content_factory",
+                  title="CONTENT: Запись", status=TaskStatus.RUNNING)
+    failed = Task(product_id=company.id, assigned_agent="content_factory",
+                  title="CONTENT: Ошибка", status=TaskStatus.FAILED)
+    db.add_all([active, failed])
+    db.commit()
+    # This endpoint must not rehydrate dozens of jobs to fetch a small
+    # notification dropdown. The regular activity endpoint is unchanged.
+    def should_not_load_full_feed(*args, **kwargs):
+        raise AssertionError("Tasks board unexpectedly loaded full activity feed")
+    monkeypatch.setattr(content_studio, "work_items", should_not_load_full_feed)
+    url = f"/studio/products/{company.id}/activity.json?scope=notifications"
+    response = client.get(url)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["jobs"] == []
+    assert data["active_count"] == 1
+    assert any(item["id"] == str(failed.id) for item in data["notices"])
+    assert response.headers["cache-control"] == "private, no-store"
+    other = client.get(f"/studio/products/{foreign.id}/activity.json?scope=notifications")
+    assert other.status_code == 200
+    assert other.json()["active_count"] == 0
+    assert other.json()["notices"] == []
+
+
+def test_tasks_poll_does_not_refetch_same_board_during_initial_paint():
+    from app.api.content_studio_work_ui import JS
+    from app.api.content_studio import studio_page_shell
+    assert "poll({includeBoard:false});" in JS
+    assert "if(workBoard&&includeBoard)" in JS
+    assert "feedUrl.searchParams.set('scope','notifications')" in JS
+    assert "window.setInterval(poll,20000)" in JS
+    # Both the full Studio shell and classic dashboard must load fresh assets.
+    from app.api.content_studio_design import STUDIO_CSS, STUDIO_JS
+    assert "sg-work-failure" in STUDIO_CSS
+    assert "poll({includeBoard:false})" in STUDIO_JS
