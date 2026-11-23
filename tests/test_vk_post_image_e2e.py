@@ -150,9 +150,10 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     if expect_state == "blocked":
         assert "ситуация, противоположная" in inbox
         assert "ситуация, противоположная" in html
-        assert "изображение не прошло проверку" in html
+        assert "Утвердить картинку и пост" in html
     if expect_state == "review_unavailable":
         assert "не подтвердил качество" in html
+        assert "Утвердить картинку и пост" in html
     if expect_state == "ready":
         assert "критичных ошибок нет" in html
 
@@ -164,12 +165,17 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
         approved = approve_material(db, tmp_path, company.id, post.id, facts_confirmed=True)
         assert approved.status == ArtifactStatus.APPROVED
     else:
-        with pytest.raises(ReviewError, match="Визуальный критик"):
+        with pytest.raises(ReviewError, match="Изображение не согласовано"):
             approve_material(db, tmp_path, company.id, post.id, facts_confirmed=True)
         assert post.status == ArtifactStatus.AWAITING_APPROVAL
         # A failed browser form submission must return to the branded detail page,
         # not render FastAPI's raw JSON on an empty dark tab.
-        req = Request({"type": "http", "method": "POST", "path": "/"})
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+        req = Request({
+            "type": "http", "method": "POST", "path": "/",
+            "headers": [(b"content-type", b"application/x-www-form-urlencoded")],
+        }, receive=receive)
         redirect = await studio_material_approve(company.id, post.id, req, db=db)
         assert redirect.status_code == 303
         assert redirect.headers["location"].endswith(
