@@ -1275,10 +1275,10 @@ def test_search_artifact_text_is_uncorrelated_and_tenant_scoped(owner_studio):
     db.flush()
     db.add_all([
         Artifact(product_id=company.id, task_id=task.id, kind="content_request",
-                 title="Запрос", content=json.dumps({"topic": "Кириллица Семейный"}),
+                 title="Запрос", content=json.dumps({"topic": "Кириллица Семейный"}, ensure_ascii=False),
                  status="draft"),
         Artifact(product_id=outsider.id, task_id=foreign.id, kind="content_request",
-                 title="Запрос", content=json.dumps({"topic": "Кириллица Семейный"}),
+                 title="Запрос", content=json.dumps({"topic": "Кириллица Семейный"}, ensure_ascii=False),
                  status="draft"),
     ])
     db.commit()
