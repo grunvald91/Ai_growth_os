@@ -2503,10 +2503,21 @@ def studio_work_page(product_id: UUID, tab: str = "all", q: str = "",
 
 @router.get("/studio/products/{product_id}/activity.json")
 def studio_activity_json(product_id: UUID, task_id: UUID | None = None,
+                         scope: str = "full",
                          db: Session = Depends(get_db), settings=Depends(get_settings)):
     product = _owner_product(db, product_id)
-    jobs = work_items(db, product.id, limit=45)
-    active_count = sum(1 for job in jobs if job["state"] in {"queued", "running"})
+    # The Tasks board only needs notifications. Avoid hydrating 45 jobs every
+    # 20 seconds while the user is viewing the task list.
+    if scope == "notifications" and task_id is None:
+        jobs = []
+        active_count = int(db.scalar(select(func.count(Task.id)).where(
+            Task.product_id == product.id,
+            Task.assigned_agent.in_(WORK_AGENTS),
+            Task.status.in_((TaskStatus.QUEUED, TaskStatus.RUNNING)),
+        )) or 0)
+    else:
+        jobs = work_items(db, product.id, limit=45)
+        active_count = sum(1 for job in jobs if job["state"] in {"queued", "running"})
     # Keep the open detail fresh even if it is older than the capped activity
     # feed or more than 22 other jobs are concurrently running. Strictly
     # enforce the same visible-agent and tenant allowlists as the work page.
