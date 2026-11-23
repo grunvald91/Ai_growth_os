@@ -520,9 +520,14 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
                 return func.sg_casefold(column).like(pattern, escape="\\")
             return column.ilike(pattern, escape="\\")
 
-        request_match = exists(select(Artifact.id).where(
+        # Materialize tenant-scoped matching task IDs once per search.
+        # A correlated EXISTS would scan each task's JSON artifacts repeatedly
+        # while calculating status counters and then fetching the page.
+        # IN (SELECT ...) retains historical full-text search semantics and
+        # lets PostgreSQL/SQLite build a single semi-join over matching artifacts.
+        request_match = Task.id.in_(select(Artifact.task_id).where(
             Artifact.product_id == product_id,
-            Artifact.task_id == Task.id,
+            Artifact.task_id.is_not(None),
             # Planning and business-review tasks carry user topics in their
             # own artifacts, not in content/creative/edit requests.
             Artifact.kind.in_((
