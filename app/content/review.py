@@ -82,6 +82,12 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
                 validate_telegram_text(source["body"])
             except ValueError as exc:
                 raise ReviewError(422, str(exc)) from None
+        pending = db.scalar(select(Task.id).where(
+            Task.product_id == product_id, Task.assigned_agent == "content_editor",
+            Task.title == "EDIT: " + str(row.id), Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),
+        ).limit(1))
+        if pending:
+            raise ReviewError(409, "Доработка ещё выполняется — подтвердите новую версию")
         if source.get("channel") == "vk" and source.get("image_model", "none") != "none":
             from app.content.vk_image_critic import (
                 _post_digest, verified_vk_image_approval,
@@ -142,12 +148,6 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
                     409, "Изображение не согласовано: выберите сохранённую картинку "
                          "в полном просмотре или создайте новую."
                 ) from None
-        pending = db.scalar(select(Task.id).where(
-            Task.product_id == product_id, Task.assigned_agent == "content_editor",
-            Task.title == "EDIT: " + str(row.id), Task.status.in_([TaskStatus.QUEUED, TaskStatus.RUNNING]),
-        ).limit(1))
-        if pending:
-            raise ReviewError(409, "Доработка ещё выполняется — подтвердите новую версию")
     row.status = ArtifactStatus.APPROVED
     row.version += 1
     db.add(Approval(
