@@ -300,11 +300,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
     can_schedule = bool(channel and posts and enabled)
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
-    body = f"""
-<section class="sg-surface">
- <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
- <p>Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно.</p></div></div>
- {alert}{current}
+    onboarding_tools = f"""
  {oauth_first}
  <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
@@ -334,6 +330,13 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  </details>
  </details>
  <p class="sg-footnote">Посты без изображения можно отправлять ключом сообщества. Для постов с фото ВКонтакте может потребовать авторизацию пользователя с правами photos и wall: ключ сообщества иногда не допускается к загрузке фото. Если ВК отклонит загрузку, ServGo покажет ошибку и НЕ опубликует один текст без фотографии. Для чтения комментариев может потребоваться отдельный доступ; успешное подключение ещё не доказывает права публикации.</p>
+"""
+    body = f"""
+<section class="sg-surface">
+ <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
+ <p>{"Сообщество подключено. Управление доступами — в настройках." if channel else "Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно."}</p></div></div>
+ {alert}{current}
+ {onboarding_tools if channel is None else ""}
 </section>
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">АВТОПУБЛИКАЦИЯ</span>
@@ -357,7 +360,8 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  {history or '<li class="sg-muted">Публикаций пока нет.</li>'}</ul>
 </section>
 """
-    body += VK_TOKEN_DEEPLINK_SCRIPT
+    if channel is None:
+        body += VK_TOKEN_DEEPLINK_SCRIPT
     # This HTML contains same-origin POST forms protected by require_studio_csrf.
     # no-referrer can turn their Origin into "null" and suppress Referer in
     # browsers, so do not use it on the form page. same-origin keeps the
