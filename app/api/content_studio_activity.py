@@ -178,27 +178,29 @@ def owner_failure_reason(runs: list[AgentRun]) -> str:
     )
     if not last_error:
         return "Подробная причина не сохранена в журнале выполнения."
-    code = ":".join(last_error.casefold().split(":")[:3])
+    # Match complete code tokens, not arbitrary substrings of error messages.
+    code_parts = last_error.casefold().split(":")[:3]
+    code = ":".join(code_parts)
     if last_error == "One or more image frames could not be generated":
         return "Не удалось создать одно или несколько изображений."
-    if any(marker in code for marker in (
+    if any(marker in code_parts for marker in (
         "timeouterror", "readtimeout", "connecttimeout", "upstream_timeout",
     )):
         return "Превышено время ожидания ответа сервиса."
-    if any(marker in code for marker in (
+    if any(marker in code_parts for marker in (
         "connecterror", "connectionerror", "networkerror", "network_failure",
     )):
         return "Не удалось установить соединение с сервисом."
-    if any(marker in code for marker in (
+    if any(marker in code_parts for marker in (
         "provider_request_failed", "provider_http_error", "httpstatuserror",
         "provider_transient",
     )):
-        return "Сервис обработки вернул ошибку."
+        return "Не удалось выполнить запрос к сервису обработки."
     if code.startswith("local_render_failed:"):
         return "Не удалось собрать видеофайл."
-    if "context_preparation_failed" in code:
+    if "context_preparation_failed" in code_parts:
         return "Не удалось подготовить исходные данные для генерации."
-    if any(marker in code for marker in (
+    if any(marker in code_parts for marker in (
         "invalid_article_output", "invalid_article_package",
         "invalid_derivative_assembly", "model_unusable_response",
         "providermalformedresponseerror", "provideremptyresponseerror",
