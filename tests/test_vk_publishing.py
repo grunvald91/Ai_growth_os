@@ -1008,7 +1008,11 @@ def test_vk_page_shows_settings_near_pilot_and_missing_comments(db, tmp_path):
                       name="Our test VK community")
     owner_connected = vk_page(product.id, owner, db=db, settings=settings).body.decode()
     assert "Комментарии: не подключены." in owner_connected
-    assert owner_connected.count('<a href="/studio/tune/vk"') >= 2
+    assert owner_connected.count('<a href="/studio/tune/vk"') >= 1
+    assert f'/studio/products/{product.id}/vk/settings' in owner_connected
+    assert f'/studio/products/{product.id}/vk/disconnect' not in owner_connected
+    assert f'/studio/products/{product.id}/vk/community-key' not in owner_connected
+    assert f'/studio/products/{product.id}/vk/connect-comments' not in owner_connected
     customer_connected = vk_page(product.id, customer, db=db, settings=settings).body.decode()
     assert "/studio/tune/vk" not in customer_connected
 
@@ -1023,10 +1027,89 @@ def test_vk_page_explains_separate_photo_access_and_keeps_user_key_private(db, t
     connect_community(db, settings, product.id, "123456", "community-token")
     request = SimpleNamespace(state=SimpleNamespace(
         studio_login="owner", studio_product_ids=None))
+    from app.api.vk_publishing import vk_photo_settings_page
     markup = vk_page(product.id, request, db=db, settings=settings).body.decode()
-    assert f'/studio/products/{product.id}/vk/photo-key' in markup
-    assert 'name="access_token" type="password"' in markup
-    assert "настроить доступ к загрузке" in markup
-    assert "Ключ сообщества для публикации текста остаётся" in markup
+    settings_href = f'/studio/products/{product.id}/vk/settings'
+    assert settings_href in markup
+    assert 'Настройки ВКонтакте' in markup
+    assert f'/studio/products/{product.id}/vk/photo-key' not in markup
+    assert f'/studio/products/{product.id}/vk/check-photo' not in markup
+    assert 'Пользовательский ключ VK API для фото' not in markup
+    assert 'name="access_token" type="password"' not in markup
+    assert f'/studio/products/{product.id}/vk/community-key' not in markup
+    assert f'/studio/products/{product.id}/vk/disconnect' not in markup
     assert "community-token" not in markup
-    assert "vk1.a." not in markup
+    response = vk_photo_settings_page(product.id, request, db=db, settings=settings)
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["referrer-policy"] == "same-origin"
+    settings_markup = response.body.decode()
+    assert f'/studio/products/{product.id}/vk/photo-key' in settings_markup
+    assert f'/studio/products/{product.id}/vk/check-photo' in settings_markup
+    assert 'name="access_token" type="password"' in settings_markup
+    assert 'https://dev.vk.ru/ru/admin/apps-list' in settings_markup
+    assert 'https://dev.vk.ru/ru/api/access-token/user-token' in settings_markup
+    assert 'https://dev.vk.ru/ru/admin/create-app' in settings_markup
+    assert f'/studio/products/{product.id}/vk/disconnect' in settings_markup
+    assert 'Я хочу отключить ВКонтакте от ServGo' in settings_markup
+    assert 'name="access_token" type="text"' not in settings_markup
+    assert "сообщества из" in settings_markup.lower()
+    assert "community-token" not in settings_markup
+    assert "vk1.a." not in settings_markup
+
+
+def test_vk_photo_settings_is_independently_accessible_and_connection_persists(
+    db, tmp_path,
+):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import vk_page, vk_photo_settings_page
+    from app.social_vk import connect_community, connect_photo_user_key
+    import asyncio
+
+    product, _ = business_and_post(db, slug="vk-photo-once")
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    connect_community(db, settings, product.id, "123456", "group-key")
+    request = SimpleNamespace(state=SimpleNamespace(
+        studio_login="owner", studio_product_ids=None,
+    ))
+
+    class UserAccess:
+        async def call(self, method, token, **params):
+            assert token == "vk1.a.user-key-private"
+            if method == "groups.getById":
+                return {"groups": [{
+                    "id": 123456, "is_admin": 1, "admin_level": 3,
+                }]}
+            assert method == "photos.getWallUploadServer"
+            return {"upload_url": "https://pu.vk.com/upload.php"}
+
+    asyncio.run(connect_photo_user_key(
+        db, settings, product.id, "vk1.a.user-key-private",
+        adapter=UserAccess(),
+    ))
+    # A new browser visit uses saved encrypted credentials; no token entry
+    # is demanded again and neither page may render its value.
+    settings_html = vk_photo_settings_page(
+        product.id, request, db=db, settings=settings).body.decode()
+    assert "Пользовательский ключ сохранён" in settings_html
+    assert "Изменить сохранённый ключ" in settings_html
+    assert "vk1.a.user-key-private" not in settings_html
+    assert "vk1.a.user-key-private" not in vk_page(
+        product.id, request, db=db, settings=settings).body.decode()
+    assert "Настройки ВКонтакте" in vk_page(
+        product.id, request, db=db, settings=settings).body.decode()
+
+
+def test_vk_photo_settings_unconnected_help_has_no_key_form(db, tmp_path):
+    from types import SimpleNamespace
+    from app.api.vk_publishing import vk_photo_settings_page
+
+    product, _ = business_and_post(db, slug="vk-photo-unconnected")
+    settings = Settings(_env_file=None, products_root=tmp_path)
+    request = SimpleNamespace(state=SimpleNamespace(
+        studio_login="owner", studio_product_ids=None,
+    ))
+    markup = vk_photo_settings_page(
+        product.id, request, db=db, settings=settings).body.decode()
+    assert "Сначала подключите сообщество" in markup
+    assert f'/studio/products/{product.id}/vk/photo-key' not in markup
+    assert f'/studio/products/{product.id}/vk"' in markup

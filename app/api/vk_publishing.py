@@ -184,6 +184,7 @@ def connection_error(key):
         "comments_connect_failed": "Не удалось проверить чтение комментариев VK. Проверьте сервисный ключ, доступность стены и права сообщества.",
         "photo_check_failed": "Подключение к VK активно, но право загрузки фото не подтверждено. Ключ сообщества может разрешать публикацию текста, но не фото. Для фото может понадобиться отдельный пользовательский доступ с правами photos и wall.",
         "photo_connect_failed": "Не удалось подтвердить пользовательский доступ к фото. Нужен ключ вашего собственного приложения VK API с правами photos и wall, принадлежащий администратору этого сообщества. Токен VK ID и ключ сообщества для этого не подходят.",
+        "disconnect_not_confirmed": "Подтвердите отключение сообщества в настройках.",
         "publish_not_confirmed": "Подтвердите отправку поста в подключённое сообщество ВКонтакте.",
         "publish_not_ready": "Публикация пока недоступна: проверьте подключение, состояние картинки и согласование поста.",
         "publish_duplicate": "Этот материал уже поставлен в очередь либо опубликован. Проверьте историю VK.",
@@ -253,40 +254,14 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
                    ('<span class="sg-channel-status">Ключ сообщества · можно проверить текстовую публикацию</span></div>'
                     if channel.is_community_token else
-                    '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
-                   f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
-                   '<button type="submit" class="btn secondary small">Отключить VK</button></form>')
+                    '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>'))
         reply_channel = CommentService(db, settings).channel(product_id, "vk")
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id
                              and (not channel.is_community_token or platform_service_token(settings)))
         current += (
-            f'<form method="post" action="/studio/products/{product_id}/vk/check-photo">'
-            '<button type="submit" class="btn secondary small">Проверить доступ к фото</button>'
-            '<small>Проверка без публикации поста и без загрузки файла.</small></form>'
-        )
-        photo_connection = photo_upload_connection(db, product_id, channel.account_id)
-        current += (
-            '<details class="sg-surface">'
-            '<summary>Фото: ' + (
-                'доступ подключён ✓' if photo_connection else 'настроить доступ к загрузке'
-            ) + '</summary>'
-            '<p class="sg-footnote">Для изображения VK API требует пользовательский ключ '
-            'с разрешениями photos и wall. Ключ сообщества для публикации текста остаётся '
-            'подключённым отдельно. Используйте только ключ вашего собственного VK-приложения '
-            'и не получайте его через сторонние сервисы.</p>'
-            f'<form method="post" action="/studio/products/{product_id}/vk/photo-key" '
-            'class="sg-fields sg-compact-form">'
-            '<label class="sg-field"><span>Пользовательский ключ VK API для фото</span>'
-            '<input name="access_token" type="password" autocomplete="off" '
-            'maxlength="8000" required placeholder="Ключ пользователя с photos и wall"></label>'
-            '<button class="btn secondary" type="submit">'
-            + ('Обновить доступ к фото' if photo_connection else 'Подключить фото')
-            + '</button></form>'
-            '<p class="sg-footnote">Проверка не публикует пост и не загружает изображение. '
-            '<a href="https://dev.vk.com/ru/api/upload/wall-photo" '
-            'target="_blank" rel="noopener noreferrer">Официальный порядок загрузки VK</a>.</p>'
-            '</details>'
+            f'<a class="btn ghost small" href="/studio/products/{product_id}/vk/settings">'
+            '⚙ Настройки ВКонтакте</a>'
         )
         if channel.is_community_token and channel.expires_at:
             current += '<p class="sg-footnote">Доступ VK ограничен по сроку. Для продления подключите сообщество заново до окончания действия ключа.</p>'
@@ -297,10 +272,6 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                           if channel.is_community_token and not platform_service_token(settings) else "")
             current += ('<p class="sg-footnote">Комментарии: не подключены.'
                         + owner_help + '</p>')
-        if channel.is_community_token and platform_service_token(settings) and not replies_ready:
-            current += (f'<form method="post" action="/studio/products/{product_id}/vk/connect-comments">'
-                        '<button class="btn secondary" type="submit">Подключить чтение комментариев</button>'
-                        '</form>')
     else:
         current = '<p class="sg-muted">Сообщество ещё не подключено.</p>'
     group_oauth_ready = _can_begin_community_oauth(settings, request)
@@ -324,11 +295,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
     can_schedule = bool(channel and posts and enabled)
     status = ("Отправка по расписанию включена на сервере."
               if enabled else "Отправка на сервере выключена. Планирование сохраняется, но публикации не уходят.")
-    body = f"""
-<section class="sg-surface">
- <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
- <p>Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно.</p></div></div>
- {alert}{current}
+    onboarding_tools = f"""
  {oauth_first}
  <details {"open" if not group_oauth_ready else ""}><summary>{"Подключить по ключу сообщества (резервный способ)" if group_oauth_ready else "Подключить сообщество сейчас (по ключу)"}</summary>
  <form method="post" action="/studio/products/{product_id}/vk/community-key" class="sg-fields sg-compact-form">
@@ -358,6 +325,13 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  </details>
  </details>
  <p class="sg-footnote">Посты без изображения можно отправлять ключом сообщества. Для постов с фото ВКонтакте может потребовать авторизацию пользователя с правами photos и wall: ключ сообщества иногда не допускается к загрузке фото. Если ВК отклонит загрузку, ServGo покажет ошибку и НЕ опубликует один текст без фотографии. Для чтения комментариев может потребоваться отдельный доступ; успешное подключение ещё не доказывает права публикации.</p>
+"""
+    body = f"""
+<section class="sg-surface">
+ <div class="sg-section-head"><div><span class="sg-overline">КАНАЛЫ</span><h2>ВКонтакте</h2>
+ <p>{"Сообщество подключено. Управление доступами — в настройках." if channel else "Скопируйте ссылку на ваше сообщество из ВКонтакте. Числовой ID искать не нужно."}</p></div></div>
+ {alert}{current}
+ {onboarding_tools if channel is None else ""}
 </section>
 <section class="sg-surface">
  <div class="sg-section-head"><div><span class="sg-overline">АВТОПУБЛИКАЦИЯ</span>
@@ -381,7 +355,8 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
  {history or '<li class="sg-muted">Публикаций пока нет.</li>'}</ul>
 </section>
 """
-    body += VK_TOKEN_DEEPLINK_SCRIPT
+    if channel is None:
+        body += VK_TOKEN_DEEPLINK_SCRIPT
     # This HTML contains same-origin POST forms protected by require_studio_csrf.
     # no-referrer can turn their Origin into "null" and suppress Referer in
     # browsers, so do not use it on the form page. same-origin keeps the
@@ -586,6 +561,149 @@ async def vk_callback(request: Request, state: str = "", code: str = "", device_
     return response
 
 
+@router.get("/studio/products/{product_id}/vk/settings", response_class=HTMLResponse)
+def vk_photo_settings_page(product_id: UUID, request: Request,
+                           done: str = "", error: str = "",
+                           db: Session = Depends(get_db),
+                           settings=Depends(get_settings)):
+    """Separate, rarely used VK credential setup; ordinary publishing stays lean."""
+    product = _owner_product(db, product_id)
+    channel = connected(db, product_id)
+    note = ""
+    if feedback(done):
+        note += f'<p class="sg-notice" role="status">{esc(feedback(done))}</p>'
+    if connection_error(error):
+        note += f'<p class="sg-notice" role="alert">{esc(connection_error(error))}</p>'
+    main_url = f"/studio/products/{product_id}/vk"
+    if channel is None:
+        body = (
+            f'<section class="sg-surface"><h2>Подключение к фото</h2>{note}'
+            '<p>Сначала подключите сообщество ВКонтакте. После этого здесь '
+            'можно настроить пользовательский доступ к фотографиям.</p>'
+            f'<a class="btn primary" href="{main_url}">Подключить сообщество</a>'
+            '</section>'
+        )
+    else:
+        record = photo_upload_connection(db, product_id, channel.account_id)
+        state = (
+            'Пользовательский ключ сохранён и проверен при подключении'
+            if record else
+            'Пользовательский доступ к фото пока не подключён'
+        )
+        status_hint = (
+            'ServGo хранит ключ в защищённом хранилище и использует его '
+            'для следующих публикаций фотографий. При отзыве или окончании '
+            'срока действия ключа VK его потребуется обновить.'
+            if record else
+            'Подключите отдельно права пользователя для загрузки фото. '
+            'Уже работающее подключение сообщества для текста останется без изменений.'
+        )
+        update = (
+            'Заменить сохранённый ключ' if record else 'Сохранить доступ к фото'
+        )
+        body = f"""
+<section class="sg-surface">
+  <div class="sg-section-head"><div>
+    <span class="sg-overline">НАСТРОЙКИ VK</span>
+    <h2>Доступ к фотографиям</h2>
+    <p>{esc(channel.account_name)} · ID {esc(channel.account_id)}</p>
+  </div></div>
+  {note}
+  <p role="status"><strong>{esc(state)}</strong></p>
+  <p class="sg-footnote">{esc(status_hint)}</p>
+  <form method="post" action="/studio/products/{product_id}/vk/check-photo">
+    <button type="submit" class="btn secondary small">Проверить доступ VK</button>
+  </form>
+  <p class="sg-footnote">Проверка запрашивает адрес сервера загрузки, но не
+  отправляет фото и не публикует пост.</p>
+</section>
+<section class="sg-surface">
+  <h2>Где получить ключ пользователя</h2>
+  <p>Понадобится пользовательский доступ вашего VK-приложения с разрешениями
+  <code>photos</code> и <code>wall</code>. Это <strong>не</strong> ключ
+  сообщества из «Управление → Работа с API».</p>
+  <ol class="sg-footnote">
+    <li>Откройте <a href="https://dev.vk.ru/ru/admin/apps-list"
+        target="_blank" rel="noopener noreferrer">Мои приложения VK Developers</a>
+        и выберите своё приложение. Если его ещё нет, используйте
+        <a href="https://dev.vk.ru/ru/admin/create-app"
+        target="_blank" rel="noopener noreferrer">создание приложения VK</a>.</li>
+    <li>Откройте <a href="https://dev.vk.ru/ru/api/access-token/user-token"
+        target="_blank" rel="noopener noreferrer">официальную инструкцию VK:
+        ключ доступа пользователя</a>. Настройте разрешённую для
+        вашего приложения авторизацию пользователя с правами
+        <code>photos</code> и <code>wall</code>.</li>
+    <li>Пройдите авторизацию от имени администратора указанного сообщества.
+        Скопируйте полученный пользовательский ключ доступа и сохраните
+        его в ServGo ниже. Пароль аккаунта и секрет приложения сюда вводить
+        не нужно.</li>
+  </ol>
+  <p class="sg-footnote">У документации также есть
+    <a href="https://dev.vk.ru/ru/api/access-token/getting-started"
+    target="_blank" rel="noopener noreferrer">обзор типов ключей VK API</a>.
+    Если VK выдаёт только несовместимый токен VK ID или не предлагает
+    права <code>photos</code>/<code>wall</code>, не используйте
+    сторонние генераторы токенов. Работоспособный пользовательский
+    ключ в таком случае не подтверждён.</p>
+  <details class="sg-manual-editor">
+    <summary>{esc("Изменить сохранённый ключ" if record else "Ввести полученный ключ")}</summary>
+    <form method="post" action="/studio/products/{product_id}/vk/photo-key"
+          class="sg-fields sg-compact-form">
+      <label class="sg-field"><span>Ключ доступа пользователя VK</span>
+        <input name="access_token" type="password" autocomplete="off"
+               maxlength="8000" required
+               placeholder="Вставьте пользовательский access_token">
+      </label>
+      <button class="btn primary" type="submit">{esc(update)}</button>
+      <p class="sg-footnote">Ключ проверяется на принадлежность администратору
+      этого сообщества и право получить сервер загрузки фотографий.
+      После сохранения значение не показывается на сайте.</p>
+    </form>
+  </details>
+</section>
+"""
+    if channel is not None:
+        reply_channel = CommentService(db, settings).channel(product_id, "vk")
+        replies_ready = bool(
+            reply_channel and reply_channel.status == "connected"
+            and reply_channel.account_id == channel.account_id
+            and (not channel.is_community_token or platform_service_token(settings))
+        )
+        comments_form = (
+            f'<form method="post" action="/studio/products/{product_id}/vk/connect-comments">'
+            '<button class="btn secondary" type="submit">Подключить чтение комментариев</button>'
+            '</form>'
+            if channel.is_community_token and platform_service_token(settings)
+            and not replies_ready else
+            '<p class="sg-footnote">Чтение комментариев: '
+            + ('подключено.' if replies_ready else 'недоступно в текущем подключении.')
+            + '</p>'
+        )
+        body += (
+            '<section class="sg-surface">'
+            '<details><summary>Другие настройки сообщества</summary>'
+            + comments_form +
+            '<details><summary>Отключить сообщество ВКонтакте</summary>'
+            '<p class="sg-footnote">Отключение также отменит назначенные публикации '
+            'и удалит сохранённый доступ к фотографиям. Уже опубликованные посты не удаляются.</p>'
+            f'<form method="post" action="/studio/products/{product_id}/vk/disconnect">'
+            '<label><input type="checkbox" name="confirmed" value="yes" required>'
+            'Я хочу отключить ВКонтакте от ServGo</label>'
+            '<button type="submit" class="btn secondary">Отключить VK</button>'
+            '</form></details>'
+            '</details></section>'
+        )
+    response = HTMLResponse(studio_page_shell(
+        product, active="channels", title="Настройки ВКонтакте",
+        subtitle="Разовое подключение и проверка доступа к фотографиям.",
+        body=body,
+        actions=f'<a class="btn ghost" href="{main_url}">← К публикациям VK</a>',
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Referrer-Policy"] = "same-origin"
+    return response
+
+
 @router.post("/studio/products/{product_id}/vk/photo-key")
 async def vk_connect_photo_key(product_id: UUID, request: Request,
                                db: Session = Depends(get_db),
@@ -599,11 +717,11 @@ async def vk_connect_photo_key(product_id: UUID, request: Request,
     except (ValueError, LookupError, OSError):
         db.rollback()
         return RedirectResponse(
-            f"/studio/products/{product_id}/vk?error=photo_connect_failed",
+            f"/studio/products/{product_id}/vk/settings?error=photo_connect_failed",
             status_code=303,
         )
     return RedirectResponse(
-        f"/studio/products/{product_id}/vk?done=photo_connected", status_code=303,
+        f"/studio/products/{product_id}/vk/settings?done=photo_connected", status_code=303,
     )
 
 
@@ -617,10 +735,10 @@ async def vk_check_photo(product_id: UUID, db: Session = Depends(get_db),
     except ValueError:
         db.rollback()
         return RedirectResponse(
-            f"/studio/products/{product_id}/vk?error=photo_check_failed", status_code=303,
+            f"/studio/products/{product_id}/vk/settings?error=photo_check_failed", status_code=303,
         )
     return RedirectResponse(
-        f"/studio/products/{product_id}/vk?done=photo_checked", status_code=303,
+        f"/studio/products/{product_id}/vk/settings?done=photo_checked", status_code=303,
     )
 
 
@@ -710,9 +828,16 @@ async def vk_reconcile(product_id: UUID, request: Request, db: Session = Depends
 
 
 @router.post("/studio/products/{product_id}/vk/disconnect")
-async def vk_disconnect(product_id: UUID, db: Session = Depends(get_db),
+async def vk_disconnect(product_id: UUID, request: Request,
+                        db: Session = Depends(get_db),
                         settings=Depends(get_settings)):
     _owner_product(db, product_id)
+    fields = await _studio_form(request)
+    if fields.get("confirmed") != "yes":
+        return RedirectResponse(
+            f"/studio/products/{product_id}/vk/settings?error=disconnect_not_confirmed",
+            status_code=303,
+        )
     sending = db.scalar(select(Publication.id).where(
         Publication.product_id == product_id, Publication.channel == "vk",
         Publication.status == "sending").limit(1))
