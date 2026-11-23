@@ -254,8 +254,7 @@ def vk_page(product_id: UUID, request: Request, done: str = "", error: str = "",
                    f'<b>{esc(channel.account_name)}</b><small>Сообщество VK · ID {esc(channel.account_id)}</small></div>' +
                    ('<span class="sg-channel-status">Ключ сообщества · можно проверить текстовую публикацию</span></div>'
                     if channel.is_community_token else
-                    '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>') +
-                   '')
+                    '<span class="sg-channel-status">VK ID · права отправки не подтверждены</span></div>'))
         reply_channel = CommentService(db, settings).channel(product_id, "vk")
         replies_ready = bool(reply_channel and reply_channel.status == "connected"
                              and reply_channel.account_id == channel.account_id
