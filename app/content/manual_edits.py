@@ -102,6 +102,7 @@ def save_manual_edit(db, product_id: UUID, source_id: UUID, fields):
             value.pop("image_sha256", None)
             value.pop("image_error_code", None)
             value.pop("image_review_artifact_id", None)
+            value.pop("image_owner_approval_artifact_id", None)
             value.pop("image_review_summary", None)
             value.pop("image_critical_issues", None)
             value.pop("image_review_error_code", None)
