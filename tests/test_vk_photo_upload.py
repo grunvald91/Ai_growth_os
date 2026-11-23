@@ -610,3 +610,56 @@ async def test_photo_connection_rotation_revokes_old_token(
     assert VKStore(settings.products_root).load_token(second.id) == "vk1.a.second"
     with pytest.raises((ValueError, OSError)):
         VKStore(settings.products_root).load_token(first.id)
+
+
+@pytest.mark.asyncio
+async def test_dedicated_user_photo_key_publishes_vk_image_without_losing_group_key(
+    db, tmp_path, monkeypatch,
+):
+    from app.social_vk import connect_photo_user_key
+    company, post, image, path = image_post(
+        db, tmp_path, slug="vk-dedicated-publisher",
+    )
+    settings = Settings(_env_file=None, products_root=tmp_path,
+                        content_vk_autopost_enabled=True)
+    connect_community(db, settings, company.id, "123456", "community-token")
+    class Preflight:
+        async def call(self, method, token, **params):
+            if method == "groups.getById":
+                return {"groups": [{"id": 123456, "is_admin": 1, "admin_level": 3}]}
+            assert method == "photos.getWallUploadServer"
+            return {"upload_url": "https://pu.vk.com/upload.php"}
+    await connect_photo_user_key(
+        db, settings, company.id, "vk1.a.owner-photos-wall", adapter=Preflight(),
+    )
+    pub = schedule(db, company.id, post.id,
+                   datetime.now(timezone.utc) + timedelta(seconds=2),
+                   products_root=tmp_path)
+    events = []
+    async def manager(self, group, token):
+        events.append(("verify_user", token))
+        return {"id": 123456, "is_admin": 1, "admin_level": 3}
+    async def photo_upload(adapter, token, group, picture, *, expected_sha256=None):
+        assert token == "vk1.a.owner-photos-wall"
+        assert group == "123456"
+        assert picture == path
+        events.append(("upload", token))
+        return "photo-123456_314"
+    async def vk_call(self, method, token, **params):
+        assert method == "wall.post"
+        assert token == "vk1.a.owner-photos-wall"
+        assert params["attachments"] == "photo-123456_314"
+        events.append(("wall.post", token))
+        return {"post_id": 314}
+    monkeypatch.setattr(VKAdapter, "manager", manager)
+    monkeypatch.setattr("app.social_vk.upload_wall_photo", photo_upload)
+    monkeypatch.setattr(VKAdapter, "call", vk_call)
+    assert await deliver_once(lambda: sessions(db), settings,
+                              now=datetime.now(timezone.utc) + timedelta(seconds=5)) == 1
+    db.refresh(pub)
+    assert pub.status == "published"
+    assert pub.external_reference == "vk:-123456_314"
+    assert [name for name, token in events] == ["verify_user", "upload", "wall.post"]
+    from app.social_vk import connected
+    ch = connected(db, company.id)
+    assert VKStore(settings.products_root).load_token(ch.id) == "community-token"
