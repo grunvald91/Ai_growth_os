@@ -251,6 +251,7 @@ test("other channels and text-only VK never accidentally request paid media", ()
 test("simple video sends its own explicit settings, never the other format's fields", () => {
   const fields = {
     "sg-create-video-length": "60", "sg-create-video-profile": "configured",
+    "sg-create-video-image": "gpt-image-2.5-sunburst",
     "sg-create-video-review": "once", "sg-create-video-budget": "45",
     "sg-create-video-science": "scientific", "sg-create-video-cta": "Подпишитесь на канал",
     "sg-create-video-script": "Мой сценарий", "sg-create-video-notes": "Контекст",
@@ -259,6 +260,8 @@ test("simple video sends its own explicit settings, never the other format's fie
   const video=setup("whiteboard",fields).creationRequest("Как работает CRM").creation.video;
   assert.equal(video.length,"60");
   assert.equal(video.profile,"configured");
+  assert.equal(video.image_model,"gpt-image-2.5-sunburst");
+  assert.equal(setup("whiteboard").creationRequest("Как работает CRM").creation.video.image_model,"gemini-3.1-flash-image");
   assert.equal(video.visual_review,true);
   assert.equal(video.max_api_calls,45);
   assert.equal(video.science_mode,"scientific");
