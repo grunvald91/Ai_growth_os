@@ -21,7 +21,7 @@ from .pipeline import WhiteboardPipeline
 from .render import MarkerSweepRenderer
 from .review import ClaudeHubVisualCritic, LLMVisualAuthor, OpenRouterVisualCritic
 from .science import FactReviewer, requires_science_review
-from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, safe_error, scoped_settings
+from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, safe_error, scoped_settings, CLAUDEHUB_IMAGE_MODELS
 
 
 class CachedAudioOnlySpeech:
@@ -32,7 +32,7 @@ class CachedAudioOnlySpeech:
 
 
 def build_pipeline(settings, payload, store):
-    if payload.image_provider != 'claudehub' or payload.models.image != 'gemini-3.1-flash-image':
+    if payload.image_provider != 'claudehub' or payload.models.image not in CLAUDEHUB_IMAGE_MODELS:
         raise ReadinessError('image_provider_required')
     privacy = PrivacyGateway()
     # GuardedStage counts exactly one provider operation. Disable hidden model
