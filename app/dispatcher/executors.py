@@ -642,7 +642,7 @@ async def whiteboard_video(ctx: Context, params: VideoParams) -> Outcome:
     try:
         body = CreateJob(topic=params.topic, duration_seconds=int(params.length),
                          call_to_action=params.call_to_action or "",
-                         profile=params.profile, visual_review=params.visual_review,
+                         profile=params.profile, image_model=params.image_model, visual_review=params.visual_review,
                          science_mode=params.science_mode, max_api_calls=params.max_api_calls,
                          recovery_budget=params.recovery_budget,
                          source_script=params.source_script, background_notes=params.background_notes,
