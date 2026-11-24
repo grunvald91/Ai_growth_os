@@ -298,26 +298,34 @@ IMAGE_TIMEOUT = httpx.Timeout(600.0, connect=15.0)
 
 
 class ClaudeHubGeminiImageProvider(OpenRouterImageProvider):
-    """Only Gemini 3.1 Flash Image, through ClaudeHub's documented Image API."""
+    """ClaudeHub image API, explicit allowlist, no model/provider fallback.
+
+    Historical class name retained for callers of the Gemini adapter.
+    """
 
     def __init__(self, *, api_key, base_url, model='gemini-3.1-flash-image', client=None):
         url = urlsplit(base_url)
-        if (model != 'gemini-3.1-flash-image' or url.scheme != 'https' or url.hostname != 'api.claudehub.fun'
+        from .runtime import CLAUDEHUB_IMAGE_MODELS
+        if (model not in CLAUDEHUB_IMAGE_MODELS or url.scheme != 'https' or url.hostname != 'api.claudehub.fun'
                 or url.port not in (None, 443) or url.path.rstrip('/') != '/v1'
                 or url.username or url.password or url.query or url.fragment):
-            raise ValueError('Gemini 3.1 Flash Image at the trusted ClaudeHub API is required')
+            raise ValueError('A supported image model at the trusted ClaudeHub API is required')
         super().__init__(api_key=api_key, model=model, client=client)
         self.base_url = base_url.rstrip('/') + '/'
 
     async def post(self, endpoint, payload):
-        if endpoint != 'images' or payload['model'] != 'gemini-3.1-flash-image':
+        if endpoint != 'images' or payload['model'] != self.model:
             raise ValueError('No alternative image model or transport is permitted')
         # ClaudeHub documents model/prompt/size, not OpenRouter's resolution/image_config.
-        size = payload.get('size', '1024x1792')
-        # The existing whiteboard path retains its portrait default.
-        if size not in {'1024x1792', '1024x1024'}:
+        from .runtime import GPT_IMAGE_MODEL
+        is_gpt = self.model == GPT_IMAGE_MODEL
+        size = payload.get('size', '1008x1792' if is_gpt else '1024x1792')
+        allowed = {'1008x1792', '1024x1024'} if is_gpt else {'1024x1792', '1024x1024'}
+        if size not in allowed:
             raise ValueError('Unsupported ClaudeHub image request size')
         body = {'model': self.model, 'prompt': payload['prompt'], 'size': size}
+        if is_gpt:
+            body['n'] = 1
         headers = {'Authorization': 'Bearer ' + self.key}
         if self.client is not None:
             response = await self.client.post('images/generations', json=body, headers=headers)
