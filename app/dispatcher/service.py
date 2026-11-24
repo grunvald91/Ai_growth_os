@@ -454,6 +454,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             # This existing executor creates only a WAITING_APPROVAL draft.
             # Paid video rendering still needs the owner's explicit confirmation.
             selected_capability = "whiteboard_video"
+            if creation.video is not None:
+                topic_params.update(creation.video.model_dump())
         else:
             selected_capability = "create_creative"
             topic_params["format"] = creation.format
