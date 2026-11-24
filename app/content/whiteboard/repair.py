@@ -11,7 +11,7 @@ from .checkpoints import CheckpointStore
 from .contracts import WhiteboardStoryboard
 from .jobs import (AGENT, ACTION, JobRequest, can_resume, can_top_up, digest,
                    records, owner_task, job_directory, started_attempts)
-from .runtime import ReadinessError, CLAUDEHUB_VISION_MODEL
+from .runtime import ReadinessError, CLAUDEHUB_VISION_MODEL, repair_image_model
 from .science import FactReview, ScienceSources, evidence_supported, requires_science_review
 
 
@@ -96,7 +96,7 @@ def queue_visual_repair(db, settings, product_id, source_id):
     repair_limit = max(13, 3 * len(story.scenes) + 2)
     payload = JobRequest(
         request=original.request,
-        models=original.models.model_copy(update={'image': 'gemini-3.1-flash-image',
+        models=original.models.model_copy(update={'image': repair_image_model(original.models),
                                                'regions': CLAUDEHUB_VISION_MODEL}),
         max_api_calls=repair_limit, visual_review=True, visual_repair_from=UUID(str(source_id)),
         image_provider='claudehub', repair_regenerate_images=True,
@@ -160,7 +160,7 @@ async def reuse_verified_science(original_store, destination, *, request, storyb
 async def prime_visual_repair(session_factory, settings, product_id, payload, destination):
     with session_factory() as db:
         source, value, original, store = source_store(db, settings, product_id, payload.visual_repair_from)
-        replacement = {'image': 'gemini-3.1-flash-image'}
+        replacement = {'image': repair_image_model(original.models)}
         if payload.repair_regenerate_images:
             replacement['regions'] = CLAUDEHUB_VISION_MODEL
         if (digest(source.content) != payload.repair_source_digest
