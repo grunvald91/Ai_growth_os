@@ -1403,3 +1403,14 @@ body[data-growth-design="v4"] .sg-create-screen .sg-create-dispatch .command-bar
 ) #sg-create-voice-hint{
   display:none!important;
 }
+
+/* Create contains only an inline response for the current submission. */
+body[data-growth-design="v4"] .sg-create-dispatch .sg-create-result{display:none;min-width:0;margin-top:14px}
+body[data-growth-design="v4"] .sg-create-dispatch.has-feed .sg-create-result{display:block}
+body[data-growth-design="v4"] .sg-create-dispatch .sg-create-result .dp-feed{
+  display:grid;position:static;z-index:auto;left:auto;bottom:auto;transform:none;
+  width:100%;min-height:0;max-height:none;overflow:visible;margin:0;padding:0;
+  border:0;background:transparent;box-shadow:none;mask-image:none;-webkit-mask-image:none;
+}
+body[data-growth-design="v4"] #sg-create-video-settings:not([hidden]){display:grid;gap:10px;min-width:0}
+body[data-growth-design="v4"] #sg-create-video-settings select{max-width:100%;min-width:0}
