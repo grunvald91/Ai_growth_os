@@ -219,3 +219,38 @@ async def test_vk_image_pipeline_end_to_end_with_provider_transport(
     assert kinds.count("vk_post_image_intent") == 1
     assert kinds.count("vk_image_critique_intent") == 1
     assert kinds.count("vk_image_critique") == (0 if verdict == "timeout" else 1)
+
+
+@pytest.mark.asyncio
+async def test_vk_image_http_failure_preserves_post_and_records_numeric_status(db, tmp_path, monkeypatch):
+    company = Product(name="Сервисный бизнес", slug="e2e-vk-http-failure")
+    db.add(company)
+    db.commit()
+    settings = Settings(_env_file=None, products_root=tmp_path,
+                        xai_api_key="offline-not-a-real-key", agent_critic_enabled=False)
+    task = queue_content(db, company.id, "Почему теряются заявки",
+                         format="post", channel="vk", image_model="gemini", image_ratio="4:5")
+    request_row = db.scalar(select(Artifact).where(
+        Artifact.product_id == company.id, Artifact.task_id == task.id,
+        Artifact.kind == "content_request"))
+    request = QuickPostRequest.model_validate_json(request_row.content)
+    calls = []
+    async def fail_image(self, endpoint, payload):
+        calls.append(endpoint)
+        response = httpx.Response(503, request=httpx.Request(
+            "POST", "https://api.claudehub.fun/v1/images/generations"))
+        response.raise_for_status()
+    monkeypatch.setattr(ClaudeHubGeminiImageProvider, "post", fail_image)
+    author = DraftModel()
+    assert not await run_quick_post(
+        db, settings, request.model_copy(update={"task_id": task.id}), provider=author)
+    post = db.scalar(select(Artifact).where(Artifact.task_id == task.id,
+                                           Artifact.kind == "channel_text"))
+    data = json.loads(post.content)
+    assert data["image_state"] == "failed"
+    assert data["image_error_stage"] == "generation"
+    assert data["image_http_status"] == 503
+    assert calls == ["images"] and author.calls == 2
+    assert post.status == ArtifactStatus.AWAITING_APPROVAL
+    assert data["body"]
+    assert "HTTP 503" in material_detail_page(db, company, post, root=tmp_path)

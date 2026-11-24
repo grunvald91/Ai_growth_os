@@ -268,3 +268,37 @@ async def test_redraw_is_consumed_by_real_content_worker_without_rewriting_post(
     page = material_detail_page(db, product, post, root=tmp_path)
     assert "Утвердить материал" in page
     assert "Переделать картинку" in page
+
+
+def test_material_preview_displays_saved_image_even_without_valid_critic(db, tmp_path):
+    from app.api.content_studio import material_detail_page
+    product, task, post, image = _setup(db, tmp_path)
+    value = json.loads(post.content)
+    value["image_state"] = "ready"
+    value["image_review_state"] = "approved"
+    post.content = json.dumps(value)
+    db.commit()
+    page = material_detail_page(db, product, post, root=tmp_path)
+    uri = f"/studio/products/{product.id}/tasks/{task.id}/images/{image.id}"
+    assert f'<img src="{uri}"' in page
+    assert page.index(uri) < page.index('id="material-copy"')
+    assert "согласование этой версии не подтверждено" in page
+    assert "Утвердить материал</button>" not in page
+    assert "Утвердить картинку и пост" not in page
+
+
+def test_material_without_picture_has_visible_generation_action_before_text(db, tmp_path):
+    from app.api.content_studio import material_detail_page
+    product, task, post, image = _setup(db, tmp_path)
+    value = json.loads(post.content)
+    value.pop("image_artifact_id")
+    value.pop("image_sha256")
+    value["image_state"] = "failed"
+    post.content = json.dumps(value)
+    db.commit()
+    page = material_detail_page(db, product, post, root=tmp_path)
+    assert "Изображение не создано. Текст сохранён." in page
+    assert page.index("Создать картинку") < page.index('id="material-copy"')
+    assert 'name="paid_confirmed"' in page
+    assert "Утвердить материал</button>" not in page
+    assert "Утвердить картинку и пост" not in page

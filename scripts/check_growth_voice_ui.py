@@ -621,8 +621,7 @@ def main():
                             (".story-shot p", ".story-shot"),
                             (".story-prompt", ".story-prompt")]),
                         (post_material, [
-                            (".material-detail-body .article-text", ".material-detail-body .article-text"),
-                            (".sg-native-post-label", ".sg-post-preview")]),
+                            (".sg-post-body", ".sg-material-post")]),
                         (creative_material, [
                             (".sg-storyboard-card p", ".sg-storyboard-card"),
                             (".sg-storyboard-screen span", ".sg-storyboard-screen")]),
