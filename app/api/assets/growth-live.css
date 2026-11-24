@@ -702,51 +702,6 @@ body[data-growth-design="v4"] .sg-create-tool{
 body[data-growth-design="v4"] .sg-create-tool a{color:var(--text);font-size:12.5px;flex:1;min-height:39px;display:flex;align-items:center}
 body[data-growth-design="v4"] .sg-create-tool:last-child{border-bottom:0}
 body[data-growth-design="v4"] .sg-create-dispatch{position:static!important;min-height:0!important;padding:0!important}
-/* Create's conversation is a dismissible overlay, not a permanently open feed. */
-body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history{
-  display:none;position:fixed;z-index:47;left:50%;transform:translateX(-50%);
-  width:min(760px,calc(100vw - 24px));bottom:110px;max-height:min(49dvh,360px);
-  flex-direction:column;min-height:0;
-  border:1px solid var(--line);background:var(--card);border-radius:15px;
-  overflow:hidden;box-shadow:var(--shadow);
-}
-body[data-growth-design="v4"] .sg-create-dispatch.has-feed:not(.sg-history-collapsed) .sg-create-history{display:flex}
-body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history .dp-feed{
-  display:grid;position:static;z-index:auto;left:auto;bottom:auto;transform:none;
-  width:100%;min-height:0;max-height:min(43dvh,310px);
-  border:0;background:transparent;border-radius:0;
-  overflow-y:auto;padding:8px 10px 10px;margin:0;box-shadow:none;
-  -webkit-mask-image:none;mask-image:none;
-}
-body[data-growth-design="v4"] .sg-create-history-close,
-body[data-growth-design="v4"] .sg-create-history-open{
-  appearance:none;border:0;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  background:transparent;color:var(--muted);
-  touch-action:none;-webkit-tap-highlight-color:transparent;
-}
-body[data-growth-design="v4"] .sg-create-history-close{
-  width:100%;min-height:38px;flex:0 0 38px;border-bottom:1px solid var(--line);
-}
-body[data-growth-design="v4"] .sg-create-history-open{
-  display:none;width:76px;height:38px;margin:0 auto 1px;border-radius:999px;
-  background:var(--card);box-shadow:0 1px 6px #00000012;
-}
-body[data-growth-design="v4"] .sg-create-dispatch.has-feed.sg-history-collapsed .sg-create-history-open{display:flex}
-body[data-growth-design="v4"] .sg-create-history-grip{
-  display:block;width:34px;height:4px;border-radius:999px;
-  background:var(--muted);opacity:.62;
-  transition:background .16s ease,opacity .16s ease;
-}
-body[data-growth-design="v4"] :is(.sg-create-history-close,.sg-create-history-open):is(:hover,:focus-visible) .sg-create-history-grip{
-  background:var(--blue);opacity:1;
-}
-body[data-growth-design="v4"] :is(.sg-create-history-close,.sg-create-history-open):focus-visible{
-  outline:2px solid var(--blue);outline-offset:-2px;
-}
-@media(prefers-reduced-motion:reduce){
-  body[data-growth-design="v4"] .sg-create-history-grip{transition:none}
-}
 body[data-growth-design="v4"] .sg-create-dispatch .dp-msg{padding:12px;border-radius:12px}
 body[data-growth-design="v4"] .sg-create-dispatch .command-dock{
   position:fixed;z-index:48;left:50%;transform:translateX(-50%);
@@ -769,10 +724,7 @@ body[data-growth-design="v4"] .sg-create-dispatch .dp-voice-note:not([hidden]){
     bottom:calc(65px + env(safe-area-inset-bottom,0px) + 4px);
     width:calc(100vw - 24px);
   }
-  body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history{
-    bottom:calc(65px + env(safe-area-inset-bottom,0px) + 103px);
   }
-}
 
 
 /* In-place edit of an AI creation request, shared by main dispatcher and Create. */
@@ -940,10 +892,6 @@ body[data-growth-design="v4"] .sg-create-suggest-row button{
 body[data-growth-design="v4"] .sg-create-suggest-row span{
   color:var(--muted);font-size:12px;
 }
-/* Do not rely on a narrow visible handle for touch input. */
-body[data-growth-design="v4"] :is(.sg-create-history-open,.sg-create-history-close){
-  touch-action:pan-x;min-height:44px;
-}
 @media(hover:hover) and (pointer:fine){
   body[data-growth-design="v4"] .sg-create-format:hover:not([aria-pressed="true"]){
     border-color:var(--blue);
@@ -954,23 +902,6 @@ body[data-growth-design="v4"] .sg-create-dispatch .command-topicbar{margin:0;}
 body[data-growth-design="v4"] .sg-create-dispatch:not(.has-feed) .command-topicbar{display:none;}
 body[data-growth-design="v4"] .sg-create-dispatch.has-feed .command-topicbar{
   display:flex;justify-content:flex-end;margin:0 0 8px;
-}
-body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history{
-  position:static;z-index:auto;left:auto;bottom:auto;transform:none;
-  width:100%;max-height:min(44dvh,380px);
-  margin:0 0 14px;border-radius:13px;
-}
-body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history .dp-feed{
-  max-height:min(36dvh,315px);
-}
-body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history-open{
-  margin:0 auto 12px;width:auto;padding:0 12px;
-}
-body[data-growth-design="v4"] .sg-create-history-open::after{
-  content:"Показать историю";font-size:12px;color:var(--muted);margin-left:8px;
-}
-body[data-growth-design="v4"] .sg-create-history-close::after{
-  content:"Свернуть историю";font-size:12px;color:var(--muted);margin-left:8px;
 }
 body[data-growth-design="v4"] .sg-create-aside{
   display:grid;gap:6px;
@@ -1014,10 +945,7 @@ body[data-growth-design="v4"] .sg-create-suggestions{
   body[data-growth-design="v4"] .sg-create-dispatch .command-dock{
     bottom:auto!important;width:100%!important;
   }
-  body[data-growth-design="v4"] .sg-create-dispatch .sg-create-history{
-    bottom:auto!important;width:100%!important;
   }
-}
 @media(max-width:360px){
   body[data-growth-design="v4"] .sg-create-format small{font-size:11px;}
   body[data-growth-design="v4"] .sg-create-dispatch .command-bar .command-go{
