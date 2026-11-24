@@ -94,7 +94,8 @@ JS = r"""
     // UUID only when this SSO user has a VERIFIED linked operator account.
     const platformId = compact ? metadata.platform_product?.id || '' : mount.dataset.platformProduct || '';
     const platformName = compact ? metadata.platform_product?.name || '' : mount.dataset.platformName || '';
-    if (platformId && platformName) {
+    if (platformId && platformName && !companies.some(company =>
+        company && businessProducts[String(company.id)] === platformId)) {
       const platformButton = text('a', compact ? 'sg-org-option' : 'sg-company-choice', '');
       platformButton.href = '/studio/products/' + encodeURIComponent(platformId);
       if (compact && metadata.current_product_id === platformId) platformButton.setAttribute('aria-current', 'true');
@@ -183,7 +184,8 @@ JS = r"""
     }
     mount.replaceChildren(
       text('p', 'sg-company-caption',
-           'Доступных организаций и проектов: ' + (companies.length + (platformId ? 1 : 0) + standaloneCount) +
+           'Доступных организаций и проектов: ' + (companies.length + (platformId && !companies.some(company =>
+             company && businessProducts[String(company.id)] === platformId) ? 1 : 0) + standaloneCount) +
            ' · Подключено к маркетингу: ' + (connectedCount + standaloneCount)),
       items
     );

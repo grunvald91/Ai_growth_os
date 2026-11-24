@@ -223,7 +223,7 @@ async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier:
 def _creator_account(request: Request) -> int | None:
     """Only verified central account sessions or existing legacy operators may create."""
     user_id = getattr(request.state, "studio_servgo_user_id", None)
-    if getattr(request.state, "studio_account_level", False) and type(user_id) is int and user_id > 0:
+    if type(user_id) is int and user_id > 0:
         return user_id
     _require_operator(request)
     return None

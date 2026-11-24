@@ -1210,7 +1210,7 @@ def test_malformed_live_role_type_is_rejected_without_server_exception(env):
     assert access.servgo_business_roles(settings, 7) is None
 
 
-def test_account_ticket_needs_no_booking_business_and_is_single_use(env):
+def test_account_ticket_needs_no_booking_business_and_is_single_use(env, monkeypatch):
     db, settings, salon, other, servgo = env
     from app.sso.models import StudioAccountProduct
     enabled = make_settings(settings.products_root, studio_public_origin="https://growth.servgo.ru",
@@ -1226,10 +1226,18 @@ def test_account_ticket_needs_no_booking_business_and_is_single_use(env):
     assert client.get("/studio/organizations.json").json()["items"] == []
     assert client.get("/studio/new").status_code == 200
     assert client.get(f"/studio/products/{other.id}").status_code == 404
-    db.add(StudioAccountProduct(servgo_user_id=7, product_id=other.id))
-    db.commit()
+    # Exercise real creation and membership persistence without paid background work.
+    from app.api import content_studio_company
+    monkeypatch.setattr(content_studio_company, "_start_job", lambda *a, **k: None)
+    created = client.post("/studio/new", headers={"Origin": "https://servgo.ru"}, data={
+        "name": "Studio only", "about": "Independent company with no online booking requirement."})
+    assert created.status_code == 303
+    owned = db.scalar(select(StudioAccountProduct).where(StudioAccountProduct.servgo_user_id == 7))
+    assert owned is not None
+    assert db.scalar(select(StudioBusinessLink).where(StudioBusinessLink.product_id == owned.product_id)) is None
     data = client.get("/studio/organizations.json").json()
-    assert [item["id"] for item in data["items"]] == [str(other.id)]
+    assert [item["id"] for item in data["items"]] == [str(owned.product_id)]
+    assert client.get(f"/studio/products/{other.id}").status_code == 404
     assert data["can_add"] is True
     assert client.get(f"/studio/products/{salon.id}").status_code == 404
     client.cookies.set("sg_identity", _browser_identity(8))

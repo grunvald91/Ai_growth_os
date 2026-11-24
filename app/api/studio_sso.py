@@ -312,6 +312,9 @@ def sso_landing(request: Request, background: BackgroundTasks, t: str | None = N
     if _canonical_pwa(request, settings):
         identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
         if identity is None or identity[0] != claims.user_id:
+            if claims.role == tickets.ACCOUNT_ROLE:
+                return _message("Другой аккаунт", "Подтвердите вход в текущий аккаунт ServGo.", 403,
+                                action=("Войти", "/workspace/studio-entry"))
             return _native_error(request, settings, "identity", "Другой аккаунт",
                                  "Войдите в ServGo под пользователем, которому принадлежит компания.", 403)
     if claims.role == tickets.ACCOUNT_ROLE:
