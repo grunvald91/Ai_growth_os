@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.dispatcher.registry import CreativeParams, PackageParams, PostParams, POST_CHANNELS
+from app.dispatcher.registry import CreativeParams, PackageParams, PostParams, POST_CHANNELS, VideoSettings
 from app.content.creative import CREATIVE_PLATFORMS
 
 FORMATS = ("post", "story", "short_video", "static_image", "package")
@@ -78,9 +78,12 @@ class CreateHints(BaseModel):
     editorial_brief: str | None = Field(default=None, max_length=3500)
     image_model: Literal["none", "auto", "gemini", "openai"] | None = None
     aspect_ratio: Literal["9:16", "4:5", "1:1", "16:9"] | None = None
+    video: VideoSettings | None = None
 
     @model_validator(mode="after")
     def valid_combination(self):
+        if self.video is not None and self.format != "whiteboard":
+            raise ValueError("Video settings require simple video format")
         if self.format == "whiteboard" and self.topic and len(self.topic) < 8:
             raise ValueError("Для простого видео уточните тему: минимум 8 символов")
         if self.format is None:
