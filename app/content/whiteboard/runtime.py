@@ -46,6 +46,12 @@ def scoped_settings(settings, models: WhiteboardModels, voice: str):
 STORYBOARD_ROLE = 'whiteboard_storyboard'
 # Everything except speech goes through ClaudeHub; OpenRouter ids always contain a slash.
 CLAUDEHUB_VISION_MODEL = 'gemini-flash-3.8'
+DEFAULT_IMAGE_MODEL = 'gemini-3.1-flash-image'
+GPT_IMAGE_MODEL = 'gpt-image-2.5-sunburst'
+CLAUDEHUB_IMAGE_MODELS = frozenset({DEFAULT_IMAGE_MODEL, GPT_IMAGE_MODEL})
+
+def repair_image_model(models):
+    return models.image if models.image in CLAUDEHUB_IMAGE_MODELS else DEFAULT_IMAGE_MODEL
 
 
 def regions_on_claudehub(models) -> bool:
@@ -59,13 +65,15 @@ def storyboard_model(settings) -> str:
     return chosen[0] if chosen else settings.whiteboard_storyboard_model
 
 
-def generation_profile(settings, profile: str):
+def generation_profile(settings, profile: str, image_model: str = DEFAULT_IMAGE_MODEL):
+    if image_model not in CLAUDEHUB_IMAGE_MODELS:
+        raise ValueError('Unknown ClaudeHub image model')
     if profile == 'gemini_ru':
         return WhiteboardModels(storyboard=storyboard_model(settings),
-            image='gemini-3.1-flash-image', speech='x-ai/grok-voice-tts-1.0',
+            image=image_model, speech='x-ai/grok-voice-tts-1.0',
             regions=CLAUDEHUB_VISION_MODEL), 'eve'
     if profile == 'configured':
-        return (configured_models(settings).model_copy(update={'image': 'gemini-3.1-flash-image',
+        return (configured_models(settings).model_copy(update={'image': image_model,
                                                               'regions': CLAUDEHUB_VISION_MODEL,
                                                               'storyboard': storyboard_model(settings)}),
                 settings.whiteboard_voice)
@@ -102,10 +110,10 @@ MESSAGES = {
     'science_sources_missing': 'Не удалось найти подходящие научные источники. Нейросети и изображения не запускались. Добавьте ссылку на научную публикацию или уточните тему.',
     'repair_source_invalid': 'Исходный сценарий или озвучка не прошли проверку сохранённых файлов. Визуальная правка остановлена; новая озвучка не запускается.',
     'repair_budget': 'В подтверждённом лимите исходного ролика осталось меньше 8 вызовов для визуальной правки. Повтор автоматически не запускается.',
-    'image_provider_required': 'Новые рисунки разрешены только через Gemini 3.1 Flash Image в ClaudeHub. Создайте новый запрос с этими настройками; автоматической замены нет.',
+    'image_provider_required': 'Новые рисунки разрешены только через поддерживаемые модели Gemini и GPT Image в ClaudeHub. Автоматической замены нет.',
     'claudehub_vision_unavailable': 'Модель ClaudeHub для разметки и проверки рисунков недоступна с текущим ключом. Платная генерация не началась.',
     'claudehub_rejected': 'ClaudeHub отклонил запрос (HTTP 401/403). Новые вызовы остановлены; администратору нужно проверить ключ и доступ модели.',
-    'claudehub_image_unavailable': 'Gemini 3.1 Flash Image недоступна с текущим ключом ClaudeHub. Новые изображения не заказаны; замены модели нет.',
+    'claudehub_image_unavailable': 'Выбранная модель изображений недоступна с текущим ключом ClaudeHub. Новые изображения не заказаны; замены модели нет.',
 }
 
 
@@ -155,7 +163,7 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
         catalogues = [] if skip_speech else [('models?output_modalities=speech', models.speech)]
         if not regions_on_claudehub(models):
             catalogues.append(('models', models.regions))
-        if models.image != 'gemini-3.1-flash-image':
+        if models.image not in CLAUDEHUB_IMAGE_MODELS:
             catalogues.insert(0, ('images/models', models.image))
         for endpoint, chosen in catalogues:
             result = await client.get(endpoint, headers=headers)
@@ -193,12 +201,12 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
             identifiers = {item.get('id') for item in entries if isinstance(item, dict)}
         except (KeyError, ValueError, TypeError):
             raise ReadinessError('claudehub_unavailable') from None
-        if 'gemini-3.1-flash-image' not in identifiers:
+        if models.image not in identifiers:
             raise ReadinessError('claudehub_image_unavailable')
         if regions_on_claudehub(models) and models.regions not in identifiers:
             raise ReadinessError('claudehub_vision_unavailable')
     try:
-        if models.image == 'gemini-3.1-flash-image':
+        if models.image in CLAUDEHUB_IMAGE_MODELS:
             from urllib.parse import urlsplit
             url = urlsplit(settings.xai_base_url)
             if url.scheme != 'https' or url.hostname != 'api.claudehub.fun' or url.path.rstrip('/') != '/v1' or url.username or url.password or url.query or url.fragment:
