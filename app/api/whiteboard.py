@@ -848,7 +848,15 @@ async def studio_repair(product_id: UUID, task_id: UUID, request: Request,
                         db: Session = Depends(get_db), settings=Depends(get_settings)):
     state = _load(db, product_id, task_id)
     from app.content.whiteboard.repair import queue_visual_repair
-    fields = await _studio_form(request)
+    # Older clients submitted an empty POST before there was a model selector.
+    # Keep that path compatible without accepting a different body format.
+    if not request.headers.get('content-type'):
+        async for chunk in request.stream():
+            if chunk:
+                raise HTTPException(415, 'Ожидается форма')
+        fields = {}
+    else:
+        fields = await _studio_form(request)
     try:
         task = queue_visual_repair(db, settings, product_id, task_id, image_model=fields.get('image_model'))
     except (ReadinessError, ValueError, CheckpointError) as exc:
