@@ -107,6 +107,7 @@ class VideoSettings(_Params):
                     "Не назвал — не указывай: видео позовёт подписаться на канал и поставить лайк.")
 
     profile: Literal["configured", "gemini_ru"] = "gemini_ru"
+    image_model: Literal["gemini-3.1-flash-image", "gpt-image-2.5-sunburst"] = "gemini-3.1-flash-image"
     visual_review: bool = False
     science_mode: Literal["general", "auto", "scientific"] = "auto"
     max_api_calls: Literal[19, 25, 34, 45] | None = None
