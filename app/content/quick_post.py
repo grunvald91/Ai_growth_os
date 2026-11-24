@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import httpx
 from datetime import datetime, timezone
 from uuid import UUID
 from typing import Literal
@@ -385,10 +386,12 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
         db.commit()  # Text is preserved if the optional paid image call fails.
         if request.image_model != "none":
             from app.content.vk_post_image import prepare_vk_post_image
+            image_stage = "generation"
             try:
                 await prepare_vk_post_image(
                     db, settings, product=product, task=task, post=post_record,
                     model_choice=request.image_model, ratio=request.image_ratio)
+                image_stage = "review"
                 from app.content.vk_image_critic import review_vk_post_image
                 await review_vk_post_image(
                     db, settings, product=product, task=task, post=post_record)
@@ -398,8 +401,16 @@ async def run_quick_post(db: Session, settings, request: QuickPostRequest, provi
                 persisted = db.get(Artifact, post_record.id)
                 if persisted is not None:
                     saved = json.loads(persisted.content)
-                    saved["image_state"] = "failed"
+                    saved["image_state"] = (
+                        "review_unavailable" if image_stage == "review"
+                        and saved.get("image_artifact_id") else "failed"
+                    )
+                    if saved["image_state"] == "review_unavailable":
+                        saved["image_review_state"] = "unavailable"
                     saved["image_error_code"] = type(exc).__name__
+                    saved["image_error_stage"] = image_stage
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        saved["image_http_status"] = exc.response.status_code
                     persisted.content = json.dumps(saved, ensure_ascii=False)
                     db.commit()
                 raise
