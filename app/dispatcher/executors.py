@@ -641,7 +641,12 @@ async def whiteboard_video(ctx: Context, params: VideoParams) -> Outcome:
     from app.api.whiteboard import CreateJob, _queue, job_state
     try:
         body = CreateJob(topic=params.topic, duration_seconds=int(params.length),
-                         call_to_action=params.call_to_action or "")
+                         call_to_action=params.call_to_action or "",
+                         profile=params.profile, visual_review=params.visual_review,
+                         science_mode=params.science_mode, max_api_calls=params.max_api_calls,
+                         recovery_budget=params.recovery_budget,
+                         source_script=params.source_script, background_notes=params.background_notes,
+                         reference_materials=params.reference_materials)
         task = _queue(ctx.db, ctx.product, body, ctx.settings)
         state = job_state(ctx.db, ctx.product.id, task.id)
     except HTTPException as exc:
@@ -657,6 +662,9 @@ async def whiteboard_video(ctx: Context, params: VideoParams) -> Outcome:
                  "Длина: около минуты, 6 сцен." if params.length == "60" else "Длина: около 30 секунд, 3 сцены.",
                  f"Призыв в конце: {params.call_to_action}." if params.call_to_action
                  else "Призыв в конце: подписаться на канал и поставить лайк.",
+                 f"Рисунки: {state['models']['image']}.",
+                 f"Озвучка: {state['models']['speech']} · {state['request']['voice']}.",
+                 f"Проверка рисунков: {'да' if state['visual_review_enabled'] else 'нет'}.",
                  f"Это платная генерация: до {state['max_api_calls']} обращений к ИИ.",
                  "Пока вы не подтвердите, ничего не списывается."],
         params={"task_id": str(task.id), "request_digest": state["request_digest"]},
