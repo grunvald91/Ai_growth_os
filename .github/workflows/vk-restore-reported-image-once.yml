@@ -1,0 +1,111 @@
+name: VK restore reported post image once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/vk-restore-reported-image-once.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vk-picture-prod-restore-once
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pinned production host identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/whiteboard-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/whiteboard-one-key
+            if ssh-keygen -lf /tmp/whiteboard-one-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/whiteboard-host-keys
+          test -s ~/.ssh/known_hosts || { echo "::error::Pinned host identity mismatch"; exit 1; }
+      - name: Queue one authorized image generation using existing production service
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" 'docker exec -i ai-growth-os-api-1 python -' <<'PY'
+          import json
+          import time
+          from sqlalchemy import select
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, ArtifactStatus, Task, TaskStatus
+          from app.content.revisions import source_fingerprint
+          from app.content.vk_image_regen import queue_vk_image_redraw
+          from app.content.vk_image_critic import _post_digest, verified_vk_image_approval
+          from app.content.brand_story_pipeline import verified_gallery_image
+          settings = get_settings()
+          with SessionLocal() as db:
+              candidates = [a for a in db.scalars(select(Artifact).where(
+                  Artifact.kind == "channel_text",
+                  Artifact.title == "Что важно уточнить перед выбором ServGo?"
+              )) if str(a.created_at).startswith("2026-11-23 14:03:59")]
+              if len(candidates) != 1:
+                  raise SystemExit("REFUSED: exact material not uniquely found")
+              post = candidates[0]
+              meta = json.loads(post.content)
+              if (meta.get("channel") != "vk" or meta.get("image_model") != "gemini"
+                      or post.status != ArtifactStatus.AWAITING_APPROVAL
+                      or meta.get("image_state") != "failed" or meta.get("image_artifact_id")
+                      or meta.get("image_error_code") != "HTTPStatusError"):
+                  raise SystemExit("REFUSED: original failed material state changed")
+              existing = [r for r in db.scalars(select(Artifact).where(
+                  Artifact.product_id == post.product_id, Artifact.kind == "vk_image_redraw_request"
+              )) if json.loads(r.content).get("post_id") == str(post.id)]
+              if existing:
+                  raise SystemExit("REFUSED: redraw already requested; no repeat")
+              if not settings.xai_api_key:
+                  raise SystemExit("REFUSED: missing configured provider credential")
+              original_digest = _post_digest(meta)
+              post_id = post.id
+              job = queue_vk_image_redraw(db, post.product_id, post.id,
+                  source_version=post.version, source_digest=source_fingerprint(post))
+              job_id = job.id
+              print("IMAGE_JOB_QUEUED", flush=True)
+          # No model call in this process: the ordinary worker claims the task.
+          for _ in range(70):
+              with SessionLocal() as db:
+                  job = db.get(Task, job_id)
+                  post = db.get(Artifact, post_id)
+                  meta = json.loads(post.content)
+                  state = str(getattr(job.status, "value", job.status))
+                  if job.status in (TaskStatus.COMPLETED, TaskStatus.FAILED):
+                      if _post_digest(meta) != original_digest:
+                          raise SystemExit("TEXT_CHANGED")
+                      if job.status == TaskStatus.FAILED:
+                          code = str(meta.get("image_regeneration_error_code", "unknown"))
+                          print("IMAGE_JOB_FAILED", code if code.isidentifier() else "unknown", flush=True)
+                          raise SystemExit(1)
+                      from uuid import UUID
+                      image = db.get(Artifact, UUID(meta["image_artifact_id"]))
+                      verified_gallery_image(db, settings.products_root, post.product_id, post.task_id, image)
+                      print("IMAGE_VERIFIED text_unchanged=true critic_approved="
+                            + str(verified_vk_image_approval(db, post, image)).lower()
+                            + " state=" + str(meta.get("image_state")), flush=True)
+                      break
+              time.sleep(10)
+          else:
+              print("IMAGE_JOB_PENDING: no retry", flush=True)
+              raise SystemExit(2)
+          PY
