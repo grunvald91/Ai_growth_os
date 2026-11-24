@@ -2129,11 +2129,11 @@ def analytics_page(db: Session, product: Product) -> str:
 def product_selector(products: list[Product], *, can_add: bool = False,
                      can_link: bool = False, unified_user_id: int | None = None,
                      linked_business_ids: tuple[int, ...] = (),
-                     platform_product: Product | None = None) -> str:
+                     platform_product: Product | None = None, business_product_ids=None) -> str:
     from app.api.studio_company_picker import selector_html
     return selector_html(products, can_add=can_add, can_link=can_link,
                          unified_user_id=unified_user_id, linked_business_ids=linked_business_ids,
-                         platform_product=platform_product)
+                         platform_product=platform_product, business_product_ids=business_product_ids)
 
 @router.get("/studio/assets/servgo.svg")
 def studio_official_logo():
@@ -2190,7 +2190,7 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
     allowed = getattr(request.state, "studio_product_ids", None)
     if allowed is not None:
         query = query.where(Product.id.in_([UUID(value) for value in allowed]))
-    products = list(db.scalars(query.order_by(Product.name).limit(100)))
+    products = list(db.scalars(query.order_by(Product.name, Product.id)))
     preferred = next((p for p in products if p.slug == "servgo"), None)
     canonical_user = _canonical_servgo_user(request, settings)
     from app.api.studio_sso import _canonical_pwa
@@ -2228,14 +2228,17 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
     from app.sso.tickets import COOKIE as SSO_COOKIE
     from app.sso.models import StudioBusinessLink
     linked_ids = ()
+    business_product_ids = {}
     if canonical_user is not None:
         links = list(db.scalars(select(StudioBusinessLink).where(
             StudioBusinessLink.product_id.in_([product.id for product in products]))))
         linked_ids = tuple(link.servgo_business_id for link in links)
+        business_product_ids = {str(link.servgo_business_id): str(link.product_id) for link in links}
     response = HTMLResponse(product_selector(
         products, can_add=allowed is None and canonical_user is None,
         can_link=bool(request.cookies.get(SSO_COOKIE)) and canonical_user is None,
         unified_user_id=canonical_user, linked_business_ids=linked_ids,
+        business_product_ids=business_product_ids,
         # Only an explicitly linked, validated Growth platform operator has
         # unrestricted scope (allowed=None). No ID/name-based elevation.
         platform_product=preferred if canonical_user is not None and allowed is None else None))
