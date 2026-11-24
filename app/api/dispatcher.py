@@ -226,7 +226,7 @@ def organization_choices(request: Request, db: Session, settings: Settings, prod
     q = select(Product)
     if permitted is not None:
         q = q.where(Product.id.in_([UUID(str(p)) for p in permitted]))
-    products = list(db.scalars(q.order_by(Product.name, Product.id).limit(100)))
+    products = list(db.scalars(q.order_by(Product.name, Product.id)))
     if product_id is not None and not any(item.id == product_id for item in products):
         current = db.get(Product, product_id)
         if current is not None:
@@ -241,6 +241,7 @@ def organization_choices(request: Request, db: Session, settings: Settings, prod
         platform = next((item for item in products if item.slug == 'servgo'), None) if permitted is None else None
         metadata = {"unified_user_id": user_id,
                     "linked_business_ids": [item.servgo_business_id for item in linked],
+                    "business_product_ids": {str(item.servgo_business_id): str(item.product_id) for item in linked},
                     "current_business_ids": [item.servgo_business_id for item in linked if item.product_id == product_id],
                     "current_product_id": str(product_id) if product_id else None,
                     "platform_product": {"id": str(platform.id), "name": platform.name} if platform else None}

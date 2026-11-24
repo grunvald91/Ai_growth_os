@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 
 
 def _esc(value: object) -> str:
@@ -76,9 +77,9 @@ html[data-theme="dark"] .sg-company-picker{
 def selector_html(products, *, can_add: bool = False, can_link: bool = False,
                   unified_user_id: int | None = None,
                   linked_business_ids: tuple[int, ...] = (),
-                  platform_product=None) -> str:
+                  platform_product=None, business_product_ids=None) -> str:
     entries = "".join(
-        '<a class="sg-company-choice" href="/studio/products/' + _esc(product.id) + '">'
+        '<a class="sg-company-choice" data-product-id="' + _esc(product.id) + '" href="/studio/products/' + _esc(product.id) + '">'
         '<span class="sg-company-avatar" aria-hidden="true">' + _esc((product.name or "?").strip()[:1].upper()) + '</span>'
         '<span class="sg-company-choice-copy"><strong>' + _esc(product.name) + '</strong>'
         '<small>Открыть студию компании</small></span>'
@@ -106,7 +107,8 @@ def selector_html(products, *, can_add: bool = False, can_link: bool = False,
                          + '" data-platform-name="' + _esc(platform_product.name) + '"'
                          if platform_product is not None else '')
         chooser = ('<section id="sg-servgo-organisations" data-user-id="' + _esc(unified_user_id)
-                   + '" data-linked-businesses="' + _esc(safe_ids) + '"' + platform_attr + '>'
+                   + '" data-linked-businesses="' + _esc(safe_ids) + '" data-business-product-ids="'
+                   + _esc(json.dumps(business_product_ids or {})) + '"' + platform_attr + '>'
                    '<p role="status" class="sg-company-caption">Загружаем все организации ServGo…</p>'
                    '</section>'
                    '<section id="sg-growth-connected"><p class="sg-company-caption">'

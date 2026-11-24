@@ -100,3 +100,19 @@ def test_canonical_organisation_script_takes_platform_project_from_server_only()
     assert "window.location.assign(url.href)" in JS
     assert "url.origin !== window.location.origin" in JS
     assert 'platformButton' in JS and 'servgo_operator' not in JS
+
+
+def test_unified_picker_preserves_studio_only_products_and_explicit_link_ids():
+    from app.api.studio_servgo_org_js import JS
+    import html
+    booking = _company("Same name")
+    studio_only = _company("Same name")
+    page = selector_html([booking, studio_only], unified_user_id=7,
+                         linked_business_ids=(12,), business_product_ids={"12": str(booking.id)})
+    assert f'data-product-id="{studio_only.id}"' in page
+    assert f'data-product-id="{booking.id}"' in page
+    assert f'"12": "{booking.id}"' in html.unescape(page)
+    assert "metadata.business_product_ids" in JS
+    assert "metadata.items" in JS
+    assert "covered.has(product.id)" in JS
+    assert "standaloneCount" in JS

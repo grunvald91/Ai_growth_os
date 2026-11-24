@@ -77,6 +77,18 @@ JS = r"""
     items.className = compact ? 'sg-org-options' : 'sg-company-items';
     const unique = new Set();
     let connectedCount = 0;
+    // Only server-authorized Growth items may be displayed as direct links.
+    // Use persisted IDs, never similar names, to decide which records overlap.
+    let businessProducts = {};
+    try {
+      businessProducts = compact ? metadata.business_product_ids || {} :
+        JSON.parse(mount.dataset.businessProductIds || '{}');
+    } catch (_) { businessProducts = {}; }
+    const covered = new Set();
+    const existing = compact ? (Array.isArray(metadata.items) ? metadata.items : []) :
+      Array.from(legacy?.querySelectorAll('[data-product-id]') || []).map(node => ({
+        id: node.dataset.productId, name: node.querySelector('strong')?.textContent || ''
+      }));
     // Existing platform-wide Growth project is a separate, protected record,
     // not a newly created BookingBot business. The server emits its product
     // UUID only when this SSO user has a VERIFIED linked operator account.
@@ -94,6 +106,7 @@ JS = r"""
       if (!compact) platformButton.appendChild(text('span', 'sg-company-arrow', '›'));
       items.appendChild(platformButton);
       connectedCount += 1;
+      covered.add(String(platformId));
     }
     for (const company of companies) {
       if (!company || !Number.isSafeInteger(company.id) || company.id <= 0 ||
@@ -101,6 +114,8 @@ JS = r"""
           unique.has(company.id)) throw new Error('Invalid company');
       unique.add(company.id);
       const connected = linked.has(String(company.id));
+      const productId = businessProducts[String(company.id)];
+      if (productId) covered.add(String(productId));
       if (connected) connectedCount++;
       const button = text('button', compact ? 'sg-org-option' : 'sg-company-choice sg-company-action', '');
       button.type = 'button';
@@ -135,8 +150,26 @@ JS = r"""
       });
       items.appendChild(button);
     }
+    let standaloneCount = 0;
+    for (const product of existing) {
+      if (!product || typeof product.id !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(product.id) ||
+          typeof product.name !== 'string' || !product.name.trim() || covered.has(product.id)) continue;
+      covered.add(product.id);
+      const link = text('a', compact ? 'sg-org-option' : 'sg-company-choice', '');
+      link.href = '/studio/products/' + encodeURIComponent(product.id);
+      if (compact && metadata.current_product_id === product.id) link.setAttribute('aria-current', 'true');
+      if (!compact) link.appendChild(text('span', 'sg-company-avatar', product.name.trim().slice(0, 1).toUpperCase()));
+      const copy = text('span', compact ? 'sg-org-copy' : 'sg-company-choice-copy', '');
+      copy.appendChild(text('strong', '', product.name));
+      if (!compact) copy.appendChild(text('small', '', 'Рабочее пространство Studio'));
+      link.appendChild(copy);
+      if (!compact) link.appendChild(text('span', 'sg-company-arrow', '›'));
+      items.appendChild(link);
+      standaloneCount++;
+    }
     if (compact) {
-      if (!companies.length && !platformId) items.appendChild(text('p', 'sg-org-menu-heading', 'Нет доступных организаций.'));
+      if (!companies.length && !platformId && !standaloneCount) items.appendChild(text('p', 'sg-org-menu-heading', 'Нет доступных организаций.'));
       state = text('div', 'sg-org-menu-heading', 'Выберите организацию');
       state.setAttribute('role', 'status');
       mount.replaceChildren(state, items);
@@ -144,11 +177,11 @@ JS = r"""
     }
     mount.replaceChildren(
       text('p', 'sg-company-caption',
-           'Доступных организаций и проектов: ' + (companies.length + (platformId ? 1 : 0)) +
-           ' · Подключено к маркетингу: ' + connectedCount),
+           'Доступных организаций и проектов: ' + (companies.length + (platformId ? 1 : 0) + standaloneCount) +
+           ' · Подключено к маркетингу: ' + (connectedCount + standaloneCount)),
       items
     );
-    if (!companies.length && !platformId) {
+    if (!companies.length && !platformId && !standaloneCount) {
       mount.appendChild(text('p', 'sg-company-empty', 'У этого аккаунта пока нет доступных организаций.'));
     }
     if (legacy) legacy.hidden = true;
