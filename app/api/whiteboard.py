@@ -20,7 +20,8 @@ from app.content.whiteboard.topics import suggest_company_video_topics, suggest_
 from app.content.whiteboard.selector_ui import topic_picker_html
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
-from app.content.whiteboard.runtime import MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings
+from app.content.whiteboard.runtime import (MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings,
+                                            DEFAULT_IMAGE_MODEL, GPT_IMAGE_MODEL, CLAUDEHUB_IMAGE_MODELS)
 from app.content.whiteboard.checkpoints import CheckpointError
 from app.content.durations import duration_notice, task_durations
 from app.core.config import get_settings
@@ -418,7 +419,13 @@ def job_html(state, product_id, *, error=None):
     if completed:
         body += '</details>'
         if not state.get('visual_repair_from'):
+            selected_model = state['models']['image']
+            if selected_model not in CLAUDEHUB_IMAGE_MODELS:
+                selected_model = DEFAULT_IMAGE_MODEL
+            repair_options = image_model_options(selected_model)
             body += (f'<form method="post" action="{base}/repair" class="sg-form wb-repair">'
+                     f'<label class="sg-field"><span>Модель новых рисунков · ClaudeHub</span>'
+                     f'<select name="image_model" aria-label="Модель новых рисунков">{repair_options}</select></label>'
                      '<button type="submit" class="btn secondary">Переделать рисунки</button>'
                      '<small role="status" aria-live="polite">Откроется отдельное задание с явным статусом и подтверждением дополнительных вызовов. Сценарий и MP3 сохранятся.</small></form>'
                      '<script>(()=>{const form=document.querySelector(".wb-repair");'
@@ -430,6 +437,14 @@ def job_html(state, product_id, *, error=None):
                      '});})();</script>')
     body += f'<p class="wb-return"><a href="/studio/products/{product_id}/whiteboard">К списку видео</a></p></section>'
     return body
+
+
+def image_model_options(selected=DEFAULT_IMAGE_MODEL):
+    return ''.join(
+        f'<option value="{value}"' + (' selected' if selected == value else '') + f'>{label}</option>'
+        for value, label in [(DEFAULT_IMAGE_MODEL, 'Gemini 3.1 Flash Image'),
+                             (GPT_IMAGE_MODEL, 'GPT Image 2.5')]
+    )
 
 
 def creation_form(product_id, *, fields=None, error=None, durations=None):
@@ -450,11 +465,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
                              ('scientific', 'Научный сюжет — обязательно проверять'),
                              ('general', 'Обычный сюжет (научные утверждения проверяются)')]
     )
-    image_options = ''.join(
-        f'<option value="{value}"' + (' selected' if fields.get('image_model', 'gemini-3.1-flash-image') == value else '') + f'>{label}</option>'
-        for value, label in [('gemini-3.1-flash-image', 'Gemini 3.1 Flash Image'),
-                             ('gpt-image-2.5-sunburst', 'GPT Image 2.5')]
-    )
+    image_options = image_model_options(fields.get('image_model', DEFAULT_IMAGE_MODEL))
     profile_options = ''.join(
         f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
         for value, label in [('gemini_ru', 'Grok Voice TTS — озвучка'),
@@ -833,12 +844,15 @@ async def studio_resume(product_id: UUID, task_id: UUID, request: Request, db: S
 
 
 @router.post('/studio/products/{product_id}/whiteboard/{task_id}/repair')
-def studio_repair(product_id: UUID, task_id: UUID, db: Session = Depends(get_db), settings=Depends(get_settings)):
+async def studio_repair(product_id: UUID, task_id: UUID, request: Request,
+                        db: Session = Depends(get_db), settings=Depends(get_settings)):
     state = _load(db, product_id, task_id)
     from app.content.whiteboard.repair import queue_visual_repair
+    fields = await _studio_form(request)
     try:
-        task = queue_visual_repair(db, settings, product_id, task_id)
+        task = queue_visual_repair(db, settings, product_id, task_id, image_model=fields.get('image_model'))
     except (ReadinessError, ValueError, CheckpointError) as exc:
+        db.rollback()
         code = getattr(exc, 'code', 'repair_source_invalid')
         return page(_owner_product(db, product_id), 'Визуальная правка',
             job_html(state, product_id, error=MESSAGES[code]), status=409)
