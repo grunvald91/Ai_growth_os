@@ -1784,6 +1784,11 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                         "pending": "Изображение ещё не готово.",
                         "failed": "Изображение не создано. Текст сохранён.",
                     }.get(state, "Для этой версии поста нет сохранённого изображения.")
+                    if state == "failed" and value.get("image_error_code") == "HTTPStatusError":
+                        http_status = value.get("image_http_status")
+                        reason += (" Сервис генерации вернул HTTP " + str(http_status) + "."
+                                   if type(http_status) is int and 100 <= http_status <= 599
+                                   else " Сервис генерации отклонил HTTP-запрос.")
                     review_html += (
                         '<p class="sg-warning" role="status">' + esc(reason) +
                         ' Публикация с изображением пока недоступна.</p>')
