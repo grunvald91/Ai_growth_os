@@ -1712,6 +1712,10 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         text = artifact_text(record, value)
         review_html = ""
         image_is_available = False
+        image_approval_valid = False
+        history_html = ""
+        is_post = record.kind == "channel_text"
+        vk_image_requested = is_post and value.get("channel") == "vk" and value.get("image_model", "none") != "none"
         if record.kind == "channel_text":
             if value.get("channel") == "vk" and value.get("image_model", "none") != "none":
                 state = value.get("image_state")
@@ -1728,18 +1732,27 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                         verified_gallery_image(
                             db, root or get_settings().products_root,
                             product.id, record.task_id, image)
-                        if state == "ready":
-                            from app.content.vk_image_critic import verified_vk_image_approval
-                            if not verified_vk_image_approval(db, record, image):
-                                raise LookupError("Image has no matching visual approval")
-                    except (LookupError, ValueError, TypeError, OSError):
+                    except (LookupError, ValueError, TypeError, OSError, KeyError):
                         review_html += ('<p class="sg-warning" role="alert">'
                                         'Изображение недоступно или повреждено. '
                                         'Публикацию нужно проверить.</p>')
                     else:
                         image_is_available = True
-                        review_html += gallery_html(product.id, record.task_id, [image])
+                        uri = f"/studio/products/{product.id}/tasks/{record.task_id}/images/{image.id}"
+                        review_html += (
+                            '<figure class="sg-post-image">'
+                            f'<a href="{uri}" target="_blank" rel="noopener" aria-label="Открыть изображение полностью">'
+                            f'<img src="{uri}" alt="Иллюстрация к посту ВКонтакте" decoding="async"></a>'
+                            f'<figcaption><a href="{uri}?download=true" download>Скачать PNG</a></figcaption></figure>'
+                        )
                         if state == "ready":
+                            from app.content.vk_image_critic import verified_vk_image_approval
+                            image_approval_valid = verified_vk_image_approval(db, record, image)
+                        if state == "ready" and not image_approval_valid:
+                            review_html += ('<p class="sg-warning" role="alert">'
+                                            'Картинка сохранена, но согласование этой версии не подтверждено. '
+                                            'Утверждение недоступно.</p>')
+                        elif state == "ready":
                             verdict = ('Изображение утверждено владельцем после замечаний критика.'
                                        if value.get("image_review_state") == "owner_approved"
                                        else 'Визуальный критик проверил изображение: критичных ошибок нет.')
@@ -1764,21 +1777,24 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                    if state == "regenerating" else
                                    'Изображение сохранено, но визуальный критик ещё не подтвердил качество.')
                                 + ' Публикация пока недоступна.</p>')
-                elif state in {"stale", "failed", "pending"}:
-                    reason = ("Текст изменён; прежняя иллюстрация больше не подходит."
-                              if state == "stale" else
-                              "Создание изображения остановилось; текст сохранился.")
+                else:
+                    reason = {
+                        "stale": "Текст изменён; нужна новая иллюстрация.",
+                        "regenerating": "Изображение создаётся.",
+                        "pending": "Изображение ещё не готово.",
+                        "failed": "Изображение не создано. Текст сохранён.",
+                    }.get(state, "Для этой версии поста нет сохранённого изображения.")
                     review_html += (
                         '<p class="sg-warning" role="status">' + esc(reason) +
                         ' Публикация с изображением пока недоступна.</p>')
             warnings = value.get("quality_warnings") or []
             warning_list = "".join(f"<li>{esc(note)}</li>" for note in warnings[:6])
             if warning_list:
-                review_html += (
-                    '<section class="panel"><h3>Проверить перед публикацией</h3>'
+                history_html += (
+                    '<details class="sg-post-details"><summary>Проверить перед публикацией</summary>'
                     '<ul>' + warning_list + '</ul>'
                     '<p>Замечания автоматические; окончательное решение за владельцем.</p>'
-                    '</section>'
+                    '</details>'
                 )
             if value.get("origin") in {"quick_post", "owner_revision", "owner_manual_revision"}:
                 versions = post_history(db, record.id)
@@ -1787,9 +1803,9 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                     f'Версия {index} · {esc(getattr(item.status, "value", item.status))}</a>'
                     for index, item in enumerate(versions, 1)
                 )
-                review_html += (
-                    '<section class="panel"><h3>История текста</h3>'
-                    '<div class="preview-actions">' + history_links + '</div></section>'
+                history_html += (
+                    '<details class="sg-post-details"><summary>История текста</summary>'
+                    '<div class="preview-actions">' + history_links + '</div></details>'
                 )
         content = f"""
         <section class="panel material-detail-card">
@@ -1806,6 +1822,16 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
           </div>
         </section>
         """
+        if is_post:
+            content = f"""
+            <section class="sg-surface sg-material-post">
+              <div class="detail-meta"><span class="chip blue">{esc(platform_label(value.get("channel")))}</span>
+                <span class="chip">{esc(record.created_at.strftime("%d.%m.%Y %H:%M") if record.created_at else "")}</span></div>
+              {review_html}
+              {'<!-- vk-image-actions -->' if vk_image_requested else ''}
+              <div class="sg-post-body" id="material-copy">{esc(text)}</div>
+              {history_html}
+            </section>"""
         if record.kind == "article":
             start = content.index('<div class="article-text ')
             end = content.index('\n            </div>', start) + len('\n            </div>')
@@ -1840,16 +1866,19 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
         if (record.kind == "channel_text" and value.get("channel") == "vk"
                 and value.get("image_model", "none") != "none"
                 and status == ArtifactStatus.AWAITING_APPROVAL):
+            image_actions = ""
             if value.get("image_state") == "regenerating":
                 task_id = value.get("image_redraw_task_id")
-                form_actions += (
+                image_actions += (
                     '<p class="sg-warning" role="status">Новая картинка создаётся. '
-                    'Текст поста и старое изображение сохранены.</p>'
+                    'Текст поста сохранён.</p>'
                     + (f'<a class="btn secondary" href="/studio/products/{product.id}/tasks/{esc(task_id)}">'
                        'Посмотреть задание</a>' if task_id else '')
                 )
             else:
-                form_actions += (
+                image_actions += (
+                    '<details class="sg-post-details sg-post-redraw"><summary>↻ '
+                    + ('Переделать картинку' if image_is_available else 'Создать картинку') + '</summary>'
                     '<form class="sg-inline-form" method="post" action="'
                     f'/studio/products/{product.id}/review/{record.id}/regenerate-image">'
                     f'<input type="hidden" name="source_version" value="{record.version}">'
@@ -1859,19 +1888,20 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                     'placeholder="Например: убрать надпись, исправить предмет, сменить композицию"></textarea></label>'
                     '<label><input type="checkbox" name="paid_confirmed" value="yes" required> '
                     'Запустить одну платную генерацию и одну проверку критиком</label>'
-                    '<button class="btn secondary" type="submit">↻ Переделать картинку</button>'
-                    '<small>Текст не изменится. Старая картинка останется в истории. '
-                    'Автоматических платных повторов нет.</small></form>'
+                    '<button class="btn secondary" type="submit">Запустить генерацию</button>'
+                    '<small>Текст не изменится. Ранее созданные картинки останутся в истории. '
+                    'Автоматических платных повторов нет.</small></form></details>'
                 )
                 if value.get("image_regeneration_error_code"):
-                    form_actions += ('<p class="sg-warning" role="alert">'
-                                     'Перегенерация не завершилась. Старая картинка сохранена; '
+                    image_actions += ('<p class="sg-warning" role="alert">'
+                                     'Генерация не завершилась; '
                                      'можно повторить вручную.</p>')
+            content = content.replace("<!-- vk-image-actions -->", image_actions, 1)
         if status == ArtifactStatus.AWAITING_APPROVAL:
             pending_vk_image = (
                 record.kind == "channel_text" and value.get("channel") == "vk"
                 and value.get("image_model", "none") != "none"
-                and value.get("image_state") != "ready"
+                and (value.get("image_state") != "ready" or not image_approval_valid)
             )
             if pending_vk_image:
                 owner_choice_possible = (
@@ -1897,7 +1927,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                 else:
                     form_actions += (
                         '<p class="sg-warning" role="status">Картинку ещё нельзя утвердить: '
-                        'файл отсутствует, повреждён или проверка пока выполняется.</p>'
+                        'файл отсутствует, повреждён или согласование не подтверждено.</p>'
                     )
             else:
                 form_actions += (
