@@ -307,8 +307,8 @@
   const result=document.getElementById('sg-create-result');
   root.addEventListener('sg:dispatcher:response',()=>{
     requestAnimationFrame(()=>{
-      const target=result.querySelector('.dp-confirm-actions')?.closest('.dp-confirm') ||
-        result.querySelector('.dp-msg');
+      const latest=[...result.querySelectorAll('.dp-msg:not(.dp-typing)')].pop();
+      const target=latest?.querySelector('.dp-confirm-actions')?.closest('.dp-confirm') || latest;
       if(!target)return;
       target.setAttribute('tabindex','-1');
       target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
