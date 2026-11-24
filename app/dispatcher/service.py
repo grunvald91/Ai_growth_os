@@ -454,8 +454,6 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             # This existing executor creates only a WAITING_APPROVAL draft.
             # Paid video rendering still needs the owner's explicit confirmation.
             selected_capability = "whiteboard_video"
-            if creation.video is not None:
-                topic_params.update(creation.video.model_dump())
         else:
             selected_capability = "create_creative"
             topic_params["format"] = creation.format
@@ -464,6 +462,9 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         decision = DispatcherDecision(
             intent="execute", capability=selected_capability,
             params=topic_params, confidence=1.0)
+        if creation.format == "whiteboard" and creation.video is not None:
+            # Already validated owner form values, not model-generated strings.
+            decision.params.update(creation.video.model_dump(exclude_none=True))
     else:
         quick = quick_capability(text)
         if quick is not None:
