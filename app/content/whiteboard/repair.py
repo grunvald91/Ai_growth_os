@@ -47,7 +47,9 @@ def queue_visual_repair(db, settings, product_id, source_id, *, image_model=None
         select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
                            Task.title.like(prefix + '%'),
                            Task.status.in_([TaskStatus.WAITING_APPROVAL, TaskStatus.QUEUED, TaskStatus.RUNNING]))
-        .order_by(Task.created_at, Task.id)))
+        .order_by(Task.created_at, Task.id).with_for_update()
+        .execution_options(populate_existing=True)))
+    # Lock candidate tasks before approval artifacts, in the same order as approve_job.
     # Upgrade legacy, unapproved visual repairs instead of reusing an old request
     # that imports the original pictures and shares the exhausted source budget.
     # Never supersede a queued/running or already approved paid job.
