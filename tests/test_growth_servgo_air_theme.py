@@ -231,4 +231,4 @@ def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separat
     ):
         assert fragment in adapter, fragment
     assert 'growth-servgo-air.css?v=19-tasks-theme-and-320' in v4
-    assert 'create-studio.js?v=create-topic-race-a11y-20261123' in v4
+    assert 'create-studio.js?v=create-video-gpt-image-20261124' in v4
