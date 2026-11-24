@@ -208,9 +208,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
-    assert '/studio/assets/create-studio.js?v=create-topic-race-a11y-20261123' in page.text
+    assert '/studio/assets/create-studio.js?v=create-video-gpt-image-20261124' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=create-topic-race-a11y-20261123' in page.text
+    assert '/studio/assets/dispatcher.js?v=create-video-gpt-image-20261124' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -218,7 +218,8 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     js = client.get('/studio/assets/dispatcher.js')
     assert js.status_code == 200
     assert "root.classList.contains('sg-create-dispatch')" in js.text
-    assert "pending[pending.length - 1]" in js.text
+    assert "pending[pending.length - 1]" not in js.text
+    assert "Keep only the current assistant response" in js.text
 
 
 
@@ -264,7 +265,7 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'name="vk_image_enabled"' in html
     assert "extrasSlot.appendChild(advanced)" in js
     assert "formatOptionsSlot.appendChild(row)" in js
-    assert "swipeDirection*velocity>.65" in js
+    assert "Math.abs(velocity)>.65" in js
     assert "translate3d(0," in js
     css = client.get('/studio/assets/growth-live.css').text
     assert '.sg-create-layout' in css
@@ -287,8 +288,8 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'id="sg-create-vk-image-slot"' in html
     assert 'id="sg-create-format-help"' in html
     assert 'data-sg-description="' in html
-    assert 'create-topic-race-a11y-20261123' in html
-    assert 'growth-live.css?v=30-single-vk-model' in html
+    assert 'create-video-gpt-image-20261124' in html
+    assert 'growth-live.css?v=31-create-video-controls' in html
     assert "vkImageSlot.appendChild(vkReviewTip)" in js
     assert "vkImageRow" not in js
     assert "vkImageModel.value" not in js
@@ -359,7 +360,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.count('id="dp-new"') == 1
     assert 'class="command-topicbar"' in page.text
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
-    assert '/studio/assets/growth-live.css?v=30-single-vk-model' in page.text
+    assert '/studio/assets/growth-live.css?v=31-create-video-controls' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
     assert '/studio/assets/dispatcher.js?v=voice-start-fast-20261121' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
