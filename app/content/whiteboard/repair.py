@@ -11,7 +11,7 @@ from .checkpoints import CheckpointStore
 from .contracts import WhiteboardStoryboard
 from .jobs import (AGENT, ACTION, JobRequest, can_resume, can_top_up, digest,
                    records, owner_task, job_directory, started_attempts)
-from .runtime import ReadinessError, CLAUDEHUB_VISION_MODEL, repair_image_model
+from .runtime import ReadinessError, CLAUDEHUB_VISION_MODEL, repair_image_model, CLAUDEHUB_IMAGE_MODELS
 from .science import FactReview, ScienceSources, evidence_supported, requires_science_review
 
 
@@ -30,7 +30,7 @@ def source_store(db, settings, product_id, source_id):
     return source, json.loads(state.content), payload, store
 
 
-def queue_visual_repair(db, settings, product_id, source_id):
+def queue_visual_repair(db, settings, product_id, source_id, *, image_model=None):
     """Queue a fresh, visible visual regeneration with a separate paid approval.
 
     The source MP3s/storyboard are immutable; source call history does not consume
@@ -39,6 +39,9 @@ def queue_visual_repair(db, settings, product_id, source_id):
     """
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     source, value, original, store = source_store(db, settings, product_id, source_id)
+    chosen = repair_image_model(original.models) if image_model is None else image_model
+    if chosen not in CLAUDEHUB_IMAGE_MODELS:
+        raise ReadinessError('repair_model_invalid')
     prefix = 'WHITEBOARD-VISUAL-REPAIR: ' + str(source_id)
     active_jobs = list(db.scalars(
         select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
@@ -53,10 +56,12 @@ def queue_visual_repair(db, settings, product_id, source_id):
     for candidate in active_jobs:
         if candidate.status == TaskStatus.WAITING_APPROVAL:
             _, pending_state, consent, pending_payload = records(db, candidate, lock=True)
-            if not pending_payload.repair_regenerate_images and consent.status == 'pending':
+            if consent.status == 'pending' and (not pending_payload.repair_regenerate_images
+                    or pending_payload.models.image != chosen):
                 consent.status = 'rejected'
                 consent.decided_at = datetime.now(timezone.utc)
-                consent.decided_by = 'policy:legacy_repair_upgrade'
+                consent.decided_by = ('policy:legacy_repair_upgrade' if not pending_payload.repair_regenerate_images
+                                      else 'owner:repair_model_changed')
                 candidate.status = TaskStatus.CANCELLED
                 prior = json.loads(pending_state.content)
                 prior.update(stage='cancelled', error='cancelled',
@@ -64,6 +69,10 @@ def queue_visual_repair(db, settings, product_id, source_id):
                 pending_state.content = json.dumps(prior)
                 superseded = True
                 continue
+        # Never return or modify an active paid job for a different model.
+        _, _, _, current = records(db, candidate, lock=True)
+        if current.models.image != chosen:
+            raise ReadinessError('repair_model_busy')
         # Repeated clicks must be idempotent for the active replacement.
         existing = candidate
         break
@@ -72,16 +81,19 @@ def queue_visual_repair(db, settings, product_id, source_id):
             db.commit()
         return existing
     # Prefer resuming paid, verified checkpoints instead of buying the same images again.
-    failed = db.scalar(
+    failures = db.scalars(
         select(Task).where(Task.product_id == product_id, Task.assigned_agent == AGENT,
                            Task.title.like(prefix + '%'), Task.status == TaskStatus.FAILED)
         .order_by(Task.created_at.desc(), Task.id.desc()))
-    if failed:
+    for failed in failures:
         _, saved, consent, old_payload = records(db, failed)
         saved_state = json.loads(saved.content)
         if (consent.status == 'approved' and old_payload.repair_regenerate_images
+                and old_payload.models.image == chosen
                 and (can_resume(failed.status, saved_state, old_payload)
                      or can_top_up(failed.status, saved_state, old_payload))):
+            if superseded:
+                db.commit()
             return failed
     story = WhiteboardStoryboard.model_validate_json(store.load('storyboard', limit=64_000))
     audio_hashes = []
@@ -96,7 +108,7 @@ def queue_visual_repair(db, settings, product_id, source_id):
     repair_limit = max(13, 3 * len(story.scenes) + 2)
     payload = JobRequest(
         request=original.request,
-        models=original.models.model_copy(update={'image': repair_image_model(original.models),
+        models=original.models.model_copy(update={'image': chosen,
                                                'regions': CLAUDEHUB_VISION_MODEL}),
         max_api_calls=repair_limit, visual_review=True, visual_repair_from=UUID(str(source_id)),
         image_provider='claudehub', repair_regenerate_images=True,
@@ -162,6 +174,10 @@ async def prime_visual_repair(session_factory, settings, product_id, payload, de
         source, value, original, store = source_store(db, settings, product_id, payload.visual_repair_from)
         replacement = {'image': repair_image_model(original.models)}
         if payload.repair_regenerate_images:
+            if payload.models.image not in CLAUDEHUB_IMAGE_MODELS:
+                raise ReadinessError('repair_model_invalid')
+            # The approved immutable repair request may deliberately use a different image model.
+            replacement['image'] = payload.models.image
             replacement['regions'] = CLAUDEHUB_VISION_MODEL
         if (digest(source.content) != payload.repair_source_digest
                 or hashlib.sha256((store.directory/'manifest.json').read_bytes()).hexdigest() != payload.repair_manifest_sha256
