@@ -1000,7 +1000,18 @@
   }
 
   function applyResult(data) {
-    (data.messages || []).forEach(upsert);
+    if (root.classList.contains('sg-create-dispatch')) {
+      // Keep only the current assistant response, not the conversation log.
+      var latest = (data.messages || []).filter(function (message) {
+        return message.role === 'assistant';
+      }).pop();
+      if (latest) {
+        Array.from(feed.children).forEach(function (child) {
+          if (!child.classList.contains('dp-typing')) child.remove();
+        });
+        upsert(latest);
+      }
+    } else (data.messages || []).forEach(upsert);
     if (data.hints) { state.hints = data.hints; renderHints(); }
     syncConversationLayout();
     toBottom();
@@ -1018,7 +1029,8 @@
     var key = body.client_key || newKey();
     body.client_key = key;
     var echoNode = null;
-    if (echo) {
+    if (root.classList.contains('sg-create-dispatch')) feed.replaceChildren();
+    if (echo && !root.classList.contains('sg-create-dispatch')) {
       echoNode = renderMessage({ id: 'local-' + key, role: 'user', text: echo });
       feed.appendChild(echoNode);
       syncConversationLayout();
@@ -1109,11 +1121,27 @@
     var vkImageModel=document.getElementById('sg-create-vk-model-choice');
     var vkRatio=document.getElementById('sg-create-vk-image-ratio');
     var aspect=document.getElementById('sg-create-aspect');
+    function videoField(id, fallback) {
+      var field=document.getElementById('sg-create-video-'+id);
+      return field ? field.value.trim() : fallback;
+    }
     var a=audience ? audience.value.trim() : '';
     var b=brief ? brief.value.trim() : '';
     if (!selected && !a && !b) return null;
     return {
       format:selected,
+      ...(selected==='whiteboard' ? {video:{
+        length:videoField('length','30'),
+        profile:videoField('profile','gemini_ru'),
+        visual_review:videoField('review','off')==='once',
+        science_mode:videoField('science','auto'),
+        max_api_calls:['auto','robust'].includes(videoField('budget','auto')) ? null : Number(videoField('budget','auto')),
+        recovery_budget:videoField('budget','auto')==='robust',
+        call_to_action:videoField('cta','') || null,
+        source_script:videoField('script',''),
+        background_notes:videoField('notes',''),
+        reference_materials:videoField('references','')
+      }} : {}),
       platform:selected && selected!=='package' && selected!=='whiteboard' && platform ? platform.value : null,
       frame_count:selected==='story' && count && count.value ? Number(count.value) : null,
       audience:selected==='whiteboard' ? null : a || null,
@@ -1699,14 +1727,16 @@
 
   // Finished work comes back into the conversation by itself: ask now and then while the page is open.
   function checkUpdates() {
-    if (document.hidden || busy) return;
+    if (document.hidden || busy || root.classList.contains('sg-create-dispatch')) return;
     fetch(api + '/updates', { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (data) { if (data && data.messages && data.messages.length) applyResult(data); })
       .catch(function () {});
   }
-  setInterval(checkUpdates, 8000);
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdates(); });
+  if (!root.classList.contains('sg-create-dispatch')) {
+    setInterval(checkUpdates, 8000);
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) checkUpdates(); });
+  }
 
   (state.messages || []).forEach(upsert);
   // An interrupted request can persist a workflow before its chat reply.
@@ -1727,21 +1757,4 @@
   renderHints();
   toBottom();
 
-  if (root.classList.contains('sg-create-dispatch')) {
-    // On Create, restore only the last pending creation card. Do not copy the
-    // full conversation from Home into the compact composition workspace.
-    fetch(api + '/state', { credentials: 'same-origin',
-      headers: { Accept: 'application/json' } })
-      .then(function (response) { return response.ok ? response.json() : null; })
-      .then(function (data) {
-        if (!data || !Array.isArray(data.messages) ||
-            feed.querySelector('.dp-msg:not(.dp-typing)')) return;
-        var pending = data.messages.filter(function (message) {
-          return message.role === 'assistant' && (message.blocks || []).some(function (b) {
-            return b.type === 'confirm' && b.state === 'pending' && !!b.editable;
-          });
-        });
-        if (pending.length) applyResult({ messages: [pending[pending.length - 1]] });
-      }).catch(function () { /* No network means no restored card, not a page failure. */ });
-  }
 })();
