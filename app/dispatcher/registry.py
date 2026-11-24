@@ -97,8 +97,7 @@ class PackageParams(_Params):
     editorial_brief: str | None = Field(default=None, max_length=3500)
 
 
-class VideoParams(_Params):
-    topic: str = Field(min_length=8, max_length=400)
+class VideoSettings(_Params):
     length: Literal["30", "60"] = Field(
         default="30", description="Длина видео: \"30\" — около 30 секунд (по умолчанию); \"60\" — около минуты, "
                                   "если владелец просит минутное, длинное или более подробное видео.")
@@ -106,6 +105,20 @@ class VideoParams(_Params):
         default=None, min_length=6, max_length=200,
         description="Призыв в конце видео, только если владелец сам его назвал, его словами. "
                     "Не назвал — не указывай: видео позовёт подписаться на канал и поставить лайк.")
+
+    profile: Literal["configured", "gemini_ru"] = "gemini_ru"
+    image_model: Literal["gemini-3.1-flash-image", "gpt-image-2.5-sunburst"] = "gemini-3.1-flash-image"
+    visual_review: bool = False
+    science_mode: Literal["general", "auto", "scientific"] = "auto"
+    max_api_calls: Literal[19, 25, 34, 45] | None = None
+    recovery_budget: bool = False
+    source_script: str = Field(default="", max_length=12000)
+    background_notes: str = Field(default="", max_length=6000)
+    reference_materials: str = Field(default="", max_length=6000)
+
+
+class VideoParams(VideoSettings):
+    topic: str = Field(min_length=8, max_length=400)
 
 
 class GoToParams(_Params):

@@ -93,3 +93,64 @@ async def test_readiness_uses_claudehub_for_image_catalogue_and_openrouter_only_
     assert all(method=='GET' for _,method,_ in seen) and len(seen)==3
     assert [who for who,_,url in seen if 'models' in url and who=='router']==['router'] and not any('vision' in url for _,_,url in seen)
     assert not any('/images' in url for _,_,url in seen)
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_uses_claudehub_exact_model_and_portrait_size():
+    from app.content.whiteboard.runtime import GPT_IMAGE_MODEL
+    seen = []
+    def handler(req):
+        seen.append(req)
+        assert str(req.url) == 'https://api.claudehub.fun/v1/images/generations'
+        assert req.headers['authorization'] == 'Bearer test-hub-key'
+        body = json.loads(req.content)
+        assert body['model'] == GPT_IMAGE_MODEL
+        assert body['size'] == '1008x1792'
+        assert body['n'] == 1
+        image = Image.new('RGB', (1008,1792), '#123456')
+        buf = io.BytesIO()
+        image.save(buf,format='PNG')
+        return httpx.Response(200,json={'data':[{'b64_json':base64.b64encode(buf.getvalue()).decode()}]})
+    async with httpx.AsyncClient(base_url='https://api.claudehub.fun/v1/',transport=httpx.MockTransport(handler)) as c:
+        provider = ClaudeHubGeminiImageProvider(api_key='test-hub-key',base_url='https://api.claudehub.fun/v1',model=GPT_IMAGE_MODEL,client=c)
+        output = await provider.generate(scene(),request())
+    assert len(seen) == 1
+    with Image.open(io.BytesIO(output)) as image:
+        assert image.size == (1008,1792)
+
+
+@pytest.mark.asyncio
+async def test_gpt_image_missing_from_claudehub_is_not_replaced(environment):
+    from app.content.whiteboard.runtime import GPT_IMAGE_MODEL
+    _, settings, _, _ = environment
+    models, voice = generation_profile(settings,'gemini_ru',GPT_IMAGE_MODEL)
+    scoped = scoped_settings(settings,models,voice)
+    seen = []
+    def hub(req):
+        seen.append(req)
+        return httpx.Response(200,json={'data':[{'id':'gemini-3.1-flash-image'},{'id':models.regions}]})
+    async with httpx.AsyncClient(base_url='https://api.claudehub.fun/v1/',transport=httpx.MockTransport(hub)) as h:
+        with pytest.raises(ReadinessError) as exc:
+            await preflight(scoped,models,voice,claudehub_client=h)
+    assert exc.value.code == 'claudehub_image_unavailable'
+    assert len(seen) == 1 and seen[0].method == 'GET'
+
+
+def test_gpt_image_is_persisted_and_preserved_for_redraw(environment):
+    from app.content.whiteboard.runtime import GPT_IMAGE_MODEL, repair_image_model
+    from uuid import UUID
+    factory,settings,product,_=environment
+    with client() as browser:
+        response = browser.post(f'/products/{product}/whiteboard/jobs',json={
+            'topic':'Как работает система записи клиентов','image_model':GPT_IMAGE_MODEL})
+        assert response.status_code == 201
+        state=response.json()
+        assert state['models']['image'] == GPT_IMAGE_MODEL
+        assert state['image_provider'] == 'claudehub'
+        with factory() as db:
+            _,_,_,payload=records(db,owner_task(db,product,UUID(state['task_id'])))
+            assert repair_image_model(payload.models) == GPT_IMAGE_MODEL
+            store=CheckpointStore(settings.products_root/'test-build'/state['task_id'],payload.request,
+                models=payload.models.model_dump(),image_provider='claudehub')
+            pipeline=build_pipeline(scoped_settings(settings,payload.models,payload.request.voice),payload,store)
+            assert pipeline.images.model == GPT_IMAGE_MODEL

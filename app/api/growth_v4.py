@@ -108,6 +108,44 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           <span>Площадка</span>
           <select id="sg-create-platform" name="platform" form="dp-form" aria-label="Площадка"></select>
         </label>
+        <details id="sg-create-video-settings" open hidden>
+          <summary id="sg-create-video-grip" class="sg-create-video-grip"><span>Настройки видео</span><small id="sg-create-video-summary"></small></summary>
+          <div class="sg-create-video-fields">
+          <label class="sg-create-setting"><span>Длительность</span>
+            <select id="sg-create-video-length" name="video_length" form="dp-form">
+              <option value="30">30 секунд · 3 сцены</option><option value="60">60 секунд · 6 сцен</option>
+            </select>
+          </label>
+          <label class="sg-create-setting"><span>Модель рисунков</span>
+            <select id="sg-create-video-image" form="dp-form">
+              <option value="gemini-3.1-flash-image">Gemini 3.1 Flash Image · ClaudeHub</option>
+              <option value="gpt-image-2.5-sunburst">GPT Image 2.5 · ClaudeHub</option>
+            </select>
+          </label>
+          <label class="sg-create-setting"><span>Модель озвучки</span>
+            <select id="sg-create-video-profile" name="video_profile" form="dp-form">
+              <option value="gemini_ru">Grok Voice TTS · Eve</option>
+              <option value="configured">Модель и голос из настроек сервера</option>
+            </select>
+          </label>
+          <details class="sg-create-advanced">
+            <summary>Дополнительные настройки видео</summary>
+            <label class="sg-create-setting"><span>Проверка рисунков</span>
+              <select id="sg-create-video-review"><option value="off">Без критика</option><option value="once">Один проход критика</option></select>
+            </label>
+            <label class="sg-create-setting"><span>Научная проверка</span>
+              <select id="sg-create-video-science"><option value="auto">Автоматически по теме</option><option value="scientific">Обязательная</option><option value="general">Обычный сюжет</option></select>
+            </label>
+            <label class="sg-create-setting"><span>Лимит API-вызовов</span>
+              <select id="sg-create-video-budget"><option value="auto">Минимальный</option><option value="robust">До 5 дополнительных</option><option value="19">19</option><option value="25">25</option><option value="34">34</option><option value="45">45</option></select>
+            </label>
+            <label class="sg-create-setting"><span>Призыв в конце</span><input id="sg-create-video-cta" maxlength="200" placeholder="Подписка и лайк — по умолчанию"></label>
+            <label class="sg-create-setting"><span>Готовый сценарий</span><textarea id="sg-create-video-script" maxlength="12000" rows="3"></textarea></label>
+            <label class="sg-create-setting"><span>Дополнительная информация</span><textarea id="sg-create-video-notes" maxlength="6000" rows="2"></textarea></label>
+            <label class="sg-create-setting"><span>Материалы для проверки фактов</span><textarea id="sg-create-video-references" maxlength="6000" rows="2"></textarea></label>
+          </details>
+          </div>
+        </details>
         <label class="sg-create-setting" id="sg-create-count-row" hidden>
           <span>Количество экранов Stories</span>
           <select id="sg-create-count" name="frame_count" form="dp-form" aria-label="Количество экранов">
@@ -223,14 +261,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           data-voice-preview-url="/studio/voice/preview" data-voice-max="{int(voice_max)}"
           data-voice-project="{html.escape(voice_project,quote=True)}"
           aria-label="Создание через диспетчера">
-          <div class="sg-create-history" id="sg-create-history" aria-label="История сообщений">
-            <button type="button" class="sg-create-history-close" id="sg-create-history-close"
-              aria-label="Свернуть историю сообщений" aria-controls="dp-feed" aria-expanded="true">
-              <span class="sg-create-history-grip" aria-hidden="true"></span>
-            </button>
-            <div class="dp-feed" id="dp-feed" role="log" aria-live="polite"
-              aria-label="Ответы диспетчера"></div>
-          </div>
           <div class="command-dock">
             <div class="voice-hold-overlay vg" id="dp-voice-overlay" aria-hidden="true">
               <div class="vg__glow"></div>
@@ -245,10 +275,6 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <div class="command-topicbar">
               <button class="dp-new" id="dp-new" type="button">{icon("plus")}<span>Новая тема</span></button>
             </div>
-            <button type="button" class="sg-create-history-open" id="sg-create-history-open"
-              aria-label="Развернуть историю сообщений" aria-controls="dp-feed" aria-expanded="false">
-              <span class="sg-create-history-grip" aria-hidden="true"></span>
-            </button>
             <form class="dp-form command-bar" id="dp-form" autocomplete="off">
               <label class="dp-sr" for="dp-input">Напишите или скажите, что создать</label>
               <textarea id="dp-input" name="topic" class="dp-input" rows="2"
@@ -274,6 +300,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             </form>
             <div class="command-tools"><div class="command-hints" id="dp-chips"
               aria-label="Подсказки"></div></div>
+          </div>
+          <div class="sg-create-result" id="sg-create-result" aria-label="Текущее задание">
+            <div class="dp-feed" id="dp-feed" aria-live="polite" aria-label="Ответ по текущему заданию"></div>
           </div>
         </section>
           </div>
@@ -571,8 +600,8 @@ def render_v4(page, request, pid, switch):
     if home:
         extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-start-fast-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=create-topic-race-a11y-20261123"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=create-topic-race-a11y-20261123"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=create-video-gpt-image-20261124"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=create-video-gpt-image-20261124"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
@@ -616,7 +645,7 @@ def render_v4(page, request, pid, switch):
     extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=3"></script>'
     template = template.replace('</head>', (
-        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=30-single-vk-model">'
+        '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=31-create-video-controls">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
         '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=20-material-post-preview">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'

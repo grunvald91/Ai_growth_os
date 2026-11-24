@@ -464,27 +464,36 @@ def main():
                 page.locator('[data-sg-format="post"]').click()
                 expect(page.locator('#sg-create-topic-label')).to_have_text('3. О чём материал?')
                 expect(page.locator('#sg-create-primary-platform')).to_be_visible()
-                # Use an isolated DOM message; no AI task or real publication.
-                page.evaluate("""() => {
-                  const feed=document.querySelector('#dp-feed');
-                  const message=document.createElement('div');
-                  message.className='dp-msg bot';
-                  message.textContent='Проверка сворачивания истории';
-                  feed.appendChild(message);
-                  document.querySelector('.sg-create-dispatch').classList.add('has-feed');
+                expect(page.locator('#sg-create-history')).to_have_count(0)
+                page.locator('[data-sg-format="whiteboard"]').click()
+                settings = page.locator('#sg-create-video-settings')
+                grip = page.locator('#sg-create-video-grip')
+                expect(settings).to_have_attribute('open', '')
+                page.locator('#sg-create-video-length').select_option('60')
+                expect(page.locator('#sg-create-video-image')).to_have_value('gemini-3.1-flash-image')
+                page.locator('#sg-create-video-image').select_option('gpt-image-2.5-sunburst')
+                expect(grip).to_contain_text('GPT Image')
+                page.locator('#sg-create-video-profile').select_option('configured')
+                expect(grip).to_contain_text('60 с')
+                grip.click()
+                expect(settings).not_to_have_attribute('open', '')
+                expect(grip).to_contain_text('Озвучка сервера')
+                grip.evaluate("""handle => {
+                  handle.dispatchEvent(new PointerEvent('pointerdown',{
+                    bubbles:true,pointerType:'touch',pointerId:91,clientY:100}));
+                  handle.dispatchEvent(new PointerEvent('pointerup',{
+                    bubbles:true,pointerType:'touch',pointerId:91,clientY:138}));
                 }""")
-                expect(page.locator('#sg-create-history')).to_be_visible()
-                page.locator('[data-sg-format="post"]').click()
-                expect(page.locator('#sg-create-history')).to_be_visible()
-                page.locator('#dp-input').focus()
-                expect(page.locator('#sg-create-history')).to_be_visible()
-                page.locator('#sg-create-history-close').click()
-                expect(page.locator('#sg-create-history')).to_be_hidden()
-                expect(page.locator('#sg-create-history-open')).to_be_visible()
-                page.locator('#sg-create-history-open').click()
-                expect(page.locator('#sg-create-history')).to_be_visible()
-                # The server response event must reveal and focus the latest
-                # confirmation, rather than a stale earlier card. No API writes.
+                expect(settings).to_have_attribute('open', '')
+                expect(page.locator('#sg-create-video-length')).to_have_value('60')
+                grip.evaluate("""handle => {
+                  handle.dispatchEvent(new PointerEvent('pointerdown',{
+                    bubbles:true,pointerType:'touch',pointerId:92,clientY:138}));
+                  handle.dispatchEvent(new PointerEvent('pointerup',{
+                    bubbles:true,pointerType:'touch',pointerId:92,clientY:100}));
+                }""")
+                expect(settings).not_to_have_attribute('open', '')
+                # Current confirmation stays inline and focuses without history.
                 page.evaluate("""() => {
                   const root=document.querySelector('.sg-create-dispatch');
                   const msg=document.createElement('div');
@@ -496,30 +505,11 @@ def main():
                   confirm.append(actions);
                   msg.append(confirm);
                   document.getElementById('dp-feed').appendChild(msg);
-                  root.dispatchEvent(new CustomEvent('sg:dispatcher:response', {
-                    detail:{source:'create',hasConfirmation:true}
-                  }));
+                  root.classList.add('has-feed');
+                  root.dispatchEvent(new CustomEvent('sg:dispatcher:response'));
                 }""")
                 expect(page.locator('.dp-confirm:last-child')).to_be_focused(timeout=3500)
-                assert page.locator('.dp-confirm:last-child').is_visible()
-                # Pointer-swipe tests the same logic used by real touch devices.
-                page.evaluate("""() => {
-                  const handle=document.querySelector('#sg-create-history-close');
-                  handle.dispatchEvent(new PointerEvent('pointerdown',{
-                    bubbles:true,pointerType:'touch',pointerId:91,clientY:100}));
-                  handle.dispatchEvent(new PointerEvent('pointerup',{
-                    bubbles:true,pointerType:'touch',pointerId:91,clientY:138}));
-                }""")
-                expect(page.locator('#sg-create-history')).to_be_hidden()
-                page.evaluate("""() => {
-                  const handle=document.querySelector('#sg-create-history-open');
-                  handle.dispatchEvent(new PointerEvent('pointerdown',{
-                    bubbles:true,pointerType:'touch',pointerId:92,clientY:138}));
-                  handle.dispatchEvent(new PointerEvent('pointerup',{
-                    bubbles:true,pointerType:'touch',pointerId:92,clientY:100}));
-                }""")
-                expect(page.locator('#sg-create-history')).to_be_visible()
-                assert 'Проверка сворачивания истории' in page.locator('#dp-feed').inner_text()
+                expect(page.locator('#sg-create-result')).to_be_visible()
                 page.screenshot(path='/tmp/growth-v4-create.png',full_page=True)
                 # The v4 page uses the dispatcher composer; the legacy POST path
                 # is exercised via its own real classic form rather than a selector

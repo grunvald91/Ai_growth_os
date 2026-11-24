@@ -15,7 +15,7 @@ from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Prod
 from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
 from .science import requires_science_review
-from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels, regions_on_claudehub
+from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels, regions_on_claudehub, CLAUDEHUB_IMAGE_MODELS
 from pydantic import Field, model_validator
 
 AGENT = 'whiteboard_renderer'
@@ -58,8 +58,8 @@ class JobRequest(Contract):
         if (self.request.scenes > 3 and not self.repair_regenerate_images
                 and self.max_api_calls < required_calls(self.request, visual_review=self.visual_review)):
             raise ValueError('The one-minute video needs more calls than this limit')
-        if self.image_provider == 'claudehub' and self.models.image != 'gemini-3.1-flash-image':
-            raise ValueError('ClaudeHub image generation must use Gemini 3.1 Flash Image')
+        if self.image_provider == 'claudehub' and self.models.image not in CLAUDEHUB_IMAGE_MODELS:
+            raise ValueError('ClaudeHub image generation must use a supported image model')
         if self.visual_repair_from is not None:
             if not self.visual_review or not self.repair_source_digest or not self.repair_manifest_sha256:
                 raise ValueError('A visual repair must bind its original approved request and media manifest')

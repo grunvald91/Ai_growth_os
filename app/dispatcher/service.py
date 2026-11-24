@@ -462,6 +462,9 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         decision = DispatcherDecision(
             intent="execute", capability=selected_capability,
             params=topic_params, confidence=1.0)
+        if creation.format == "whiteboard" and creation.video is not None:
+            # Already validated owner form values, not model-generated strings.
+            decision.params.update(creation.video.model_dump(exclude_none=True))
     else:
         quick = quick_capability(text)
         if quick is not None:
