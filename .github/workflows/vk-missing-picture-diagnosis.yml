@@ -1,0 +1,120 @@
+name: VK missing picture read-only diagnosis
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/vk-missing-picture-diagnosis.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vk-picture-prod-diagnosis
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    env:
+      SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
+      HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
+      HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pinned production host identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$SSHPASS" || { echo "::error::Missing SERVER_SSH_PASSWORD"; exit 1; }
+          sudo apt-get install -y -qq sshpass >/dev/null
+          install -m 700 -d ~/.ssh
+          ssh-keyscan -T 15 -t ed25519,ecdsa,rsa "$HOST" 2>/dev/null > /tmp/whiteboard-host-keys
+          while IFS= read -r line; do
+            printf '%s\n' "$line" > /tmp/whiteboard-one-key
+            if ssh-keygen -lf /tmp/whiteboard-one-key 2>/dev/null | grep -q "SHA256:$HOST_FP "; then
+              printf '%s\n' "$line" >> ~/.ssh/known_hosts
+            fi
+          done < /tmp/whiteboard-host-keys
+          test -s ~/.ssh/known_hosts || { echo "::error::Pinned host identity mismatch"; exit 1; }
+      - name: Inspect only the affected VK post (no paid calls or writes)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for container in ai-growth-os-api-1 ai-growth-os-worker-1; do
+            echo "== $container"
+            sshpass -e ssh -o StrictHostKeyChecking=yes -o ConnectTimeout=20 "root@$HOST" "docker exec -i $container python -" <<'PY'
+          import json
+          import re
+          from sqlalchemy import select
+          from app.core.config import get_settings
+          from app.db.session import SessionLocal
+          from app.models.domain import Artifact, Task, AgentRun
+          from app.content.brand_story_pipeline import verified_gallery_image
+          from app.content.creative_images import image_folder
+          settings = get_settings()
+          def safe_type(value):
+              return value if isinstance(value, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,79}", value) else None
+          def enum(value):
+              return getattr(value, "value", value)
+          def info(a):
+              try:
+                  return json.loads(a.content)
+              except (ValueError, TypeError):
+                  return {}
+          print(json.dumps({"release": settings.release_sha, "gemini_key_configured": bool(settings.xai_api_key),
+                            "openai_key_configured": bool(settings.openai_api_key)}, default=str))
+          with SessionLocal() as db:
+              rows = list(db.scalars(select(Artifact).where(
+                  Artifact.kind == "channel_text",
+                  Artifact.title == "Что важно уточнить перед выбором ServGo?"
+              ).order_by(Artifact.created_at.desc()).limit(5)))
+              print("matching_posts", len(rows))
+              for post in rows:
+                  meta = info(post)
+                  if meta.get("channel") != "vk":
+                      continue
+                  task = db.get(Task, post.task_id) if post.task_id else None
+                  records = list(db.scalars(select(Artifact).where(
+                      Artifact.product_id == post.product_id, Artifact.task_id == post.task_id,
+                      Artifact.kind.in_(["generated_image", "vk_post_image_intent", "vk_image_critique", "vk_image_critique_intent"])
+                  ))) if task else []
+                  assets = []
+                  for item in records:
+                      data = info(item)
+                      if item.kind == "generated_image":
+                          try:
+                              verified_gallery_image(db, settings.products_root, post.product_id, post.task_id, item)
+                              valid = True
+                              failure = None
+                          except Exception as exc:
+                              valid = False
+                              failure = type(exc).__name__
+                          assets.append({"linked": str(item.id) == str(meta.get("image_artifact_id")),
+                                         "verified_file": valid, "verification_error": failure})
+                  directory = image_folder(settings.products_root, post.product_id, post.task_id) if task else None
+                  runs = list(db.scalars(select(AgentRun).where(AgentRun.task_id == post.task_id))) if task else []
+                  codes = []
+                  for run in runs:
+                      err = getattr(run, "error", None) or ""
+                      match = re.search(r"quick_post_failed:([A-Za-z_][A-Za-z0-9_]*):", err)
+                      if match:
+                          codes.append(match.group(1))
+                  print(json.dumps({"created": str(post.created_at), "status": enum(post.status),
+                      "task_status": enum(task.status) if task else None,
+                      "image_state": meta.get("image_state") if meta.get("image_state") in
+                      {"none","pending","failed","ready","blocked","awaiting_review","review_unavailable","regenerating","stale"} else "unknown",
+                      "image_model": meta.get("image_model") if meta.get("image_model") in {"none","auto","gemini","openai"} else "unknown",
+                      "image_error_code": safe_type(meta.get("image_error_code")),
+                      "image_review_error_code": safe_type(meta.get("image_review_error_code")),
+                      "run_error_types": codes,
+                      "generation_intents": [info(i).get("state") == "completed" for i in records if i.kind == "vk_post_image_intent"],
+                      "critic_intents": sum(i.kind == "vk_image_critique_intent" for i in records),
+                      "critic_results": sum(i.kind == "vk_image_critique" for i in records),
+                      "initial_png_exists": bool(directory and (directory / "frame-01.png").is_file()),
+                      "assets": assets}, ensure_ascii=False, default=str))
+          PY
+          done
