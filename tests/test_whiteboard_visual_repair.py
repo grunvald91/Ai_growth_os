@@ -11,7 +11,7 @@ from app.api import whiteboard as api
 
 from app.content.whiteboard.jobs import records, owner_task, job_directory, resume_job, digest
 from app.content.whiteboard.repair import queue_visual_repair
-from app.content.whiteboard.runtime import ReadinessError
+from app.content.whiteboard.runtime import ReadinessError, DEFAULT_IMAGE_MODEL, GPT_IMAGE_MODEL
 from app.content.whiteboard.worker import run_whiteboard_once
 from app.models.domain import Task,TaskStatus
 from test_whiteboard_jobs import environment,new_job,approve,ready,fake_factory,client
@@ -26,13 +26,14 @@ async def test_visual_only_repair_generates_new_images_without_story_or_tts_and_
     original=job_directory(settings.products_root,product,source_id)/'stages'
     original_hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in original.glob('*speech.data')}
     with factory() as db:
-        repair_id=queue_visual_repair(db,settings,product,source_id).id
+        repair_id=queue_visual_repair(db,settings,product,source_id,image_model=GPT_IMAGE_MODEL).id
         _,state,approval,payload=records(db,owner_task(db,product,repair_id))
         assert payload.visual_repair_from==source_id and payload.inherited_calls==13
         assert payload.repair_regenerate_images and payload.max_api_calls==13
         assert json.loads(state.content)['calls']==0 and approval.status=='pending'
         assert json.loads(state.content)['attempts_started']==0
-        assert queue_visual_repair(db,settings,product,source_id).id==repair_id
+        assert payload.models.image == GPT_IMAGE_MODEL
+        assert queue_visual_repair(db,settings,product,source_id,image_model=GPT_IMAGE_MODEL).id==repair_id
     with client() as browser:
         page=browser.get(f'/studio/products/{product}/whiteboard/{repair_id}')
         assert 'Новая озвучка запрещена' in page.text and 'В исходном задании было 13 API-вызовов' in page.text
@@ -47,6 +48,7 @@ async def test_visual_only_repair_generates_new_images_without_story_or_tts_and_
         image.save(output, format='PNG')
         return output.getvalue()
     def build(settings,payload,store):
+        assert payload.models.image == GPT_IMAGE_MODEL
         p=fake_factory(settings,payload,store);p.visual_review=True;p.max_api_calls=payload.max_api_calls
         initial=p.images
         class Images:
@@ -277,3 +279,43 @@ async def test_source_with_approved_extra_calls_can_still_regenerate_images(envi
         assert payload.max_api_calls == 13
         assert approval.status == 'pending'
         assert json.loads(repair_state.content)['calls'] == 0
+
+
+@pytest.mark.asyncio
+async def test_repair_model_selection_replaces_only_unapproved_draft(environment):
+    factory,settings,product,_=environment
+    source=new_job(environment,maximum=25);approve(environment,source)
+    await run_whiteboard_once(factory,settings,factory=fake_factory,readiness=ready)
+    base=f'/studio/products/{product}/whiteboard/{source}'
+    with client() as browser:
+        page=browser.get(base)
+        assert 'name="image_model"' in page.text
+        assert DEFAULT_IMAGE_MODEL in page.text and GPT_IMAGE_MODEL in page.text
+        old=browser.post(base+'/repair',data={'image_model':DEFAULT_IMAGE_MODEL},follow_redirects=False)
+        assert old.status_code==303
+        new=browser.post(base+'/repair',data={'image_model':GPT_IMAGE_MODEL},follow_redirects=False)
+        assert new.status_code==303 and old.headers['location']!=new.headers['location']
+        repeat=browser.post(base+'/repair',data={'image_model':GPT_IMAGE_MODEL},follow_redirects=False)
+        assert repeat.headers['location']==new.headers['location']
+        assert GPT_IMAGE_MODEL in browser.get(new.headers['location']).text
+        assert browser.post(base+'/repair',data={'image_model':'unknown'}).status_code==409
+    from uuid import UUID
+    old_id=UUID(old.headers['location'].rsplit('/',1)[-1])
+    new_id=UUID(new.headers['location'].rsplit('/',1)[-1])
+    with factory() as db:
+        prior=owner_task(db,product,old_id)
+        assert prior.status==TaskStatus.CANCELLED
+        assert records(db,prior)[2].status=='rejected'
+        task=owner_task(db,product,new_id)
+        _,state,approval,payload=records(db,task)
+        assert task.status==TaskStatus.WAITING_APPROVAL
+        assert payload.models.image==GPT_IMAGE_MODEL and approval.status=='pending'
+        assert json.loads(state.content)['calls']==0
+    approve(environment,new_id)
+    with client() as browser:
+        busy=browser.post(base+'/repair',data={'image_model':DEFAULT_IMAGE_MODEL})
+        assert busy.status_code==409
+    with factory() as db:
+        task=owner_task(db,product,new_id)
+        assert task.status==TaskStatus.QUEUED
+        assert records(db,task)[3].models.image==GPT_IMAGE_MODEL
