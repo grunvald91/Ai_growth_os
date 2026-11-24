@@ -990,6 +990,9 @@
 
   function notify(text) {
     var note = el('div', 'dp-msg bot dp-error', text);
+    if (root.classList.contains('sg-create-dispatch')) {
+      Array.from(feed.querySelectorAll('.dp-error')).forEach(function (old) { old.remove(); });
+    }
     feed.appendChild(note);
     syncConversationLayout();
     toBottom();
