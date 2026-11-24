@@ -2238,7 +2238,8 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
         linked_ids = tuple(link.servgo_business_id for link in links)
         business_product_ids = {str(link.servgo_business_id): str(link.product_id) for link in links}
     response = HTMLResponse(product_selector(
-        products, can_add=canonical_user is not None or (allowed is None and canonical_user is None),
+        products, can_add=(canonical_user is not None and getattr(request.state, "studio_servgo_user_id", None) == canonical_user)
+        or (allowed is None and canonical_user is None),
         can_link=bool(request.cookies.get(SSO_COOKIE)) and canonical_user is None,
         unified_user_id=canonical_user, linked_business_ids=linked_ids,
         business_product_ids=business_product_ids,

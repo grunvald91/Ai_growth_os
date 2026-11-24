@@ -247,7 +247,8 @@ def organization_choices(request: Request, db: Session, settings: Settings, prod
                     "platform_product": {"id": str(platform.id), "name": platform.name} if platform else None}
     return JSONResponse({
         "items": [{"id": str(item.id), "name": item.name} for item in products],
-        "can_add": user_id is not None or permitted is None,
+        "can_add": ((user_id is not None and getattr(request.state, "studio_servgo_user_id", None) == user_id)
+                    or (user_id is None and permitted is None)),
         **metadata,
     }, headers={"Cache-Control": "private, no-store"})
 
