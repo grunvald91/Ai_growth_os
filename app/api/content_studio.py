@@ -1751,7 +1751,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                         if state == "ready" and not image_approval_valid:
                             review_html += ('<p class="sg-warning" role="alert">'
                                             'Картинка сохранена, но согласование этой версии не подтверждено. '
-                                            'Утверждение недоступно.</p>')
+                                            'Публикацию нужно проверить. Утверждение недоступно.</p>')
                         elif state == "ready":
                             verdict = ('Изображение утверждено владельцем после замечаний критика.'
                                        if value.get("image_review_state") == "owner_approved"
@@ -1779,7 +1779,7 @@ def material_detail_page(db: Session, product: Product, record: Artifact, *, roo
                                 + ' Публикация пока недоступна.</p>')
                 else:
                     reason = {
-                        "stale": "Текст изменён; нужна новая иллюстрация.",
+                        "stale": "Текст изменён; прежняя иллюстрация больше не подходит.",
                         "regenerating": "Изображение создаётся.",
                         "pending": "Изображение ещё не готово.",
                         "failed": "Изображение не создано. Текст сохранён.",
