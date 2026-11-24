@@ -19,6 +19,7 @@
   const summary=document.getElementById('sg-create-review-summary');
   const formatOptions=document.getElementById('sg-create-format-options');
   const formatOptionsSlot=document.getElementById('sg-create-format-options-slot');
+  const videoSettings=document.getElementById('sg-create-video-settings');
   const extrasSlot=document.getElementById('sg-create-extra-settings-slot');
   const advanced=document.getElementById('sg-create-advanced');
   // The image generation/critic cost note must accompany the visible VK option.
@@ -28,7 +29,7 @@
   // All format-affecting controls precede the topic and submit button on
   // narrow screens. Optional wishes stay in the same form, before submit.
   if(formatOptionsSlot){
-    [countRow,modelRow,aspectRow,vkRatioRow,storyRatio].forEach(row=>{
+    [videoSettings,countRow,modelRow,aspectRow,vkRatioRow,storyRatio].forEach(row=>{
       if(row)formatOptionsSlot.appendChild(row);
     });
   }
@@ -139,7 +140,7 @@
   }
   function updateFormatOptionVisibility(){
     const key=root.getAttribute('data-create-format');
-    const show=key==='story' || key==='static_image' ||
+    const show=key==='whiteboard' || key==='story' || key==='static_image' ||
       (key==='post' && platform.value==='vk' && imageEnabled());
     if(formatOptions)formatOptions.hidden=!show;
   }
@@ -166,6 +167,7 @@
     if(platformShell)platformShell.hidden=platformRow.hidden;
     const topicLabel=document.getElementById('sg-create-topic-label');
     if(topicLabel)topicLabel.textContent=platformRow.hidden ? '2. О чём материал?' : '3. О чём материал?';
+    if(videoSettings)videoSettings.hidden=key!=='whiteboard';
     countRow.hidden=key!=='story';
     modelRow.hidden=key!=='story' && key!=='static_image';
     aspectRow.hidden=key!=='static_image';
@@ -192,11 +194,7 @@
       ? 'Готовое видео MP4. Платный запуск — только после подтверждения.'
       : '';
     if(advanced) advanced.hidden=key==='whiteboard';
-    if(key==='whiteboard'){
-      const link=document.createElement('a');link.href=base+'/whiteboard';
-      link.textContent='Подробные настройки видео →';
-      context.append(document.createTextNode(' '),link);
-    }
+
   }
   screen.querySelectorAll('[data-sg-format]').forEach(button=>{
     button.addEventListener('click',()=>chooseFormat(button.dataset.sgFormat));
@@ -259,88 +257,18 @@
     }
   });
 
-  // The Create overlay can be collapsed without hiding the input or losing messages.
-  // Pointer gestures are scoped to the handles, so they do not compete with
-  // feed scrolling or the hold-to-record voice gesture in the composer.
-  const history=document.getElementById('sg-create-history');
-  const historyClose=document.getElementById('sg-create-history-close');
-  const historyOpen=document.getElementById('sg-create-history-open');
-  if(history && historyClose && historyOpen){
-    function showHistory(open,focusHandle=true){
-      root.classList.toggle('sg-history-collapsed',!open);
-      history.setAttribute('aria-hidden',String(!open));
-      historyClose.setAttribute('aria-expanded',String(open));
-      historyOpen.setAttribute('aria-expanded',String(open));
-      if(focusHandle)(open ? historyClose : historyOpen).focus({preventScroll:true});
-    }
-    // Inline history is not a popover: clicking a form field must not collapse it.
-    function attachGrip(button,open,swipeDirection){
-      let gesture=null;
-      let suppressClickUntil=0;
-      function resetPosition(){
-        const reduceMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        button.style.transition=reduceMotion?'none':'transform 160ms ease-out, opacity 160ms ease-out';
-        button.style.transform='';
-        button.style.opacity='';
-      }
-      button.addEventListener('pointerdown',event=>{
-        if((event.pointerType!=='touch' && event.pointerType!=='pen') || event.button!==0)return;
-        gesture={id:event.pointerId,startY:event.clientY,lastY:event.clientY,
-          lastTime:event.timeStamp,velocity:0,moved:false};
-        button.style.transition='none';
-        // Track only the handle, never intercept scrolling in the result or editor.
-        try{button.setPointerCapture(event.pointerId);}catch(_){/* synthetic event */}
-      });
-      button.addEventListener('pointermove',event=>{
-        if(!gesture || event.pointerId!==gesture.id)return;
-        const elapsed=Math.max(1,event.timeStamp-gesture.lastTime);
-        gesture.velocity=(event.clientY-gesture.lastY)/elapsed;
-        gesture.lastY=event.clientY;
-        gesture.lastTime=event.timeStamp;
-        const delta=event.clientY-gesture.startY;
-        if(Math.abs(delta)>6)gesture.moved=true;
-        // The handle follows the pointer directly; opposing movement resists.
-        const tracked=swipeDirection*delta<0?delta*.2:delta;
-        button.style.transform='translate3d(0,'+Math.max(-120,Math.min(120,tracked))+'px,0)';
-      });
-      button.addEventListener('pointerup',event=>{
-        if(!gesture || event.pointerId!==gesture.id)return;
-        const displacement=event.clientY-gesture.startY;
-        const velocity=gesture.velocity;
-        const dragged=gesture.moved || Math.abs(displacement)>6;
-        const shouldToggle=swipeDirection*displacement>24 ||
-          (swipeDirection*displacement>8 && swipeDirection*velocity>.65);
-        gesture=null;
-        resetPosition();
-        if(dragged)suppressClickUntil=performance.now()+350;
-        if(shouldToggle)showHistory(open);
-      });
-      button.addEventListener('pointercancel',()=>{gesture=null;resetPosition();});
-      button.addEventListener('click',()=>{
-        if(performance.now()<suppressClickUntil)return;
-        showHistory(open);
-      });
-    }
-    attachGrip(historyClose,false,1); // pull down
-    attachGrip(historyOpen,true,-1);  // pull up
-    // Voice and typed requests reopen the conversation where the reply appears.
-    // Keep focus on the composer to avoid Android keyboard/focus jumps.
-    root.addEventListener('sg:dispatcher:outgoing',()=>showHistory(true,false));
-    root.addEventListener('sg:dispatcher:response',event=>{
-      // Wait until the server response is rendered, not the send click. This
-      // also reveals a confirmation that arrives after the mobile keyboard hides.
-      showHistory(true,false);
-      requestAnimationFrame(()=>{
-        const latest=[...history.querySelectorAll('.dp-msg')].pop();
-        // Never jump to an older unrelated confirmation card.
-        const pending=latest && latest.querySelector('.dp-confirm-actions');
-        const target=(pending && pending.closest('.dp-confirm')) || latest || history;
-        target.setAttribute('tabindex','-1');
-        target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
-        if(pending)target.focus({preventScroll:true});
-      });
+  // The current confirmation is inline, never a swipe-open conversation.
+  const result=document.getElementById('sg-create-result');
+  root.addEventListener('sg:dispatcher:response',()=>{
+    requestAnimationFrame(()=>{
+      const target=result.querySelector('.dp-confirm-actions')?.closest('.dp-confirm') ||
+        result.querySelector('.dp-msg');
+      if(!target)return;
+      target.setAttribute('tabindex','-1');
+      target.scrollIntoView({block:'center',inline:'nearest',behavior:'auto'});
+      if(target.querySelector('.dp-confirm-actions'))target.focus({preventScroll:true});
     });
-  }
+  });
   // Only the lower dispatcher composer can submit a request.
   // Settings are read at send time, including immediately after voice transcription.
 })();
