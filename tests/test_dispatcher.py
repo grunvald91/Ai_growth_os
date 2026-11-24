@@ -1295,6 +1295,7 @@ async def test_create_video_settings_reach_saved_paid_draft(db, product):
         client_key="whiteboard-create-settings", creation=CreateHints(
             format="whiteboard", topic=topic, video={
                 "length": "60", "profile": "gemini_ru", "visual_review": True,
+                "image_model": "gpt-image-2.5-sunburst",
                 "max_api_calls": 45, "science_mode": "scientific",
                 "call_to_action": "Подпишитесь на канал",
                 "source_script": "Исходный сценарий",
@@ -1311,7 +1312,7 @@ async def test_create_video_settings_reach_saved_paid_draft(db, product):
     assert saved["request"]["science_mode"] == "scientific"
     assert saved["max_api_calls"] == 45
     assert saved["visual_review_enabled"] is True
-    assert saved["models"]["image"] == "gemini-3.1-flash-image"
+    assert saved["models"]["image"] == "gpt-image-2.5-sunburst"
     assert saved["models"]["speech"] == "x-ai/grok-voice-tts-1.0"
     assert card["paid"] is True
     assert any("6 сцен" in line for line in card["details"])
