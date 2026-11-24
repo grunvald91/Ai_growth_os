@@ -1282,3 +1282,48 @@ async def test_illustrated_post_explicit_landscape_overrides_platform_default(db
     assert card["editable"]["format"] == "static_image"
     assert card["editable"]["platform"] == "vk"
     assert card["editable"]["aspect_ratio"] == "16:9"
+
+
+@pytest.mark.asyncio
+async def test_create_video_settings_reach_saved_paid_draft(db, product):
+    from app.dispatcher.editable import CreateHints
+    from app.api.whiteboard import job_state
+
+    topic = "Как CRM помогает не потерять заявки"
+    result = await service.handle_message(
+        db, context(db, product), None, text=topic,
+        client_key="whiteboard-create-settings", creation=CreateHints(
+            format="whiteboard", topic=topic, video={
+                "length": "60", "profile": "gemini_ru", "visual_review": True,
+                "max_api_calls": 45, "science_mode": "scientific",
+                "call_to_action": "Подпишитесь на канал",
+                "source_script": "Исходный сценарий",
+                "background_notes": "Контекст", "reference_materials": "Источник"}))
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    task = tasks(db, "whiteboard_renderer")[0]
+    assert task.status == TaskStatus.WAITING_APPROVAL
+    saved = job_state(db, product.id, task.id)
+    assert saved["request"]["duration_seconds"] == 60
+    assert saved["request"]["scenes"] == 6
+    assert saved["request"]["source_script"] == "Исходный сценарий"
+    assert saved["request"]["reference_materials"] == "Источник"
+    assert saved["request"]["call_to_action"] == "Подпишитесь на канал"
+    assert saved["request"]["science_mode"] == "scientific"
+    assert saved["max_api_calls"] == 45
+    assert saved["visual_review_enabled"] is True
+    assert saved["models"]["image"] == "gemini-3.1-flash-image"
+    assert saved["models"]["speech"] == "x-ai/grok-voice-tts-1.0"
+    assert card["paid"] is True
+    assert any("6 сцен" in line for line in card["details"])
+    assert any("grok-voice-tts" in line for line in card["details"])
+
+
+def test_video_settings_reject_wrong_format_and_unknown_profile():
+    from app.dispatcher.editable import CreateHints
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CreateHints(format="post", topic="Тема", video={"length": "60"})
+    with pytest.raises(ValidationError):
+        CreateHints(format="whiteboard", topic="Тема для видео",
+                    video={"profile": "unverified"})
