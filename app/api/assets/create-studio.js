@@ -257,6 +257,52 @@
     }
   });
 
+  // A swipe on the settings handle is optional; taps and keyboard retain
+  // native details semantics. Never capture swipes over form controls.
+  const grip=document.getElementById('sg-create-video-grip');
+  const videoSummary=document.getElementById('sg-create-video-summary');
+  const videoLength=document.getElementById('sg-create-video-length');
+  const videoProfile=document.getElementById('sg-create-video-profile');
+  function updateVideoSummary(){
+    videoSummary.textContent=videoLength.value+' с · Gemini · '+
+      (videoProfile.value==='gemini_ru'?'Grok Voice':'Озвучка сервера');
+  }
+  videoLength.addEventListener('change',updateVideoSummary);
+  videoProfile.addEventListener('change',updateVideoSummary);
+  updateVideoSummary();
+  let gesture=null, suppressClickUntil=0;
+  function resetGrip(){
+    grip.style.transition=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'none':'transform 160ms ease-out';
+    grip.style.transform='';
+  }
+  grip.addEventListener('pointerdown',event=>{
+    if((event.pointerType!=='touch' && event.pointerType!=='pen') || event.button!==0)return;
+    gesture={id:event.pointerId,y:event.clientY,lastY:event.clientY,lastTime:event.timeStamp,velocity:0,moved:false};
+    grip.style.transition='none';
+    try{grip.setPointerCapture(event.pointerId);}catch(_){/* synthetic pointer */}
+  });
+  grip.addEventListener('pointermove',event=>{
+    if(!gesture || event.pointerId!==gesture.id)return;
+    gesture.velocity=(event.clientY-gesture.lastY)/Math.max(1,event.timeStamp-gesture.lastTime);
+    gesture.lastY=event.clientY;gesture.lastTime=event.timeStamp;
+    const delta=event.clientY-gesture.y;
+    if(Math.abs(delta)>6)gesture.moved=true;
+    grip.style.transform='translate3d(0,'+Math.max(-36,Math.min(36,delta*.3))+'px,0)';
+  });
+  grip.addEventListener('pointerup',event=>{
+    if(!gesture || event.pointerId!==gesture.id)return;
+    const delta=event.clientY-gesture.y,velocity=gesture.velocity;
+    if(gesture.moved || Math.abs(delta)>6)suppressClickUntil=performance.now()+350;
+    if(Math.abs(delta)>24 || (Math.abs(delta)>8 && Math.abs(velocity)>.65)){
+      videoSettings.open=delta>0;
+    }
+    gesture=null;resetGrip();
+  });
+  grip.addEventListener('pointercancel',()=>{gesture=null;resetGrip();});
+  grip.addEventListener('click',event=>{
+    if(event.detail!==0 && performance.now()<suppressClickUntil)event.preventDefault();
+  });
+
   // The current confirmation is inline, never a swipe-open conversation.
   const result=document.getElementById('sg-create-result');
   root.addEventListener('sg:dispatcher:response',()=>{
