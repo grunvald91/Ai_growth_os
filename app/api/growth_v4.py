@@ -108,7 +108,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           <span>Площадка</span>
           <select id="sg-create-platform" name="platform" form="dp-form" aria-label="Площадка"></select>
         </label>
-        <div id="sg-create-video-settings" hidden>
+        <details id="sg-create-video-settings" open hidden>
+          <summary id="sg-create-video-grip" class="sg-create-video-grip"><span>Настройки видео</span><small id="sg-create-video-summary"></small></summary>
+          <div class="sg-create-video-fields">
           <label class="sg-create-setting"><span>Длительность</span>
             <select id="sg-create-video-length" name="video_length" form="dp-form">
               <option value="30">30 секунд · 3 сцены</option><option value="60">60 секунд · 6 сцен</option>
@@ -141,7 +143,8 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
             <label class="sg-create-setting"><span>Дополнительная информация</span><textarea id="sg-create-video-notes" maxlength="6000" rows="2"></textarea></label>
             <label class="sg-create-setting"><span>Материалы для проверки фактов</span><textarea id="sg-create-video-references" maxlength="6000" rows="2"></textarea></label>
           </details>
-        </div>
+          </div>
+        </details>
         <label class="sg-create-setting" id="sg-create-count-row" hidden>
           <span>Количество экранов Stories</span>
           <select id="sg-create-count" name="frame_count" form="dp-form" aria-label="Количество экранов">
