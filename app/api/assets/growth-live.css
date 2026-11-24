@@ -1412,5 +1412,8 @@ body[data-growth-design="v4"] .sg-create-dispatch .sg-create-result .dp-feed{
   width:100%;min-height:0;max-height:none;overflow:visible;margin:0;padding:0;
   border:0;background:transparent;box-shadow:none;mask-image:none;-webkit-mask-image:none;
 }
-body[data-growth-design="v4"] #sg-create-video-settings:not([hidden]){display:grid;gap:10px;min-width:0}
+body[data-growth-design="v4"] #sg-create-video-settings:not([hidden]){display:block;min-width:0}
+body[data-growth-design="v4"] .sg-create-video-fields{display:grid;gap:10px;min-width:0;padding-top:8px}
+body[data-growth-design="v4"] .sg-create-video-grip{cursor:pointer;touch-action:pan-x;min-height:44px;display:list-item;line-height:1.5;padding:8px 0;font-weight:650}
+body[data-growth-design="v4"] .sg-create-video-grip small{display:block;color:var(--muted);font-size:12px;font-weight:400;padding-left:16px}
 body[data-growth-design="v4"] #sg-create-video-settings select{max-width:100%;min-width:0}
