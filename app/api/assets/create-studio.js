@@ -263,12 +263,14 @@
   const videoSummary=document.getElementById('sg-create-video-summary');
   const videoLength=document.getElementById('sg-create-video-length');
   const videoProfile=document.getElementById('sg-create-video-profile');
+  const videoImage=document.getElementById('sg-create-video-image');
   function updateVideoSummary(){
-    videoSummary.textContent=videoLength.value+' с · Gemini · '+
+    videoSummary.textContent=videoLength.value+' с · '+(videoImage.value==='gpt-image-2.5-sunburst'?'GPT Image':'Gemini')+' · '+
       (videoProfile.value==='gemini_ru'?'Grok Voice':'Озвучка сервера');
   }
   videoLength.addEventListener('change',updateVideoSummary);
   videoProfile.addEventListener('change',updateVideoSummary);
+  videoImage.addEventListener('change',updateVideoSummary);
   updateVideoSummary();
   let gesture=null, suppressClickUntil=0;
   function resetGrip(){
