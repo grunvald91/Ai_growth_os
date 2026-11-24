@@ -1136,6 +1136,7 @@
       ...(selected==='whiteboard' ? {video:{
         length:videoField('length','30'),
         profile:videoField('profile','gemini_ru'),
+        image_model:videoField('image','gemini-3.1-flash-image'),
         visual_review:videoField('review','off')==='once',
         science_mode:videoField('science','auto'),
         max_api_calls:['auto','robust'].includes(videoField('budget','auto')) ? null : Number(videoField('budget','auto')),
