@@ -419,7 +419,7 @@ def job_html(state, product_id, *, error=None):
     if completed:
         body += '</details>'
         if not state.get('visual_repair_from'):
-            selected_model = state['models']['image']
+            selected_model = (state.get('models') or {}).get('image', DEFAULT_IMAGE_MODEL)
             if selected_model not in CLAUDEHUB_IMAGE_MODELS:
                 selected_model = DEFAULT_IMAGE_MODEL
             repair_options = image_model_options(selected_model)
