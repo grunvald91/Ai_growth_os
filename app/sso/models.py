@@ -27,3 +27,19 @@ class StudioSsoTicket(UUIDMixin, Base):
     servgo_business_id: Mapped[int] = mapped_column(Integer, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class StudioAccountTicket(Base):
+    """One-time account-level tickets have no artificial company foreign key."""
+    __tablename__ = "studio_account_tickets"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class StudioAccountProduct(Base):
+    """Explicit ownership of a Studio-only workspace by a verified ServGo account."""
+    __tablename__ = "studio_account_products"
+
+    servgo_user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    product_id: Mapped[UUID] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), primary_key=True)

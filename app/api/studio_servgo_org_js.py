@@ -168,6 +168,12 @@ JS = r"""
       items.appendChild(link);
       standaloneCount++;
     }
+    const canAdd = compact ? metadata.can_add : mount.dataset.canAdd === '1';
+    if (canAdd) {
+      const add = text('a', compact ? 'sg-org-footer' : 'sg-company-choice', '+ Добавить компанию в Studio');
+      add.href = '/studio/new';
+      items.appendChild(add);
+    }
     if (compact) {
       if (!companies.length && !platformId && !standaloneCount) items.appendChild(text('p', 'sg-org-menu-heading', 'Нет доступных организаций.'));
       state = text('div', 'sg-org-menu-heading', 'Выберите организацию');

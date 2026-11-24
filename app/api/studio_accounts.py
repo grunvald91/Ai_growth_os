@@ -242,7 +242,14 @@ def _live_servgo_identity(request: Request, settings, db: Session) -> int | None
     if not tickets.configured(settings):
         return None
     session = tickets.read_session(settings, request.cookies.get(tickets.COOKIE))
-    if session is None or not _sso_link_current(db, session):
+    if session is None:
+        return None
+    if session.role == tickets.ACCOUNT_ROLE:
+        # The route dependency already verified the canonical cookie, browser
+        # identity and current account. Never link via an unverified cookie.
+        return (session.user_id if getattr(request.state, "studio_servgo_user_id", None) == session.user_id
+                and getattr(request.state, "studio_account_level", False) else None)
+    if not _sso_link_current(db, session):
         return None
     access.forget(session.user_id, session.business_id)
     if access.servgo_role(settings, session.user_id, session.business_id) is None:

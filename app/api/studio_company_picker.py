@@ -108,7 +108,7 @@ def selector_html(products, *, can_add: bool = False, can_link: bool = False,
                          if platform_product is not None else '')
         chooser = ('<section id="sg-servgo-organisations" data-user-id="' + _esc(unified_user_id)
                    + '" data-linked-businesses="' + _esc(safe_ids) + '" data-business-product-ids="'
-                   + _esc(json.dumps(business_product_ids or {})) + '"' + platform_attr + '>'
+                   + _esc(json.dumps(business_product_ids or {})) + '" data-can-add="' + ('1' if can_add else '0') + '"' + platform_attr + '>'
                    '<p role="status" class="sg-company-caption">Загружаем все организации ServGo…</p>'
                    '</section>'
                    '<section id="sg-growth-connected"><p class="sg-company-caption">'
@@ -133,6 +133,7 @@ def selector_html(products, *, can_add: bool = False, can_link: bool = False,
         '<p class="sg-company-caption">Выберите организацию для работы в Growth Studio.</p>'
         + chooser +
         '<div class="sg-company-foot">' + connect +
+        ('<a href="/studio/chat">AI-чат</a>' if unified else '') +
         '<a href="/studio/logout">Выйти из студии</a></div>'
         '</main></body></html>'
     )

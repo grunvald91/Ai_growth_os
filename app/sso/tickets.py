@@ -19,6 +19,7 @@ AUDIENCE = "growth-studio"
 MIN_SECRET_LENGTH = 32
 MAX_TICKET_LIFETIME = 120  # ServGo issues 60 seconds; anything much longer is not from ServGo.
 ROLES = {"owner", "co_owner", "administrator"}
+ACCOUNT_ROLE = "account"
 CANONICAL_ORIGIN = "https://servgo.ru"
 
 
@@ -77,7 +78,10 @@ def verify_ticket(settings, token: str | None, *, now: float | None = None) -> C
         raise SsoError("expired")
     if claims.expires - current > MAX_TICKET_LIFETIME:
         raise SsoError("lifetime too long")
-    if claims.role not in ROLES or not 8 <= len(claims.jti) <= 64:
+    account_ticket = (claims.role == ACCOUNT_ROLE and claims.business_id == 0
+                      and claims.user_id > 0 and claims.origin == CANONICAL_ORIGIN)
+    if (not (account_ticket or (claims.role in ROLES and claims.business_id > 0 and claims.user_id > 0))
+            or not 8 <= len(claims.jti) <= 64):
         raise SsoError("malformed")
     return claims
 
@@ -125,7 +129,10 @@ def read_session(settings, token: str | None, *, now: float | None = None) -> Se
         expires = int(data["e"])
     except (ValueError, KeyError, TypeError):
         return None
-    if expires < (now if now is not None else time.time()) or session.role not in ROLES:
+    account_session = (session.role == ACCOUNT_ROLE and session.business_id == 0
+                       and session.product_id == "" and session.user_id > 0 and bool(session.identity_hash))
+    if (expires < (now if now is not None else time.time()) or
+            not (account_session or (session.role in ROLES and session.business_id > 0 and session.user_id > 0))):
         return None
     return session
 

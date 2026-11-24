@@ -81,6 +81,8 @@ class FakeServGo:
             return httpx.Response(500, json={})
         if request.headers.get("x-studio-key") != KEY:
             return httpx.Response(403, json={})
+        if request.url.path.endswith("/internal/studio/account"):
+            return httpx.Response(200, json={"allowed": int(request.url.params["user_id"]) in {7, 8}})
         if request.url.path.endswith("/internal/studio/businesses"):
             if self.mode == "legacy":
                 return httpx.Response(404)
@@ -1206,3 +1208,39 @@ def test_malformed_live_role_type_is_rejected_without_server_exception(env):
             return original(request)
     access._transport = httpx.MockTransport(MalformedRoles())
     assert access.servgo_business_roles(settings, 7) is None
+
+
+def test_account_ticket_needs_no_booking_business_and_is_single_use(env):
+    db, settings, salon, other, servgo = env
+    from app.sso.models import StudioAccountProduct
+    enabled = make_settings(settings.products_root, studio_public_origin="https://growth.servgo.ru",
+                            studio_servgo_gateway_enabled=True)
+    app.dependency_overrides[get_settings] = lambda: enabled
+    servgo.allowed.clear()
+    client = TestClient(app, base_url="https://servgo.ru", follow_redirects=False)
+    client.cookies.set("sg_identity", _browser_identity(7))
+    ticket = make_ticket(biz=0, role="account", origin=tickets.CANONICAL_ORIGIN, jti="acct-test-000001")
+    first = client.get("/studio/sso", params={"t": ticket})
+    assert first.status_code == 303 and first.headers["location"] == "/studio"
+    assert client.get("/studio/sso", params={"t": ticket}).status_code == 400
+    assert client.get("/studio/organizations.json").json()["items"] == []
+    assert client.get("/studio/new").status_code == 200
+    assert client.get(f"/studio/products/{other.id}").status_code == 404
+    db.add(StudioAccountProduct(servgo_user_id=7, product_id=other.id))
+    db.commit()
+    data = client.get("/studio/organizations.json").json()
+    assert [item["id"] for item in data["items"]] == [str(other.id)]
+    assert data["can_add"] is True
+    assert client.get(f"/studio/products/{salon.id}").status_code == 404
+    client.cookies.set("sg_identity", _browser_identity(8))
+    assert client.get("/studio/organizations.json").status_code == 401
+
+
+def test_account_ticket_cannot_open_legacy_host_or_fake_company(env):
+    _, settings, *_ = env
+    with pytest.raises(tickets.SsoError):
+        tickets.verify_ticket(settings, make_ticket(biz=12, role="account", origin=tickets.CANONICAL_ORIGIN))
+    with pytest.raises(tickets.SsoError):
+        tickets.verify_ticket(settings, make_ticket(biz=0, role="account"))
+    ticket = make_ticket(biz=0, role="account", origin=tickets.CANONICAL_ORIGIN)
+    assert browser().get("/studio/sso", params={"t": ticket}).status_code == 403
