@@ -9,9 +9,10 @@ import json
 import logging
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, exists
+from sqlalchemy.orm import aliased
 
-from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task
+from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.seo.activation import SeoFactoryActivation, editorial_preferences, is_enabled
 from app.seo.diagnostics import audit_seo
 from app.seo.publishing import public_blog_ready
@@ -34,6 +35,7 @@ MESSAGES = {
     "running_long": "Обнаружены длительные или прерванные задания",
     "missing_article": "Завершённые задания без статьи",
     "public_blog_unavailable": "Не подтверждена привязка публичного блога",
+    "model_wait": "Задания длительно ожидают доступности модели",
 }
 
 
@@ -56,6 +58,7 @@ def _previous_day_published(db, product_id, now, timezone_name):
     start, stop = day_bounds(start_today - timedelta(seconds=1), tz=tz)
     # Require a matching SEO task and article status. Distinct receipts are
     # counted only as evidence of publication, not public URL reachability.
+    conflict = aliased(Publication)
     found = db.scalar(select(Publication.id).join(Artifact, Publication.artifact_id == Artifact.id)
         .join(Task, Artifact.task_id == Task.id).where(
             Publication.product_id == product_id, Artifact.product_id == product_id,
@@ -65,6 +68,9 @@ def _previous_day_published(db, product_id, now, timezone_name):
             Publication.channel == "own_site", Publication.status == "published",
             Publication.published_at >= db_time(db, start),
             Publication.published_at < db_time(db, stop),
+            ~exists(select(conflict.id).where(conflict.product_id == product_id,
+                conflict.artifact_id == Artifact.id, conflict.channel == "own_site",
+                conflict.status != "published")),
         ).limit(1))
     return start, found is not None
 
@@ -80,6 +86,15 @@ def observe(db, product, activation, settings, now):
     for code in ("publication_mismatch", "generation_failed", "running_long", "missing_article"):
         if audit.counts.get(code):
             issues[code] = audit.counts[code]
+    waiting = set()
+    for task_id, retry_at in db.execute(select(Artifact.task_id, Artifact.title).join(Task, Task.id == Artifact.task_id).where(
+            Artifact.product_id == product.id, Task.product_id == product.id,
+            Task.status == TaskStatus.QUEUED, Artifact.kind == 'seo_model_wait')):
+        next_check = _date(retry_at)
+        if next_check and next_check >= now - timedelta(minutes=30):
+            waiting.add(task_id)
+    if waiting:
+        issues['model_wait'] = len(waiting)
     if not public_blog_ready(db, product.id):
         issues["public_blog_unavailable"] = 1
         return issues
@@ -131,7 +146,7 @@ def inspect_and_claim(db, product_id, settings, *, now=None, can_notify=False):
     mature = {}
     for code, count in issues.items():
         age = now - _date(since[code])
-        grace = RESERVE_GRACE if code in {"reserve_shortage", "pipeline_shortage", "generation_failed"} else PERSISTENCE
+        grace = RESERVE_GRACE if code in {"reserve_shortage", "pipeline_shortage", "generation_failed", "model_wait"} else PERSISTENCE
         if age >= grace:
             mature[code] = count
     last_attempt, last_sent = _date(state.get("last_attempt")), _date(state.get("last_sent"))
@@ -176,12 +191,22 @@ def recover_once(session_factory, settings):
         from app.seo.interruption import recover_interrupted_articles
     except ImportError:
         recover_interrupted_articles = None
+    def schema():
+        with session_factory() as db:
+            recover_failed_schema_once(db, enabled=settings.seo_schema_recovery_enabled)
+
+    def plan():
+        with session_factory() as db:
+            enqueue_enabled_if_due(db, settings)
+
+    actions = [schema, plan]
     if recover_interrupted_articles:
-        recover_interrupted_articles(session_factory, settings.products_root)
-    with session_factory() as db:
-        recover_failed_schema_once(db, enabled=settings.seo_schema_recovery_enabled)
-    with session_factory() as db:
-        enqueue_enabled_if_due(db, settings)
+        actions.insert(0, lambda: recover_interrupted_articles(session_factory, settings.products_root))
+    for action in actions:
+        try:
+            action()
+        except Exception as exc:
+            logger.warning("seo_watchdog_recovery_failed type=%s", type(exc).__name__)
 
 
 async def run_watchdog_once(session_factory, settings, *, api=None, now=None):
