@@ -139,6 +139,9 @@ async def describe_redraw_post_image(ctx: Context, params):
         if (row.status != ArtifactStatus.AWAITING_APPROVAL or row.task_id is None
                 or value.get("channel") != "vk" or value.get("image_model", "none") == "none"):
             return Outcome("Перегенерация доступна только для поста ВКонтакте с картинкой до утверждения.", ok=False)
+        if not isinstance(value.get("title"), str) or not value["title"].strip() or not isinstance(value.get("body"), str) or not value["body"].strip():
+            return Outcome("В исходном посте отсутствует заголовок или текст. Откройте материал и исправьте его перед перегенерацией.",
+                           ok=False, blocks=[links_block(ctx, "review")])
         return Confirmation("Перегенерировать картинку поста?",
             [row.title[:120], "Текст поста не изменится.", f"Модель: {value['image_model']}.",
              "Одна новая генерация изображения и одна проверка критиком — возможны платные вызовы."]
@@ -158,10 +161,13 @@ async def confirm_redraw_post_image(ctx: Context, stored, via):
         task = queue_vk_image_redraw(ctx.db, ctx.product.id, UUID(stored["material_id"]),
             source_version=int(stored["source_version"]), source_digest=stored["source_digest"],
             feedback=stored["feedback"])
-    except (LookupError, ValueError, TypeError, KeyError):
+    except (LookupError, ValueError) as exc:
         ctx.db.rollback()
-        return Outcome("Перегенерация недоступна: пост изменился, уже выполняется правка или исчерпан лимит. "
-                       "Проверьте текущий пост.", ok=False, blocks=[links_block(ctx, "review")])
+        return Outcome(str(exc), ok=False, blocks=[links_block(ctx, "review")])
+    except (TypeError, KeyError):
+        ctx.db.rollback()
+        return Outcome("Некорректные данные исходного поста. Откройте материал для проверки.", ok=False,
+                       blocks=[links_block(ctx, "review")])
     return _task_result(ctx, task, "Поставил новую картинку в очередь. Текст поста остаётся прежним.")
 
 
