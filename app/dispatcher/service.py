@@ -240,7 +240,7 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
         return Outcome(f"{described.title} Подтвердите кнопкой.", described.title), described, capability_id
     outcome = await executors.EXECUTORS[capability_id](ctx, params)
     if capability.operation != ToolOperation.ANALYTICS:  # reads leave no ToolCall
-        _record_tool_call(ctx.db, ctx, capability_id, params.model_dump(exclude_none=True), outcome)
+        _record_tool_call(ctx.db, ctx, capability_id, params.model_dump(mode="json", exclude_none=True), outcome)
     return outcome, outcome.confirmation, capability_id
 
 
@@ -716,6 +716,8 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
 
 
 async def _decline(ctx: Context, capability_id: str, stored: dict) -> Outcome:
+    if capability_id == "repair_video_images":
+        return Outcome("Перерисовку не запускаю. Черновик остаётся без платного запуска.")
     if capability_id == "whiteboard_video":
         from app.content.whiteboard.jobs import cancel_job
         try:
