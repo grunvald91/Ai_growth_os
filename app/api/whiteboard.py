@@ -18,6 +18,7 @@ from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, White
 from app.content.whiteboard.science import requires_science_review
 from app.content.whiteboard.topics import suggest_company_video_topics, suggest_company_create_topics
 from app.content.whiteboard.selector_ui import topic_picker_html
+from app.content.whiteboard.image_recovery import IMAGE_RECOVERY_RESERVE
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
 from app.content.whiteboard.runtime import (MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings,
@@ -72,6 +73,8 @@ def job_state(db, product_id, task_id):
             'models': payload.models.model_dump(), 'max_api_calls': payload.max_api_calls,
             'visual_review_enabled': payload.visual_review,
             'image_provider': payload.image_provider,
+            'image_recovery': payload.image_recovery,
+            'image_recovery_reserve': IMAGE_RECOVERY_RESERVE if payload.image_recovery else 0,
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
             'repair_regenerate_images': payload.repair_regenerate_images,
@@ -129,6 +132,14 @@ async def _approve(db, product_id, task_id, body, actor, settings):
                         payload.models, payload.request.voice,
                         **({'skip_speech': True} if payload.repair_regenerate_images else {}))
     except ReadinessError as exc:
+        if payload.image_recovery and exc.code in {'claudehub_unavailable', 'claudehub_image_unavailable'}:
+            # The worker owns the persisted outage clock; the owner must not
+            # have to repeat approval while the chosen image model is offline.
+            try:
+                return approve_job(db, product_id, task_id, request_digest=body.request_digest,
+                                   confirmed=body.confirmed, decided_by=actor or 'local-owner')
+            except ReadinessError:
+                raise HTTPException(409, MESSAGES['approval_invalid']) from None
         # Short transaction after network I/O. Do not overwrite cancellation.
         task = owner_task(db, product_id, task_id, lock=True)
         _, saved, _, _ = records(db, task, lock=True)
@@ -204,8 +215,10 @@ def approval_card(state, product_id, error=None):
     )
     review = ('<p>Один проход визуального критика. Автор выбирает существенные исправления; '
               'каждая выбранная сцена перерисовывается максимум один раз.</p>' if state.get('visual_review_enabled') else '')
+    recovery = (' До 105 дополнительных потенциально платных попыток при сбоях изображений; '
+                'резервная модель только после 24 часов непрерывной недоступности основной.' if state.get('image_recovery') else '')
     provider = (f'<p>Новые рисунки и перерисовки: {esc(state["models"]["image"])} через API ClaudeHub. '
-                'Автоматической замены модели или провайдера нет.</p>' if state.get('image_provider') == 'claudehub' else '')
+                f'{recovery}</p>' if state.get('image_provider') == 'claudehub' else '')
     # Repair requests have additional cost and audio-reuse disclosures in the
     # regular renderer; retain that path rather than omit those conditions.
     return (f'<section class="sg-surface wb-job wb-approval"><header class="wb-heading">'
@@ -223,7 +236,7 @@ def approval_card(state, product_id, error=None):
             f'<footer class="wb-actions"><form method="post" action="{base}/approve" class="sg-form">'
             f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
             '<label class="wb-consent"><input type="checkbox" name="confirmed" value="yes" required>'
-            f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов</span></label>'
+            f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов.{recovery}</span></label>'
             '<button class="btn primary" type="submit">Подтвердить и сгенерировать</button></form>'
             f'<form method="post" action="{base}/cancel"><button class="btn secondary" type="submit">Остановить задание</button></form>'
             f'<a class="wb-back" href="/studio/products/{product_id}/whiteboard">К простым видео →</a></footer></section>')
@@ -304,7 +317,13 @@ def job_html(state, product_id, *, error=None):
         reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
         provider_wait = (state.get('last_error') in {'openrouter_unavailable', 'claudehub_unavailable'}
                          and state.get('auto_resumes', 0) > state.get('auto_resume_limit', 0))
-        if provider_wait:
+        if state.get('image_outage_since'):
+            body += (f'<p class="sg-warning" role="status">Ожидаем восстановления модели. '
+                     f'Начало сбоя: {esc(state["image_outage_since"][:16].replace("T", " "))} UTC. '
+                     f'Следующая проверка: {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+                     f'Модель: {esc(state.get("active_image_model", state["models"]["image"]))}. '
+                     'Готовые этапы сохранены; резервная модель только после 24 часов.</p>')
+        elif provider_wait:
             body += (f'<p class="sg-warning" role="status">Ожидаем восстановления доступа к моделям. '
                      f'Следующая автоматическая проверка не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
                      'Проверка не выполняет платных вызовов; готовые этапы сохранены.</p>')
@@ -359,7 +378,11 @@ def job_html(state, product_id, *, error=None):
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
-        body += f'<p>Новые рисунки и перерисовки: {esc(state["models"]["image"])} через API ClaudeHub. Автоматической замены модели или провайдера нет.</p>'
+        policy = ('Резервная модель разрешена только после 24 часов недоступности основной.'
+                  if state.get('image_recovery') else 'Автоматической замены модели нет для этого разрешения.')
+        body += (f'<p>Основная модель рисунков: {esc(state["models"]["image"])} через API ClaudeHub. {policy}</p>')
+        if state.get('active_image_model'):
+            body += f'<p>Текущая резервная модель: {esc(state["active_image_model"])}.</p>'
     if state.get('visual_repair_from'):
         source_link = f'/studio/products/{product_id}/whiteboard/{state["visual_repair_from"]}'
         body += ('<p><strong>Перерисовка без новой озвучки.</strong> Новые изображения создаются отдельно. '
@@ -410,7 +433,9 @@ def job_html(state, product_id, *, error=None):
                  f'<form method="post" action="{base}/approve" class="sg-form">'
                  f'<input type="hidden" name="request_digest" value="{state["request_digest"]}">'
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
-                 f'Разрешаю {"перерисовку" if state.get("visual_repair_from") else "генерацию видео"}: до {state["max_api_calls"]} API-вызовов</span></label>'
+                 f'Разрешаю {"перерисовку" if state.get("visual_repair_from") else "генерацию видео"}: до {state["max_api_calls"]} API-вызовов. '
+                 + ('До 105 дополнительных потенциально платных попыток при сбоях изображений; резервная модель только после 24 часов. ' if state.get('image_recovery') else '')
+                 + '</span></label>'
                  f'<button class="btn primary" type="submit">{"Подтвердить перерисовку" if state.get("visual_repair_from") else "Подтвердить и сгенерировать"}</button></form>')
     if state['status'] in {'queued', 'running', 'waiting_approval'}:
         body += (f'<form method="post" action="{base}/cancel"><button class="btn secondary">Остановить задание</button></form>')
@@ -558,7 +583,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             </label>
             <label class="sg-field"><span>Максимум платных API-вызовов</span>
               <select name="max_api_calls">{call_options}</select>
-              <small>При «Автозавершении» заранее подтверждается максимум на 5 вызовов больше необходимого: они расходуются только при необходимости. Минимальный режим не оставляет запаса на сбои. Это ограничение вызовов, а не стоимости в деньгах.</small>
+              <small>При «Автозавершении» заранее подтверждается максимум на 5 вызовов больше необходимого: они расходуются только при необходимости. Отдельный резерв восстановления изображений (до 105 потенциально платных попыток) подтверждается при запуске. Это ограничение вызовов, а не стоимости в деньгах.</small>
             </label>
           </div>
         </details>
@@ -727,6 +752,7 @@ async def studio_topic_quote(product_id: UUID, request: Request, db: Session = D
     except (TypeError, ValueError, KeyError, ValidationError):
         raise HTTPException(422, 'Проверьте тему и лимит API-вызовов.') from None
     return {'required_calls': needed, 'limit': limit, 'allowed': limit >= needed,
+            'image_recovery_reserve': IMAGE_RECOVERY_RESERVE,
             'science_review': requires_science_review(draft)}
 
 
