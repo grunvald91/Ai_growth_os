@@ -227,7 +227,7 @@ def duplicate_page_problems(db: Session, row: Artifact, article: ArticleArtifact
 
 def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
                      daily_limit: int = PUBLICATIONS_PER_DAY,
-                     internal_canary: bool = False) -> Outcome:
+                     internal_canary: bool = False, reserve_enabled: bool = False) -> Outcome:
     """Publish immediately when the AI critic and basic article checks pass."""
     row = db.get(Artifact, article_id)
     if row is None or row.kind != "article":
@@ -261,7 +261,6 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
         Approval.product_id == row.product_id,
         Approval.artifact_id == row.id,
         Approval.action_type == ToolOperation.PUBLISH.value,
-        Approval.requested_by == "seo_factory",
         Approval.status == "rejected",
     ).limit(1))
     if row.status == ArtifactStatus.REJECTED or rejected is not None:
@@ -307,6 +306,11 @@ def publish_if_clear(db: Session, article_id, *, now: datetime | None = None,
                 reason="Held for the owner: " + "; ".join(problems))
         db.commit()
         return Outcome(False, "; ".join(problems))
+    if reserve_enabled and task is not None and task.title.startswith('SEO-ARTICLE:'):
+        from app.seo.reserve import permits_extra_release
+        if not permits_extra_release(db, row, now=now, timezone_name=prefs.timezone_name,
+                                     daily_limit=prefs.publications_per_day):
+            return Outcome(False, 'reserve_protected')
     # A failed first critic can leave a pending request. Once the critic
     # passes, resolve that request automatically; never leave a ghost
     # "waiting for owner" notification beside an already published article.
@@ -349,7 +353,7 @@ def _go_live(db: Session, row: Artifact, article: ArticleArtifact, approval: App
 
 
 def publish_owner_approved(db: Session, *, now: datetime | None = None,
-                           daily_limit: int = PUBLICATIONS_PER_DAY) -> int:
+                           daily_limit: int = PUBLICATIONS_PER_DAY, reserve_enabled: bool = False) -> int:
     """Publish held plan articles once the owner approved them, in the Studio (artifact approved) or on the
     approval itself. A rejected approval keeps the article off the blog."""
     held = db.scalars(select(Approval).where(Approval.requested_by == "seo_factory",
@@ -417,6 +421,11 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
                             row.id, "; ".join(problems))
             continue
         release_time = now or datetime.now(timezone.utc)
+        if reserve_enabled and task is not None and task.title.startswith('SEO-ARTICLE:'):
+            from app.seo.reserve import permits_extra_release
+            if not permits_extra_release(db, row, now=release_time, timezone_name=prefs.timezone_name,
+                                         daily_limit=prefs.publications_per_day):
+                continue
         if approval.status == "pending":
             approval.status, approval.decided_by, approval.decided_at = "approved", "owner:studio", release_time
         _go_live(db, row, article, approval, release_time)
@@ -427,7 +436,7 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
 
 
 def publish_pending(db: Session, *, now: datetime | None = None,
-                    daily_limit: int = PUBLICATIONS_PER_DAY) -> int:
+                    daily_limit: int = PUBLICATIONS_PER_DAY, reserve_enabled: bool = False) -> int:
     from app.models.domain import Task, TaskStatus
     from sqlalchemy import or_
     moment = now or datetime.now(timezone.utc)
@@ -435,6 +444,7 @@ def publish_pending(db: Session, *, now: datetime | None = None,
         .join(Task, Artifact.task_id == Task.id)
         .join(SeoFactoryActivation, SeoFactoryActivation.product_id == Artifact.product_id)
         .where(Artifact.kind == "article", Artifact.status == ArtifactStatus.DRAFT,
+               Task.product_id == Artifact.product_id, Task.assigned_agent == 'content_factory',
                Task.status == TaskStatus.COMPLETED, Task.title.like("SEO-ARTICLE:%"),
                SeoFactoryActivation.enabled.is_(True),
                or_(Task.due_at.is_(None), Task.due_at <= db_time(db, moment)))
@@ -443,10 +453,12 @@ def publish_pending(db: Session, *, now: datetime | None = None,
         if not is_enabled(db, row.product_id):
             continue
         try:
-            publish_if_clear(db, row.id, now=moment, daily_limit=daily_limit)
+            publish_if_clear(db, row.id, now=moment, daily_limit=daily_limit, reserve_enabled=reserve_enabled)
         except Exception:
             db.rollback()
             _logger.exception("SEO publication recovery failed for article %s", row.id)
+        finally:
+            db.rollback()  # release product lock after a no-op
     # A clean review may arrive after a hold. Recheck those records without
     # repeated writes for blocked articles or requiring another owner click.
     held = list(db.scalars(select(Artifact).join(Task, Artifact.task_id == Task.id)
@@ -467,11 +479,13 @@ def publish_pending(db: Session, *, now: datetime | None = None,
                     or servgo_buyer_intent_problems(db, row, article)
                     or duplicate_page_problems(db, row, article)):
                 continue
-            publish_if_clear(db, row.id, now=moment, daily_limit=daily_limit)
+            publish_if_clear(db, row.id, now=moment, daily_limit=daily_limit, reserve_enabled=reserve_enabled)
             checked += 1
         except Exception:
             db.rollback()
             _logger.warning("SEO held publication recovery failed for article %s", row.id)
+        finally:
+            db.rollback()
         if checked >= 100:
             break
     return len(rows) + checked
