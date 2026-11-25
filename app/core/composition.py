@@ -33,15 +33,27 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     from app.llm.router_store import role_override
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     factory, models = None, ()
+    from app.llm.seo_availability import policy_for
+    availability = policy_for(settings)
     if provider is None and settings.llm_provider == "xai" and settings.xai_api_key:
         def factory(model: str) -> LLMService:
-            # A fixed model per attempt, bypassing the router: each retry deliberately goes to another provider.
-            return LLMService(privacy_gateway=privacy, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS, provider=XAIProvider(
-                api_key=settings.xai_api_key, model=model, base_url=settings.xai_base_url,
-                reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds))
+            # With the shared policy, the whole configured chain is guarded;
+            # the intake service must not independently switch on a bad answer.
+            def fixed(name):
+                return XAIProvider(api_key=settings.xai_api_key, model=name, base_url=settings.xai_base_url,
+                    reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds)
+            if availability is not None:
+                chain = intake_model_order(role_override(settings, 'company_intake'),
+                    [m.strip() for m in settings.intake_models.split(',') if m.strip()], settings.intake_max_attempts)
+                chosen = FallbackProvider(providers=[(name, fixed(name)) for name in chain], availability=availability)
+            else:
+                chosen = fixed(model)
+            return LLMService(privacy_gateway=privacy, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS, provider=chosen)
         models = intake_model_order(role_override(settings, "company_intake"),
                                     [m.strip() for m in settings.intake_models.split(",") if m.strip()],
                                     settings.intake_max_attempts)
+        if availability is not None:
+            models = models[:1]
     return CompanyIntakeService(
         db, products_root=settings.products_root,
         # Every extracted value is checked against a verbatim quote from its source, and a second model reviews the
@@ -74,8 +86,10 @@ def build_dispatcher_provider(settings: Settings) -> LLMProvider:
         timeout_seconds=settings.xai_timeout_seconds,
     )
     effective = effective_router_settings(settings)
+    from app.llm.seo_availability import policy_for
+    availability = policy_for(effective)
     if not effective.model_router_enabled:
-        return provider
+        return FallbackProvider(providers=[(model, provider)], availability=availability) if availability else provider
     # Preserve the owner's existing router catalog and per-call price ceiling.
     # Override only this interactive role in memory; all other roles retain
     # their saved selections. The dedicated model must be enabled in the catalog.
@@ -88,16 +102,13 @@ def build_dispatcher_provider(settings: Settings) -> LLMProvider:
         max_call_usd=effective.model_router_max_call_usd,
         provider_supports_web_search=False,
     )
-    return ModelRoutingProvider(provider=provider, router=router)
+    return ModelRoutingProvider(provider=provider, router=router, availability=availability)
 
 
 def build_llm_provider(settings: Settings, *, seo_availability: bool = False) -> LLMProvider:
     settings = effective_router_settings(settings)
-    availability = None
-    if seo_availability and settings.seo_model_availability_enabled:
-        from app.llm.seo_availability import AvailabilityPolicy
-        endpoint = settings.xai_base_url if settings.llm_provider == 'xai' else settings.anthropic_base_url
-        availability = AvailabilityPolicy(settings.products_root, settings.llm_provider + ':' + str(endpoint))
+    from app.llm.seo_availability import policy_for
+    availability = policy_for(settings, seo=seo_availability)
     if settings.llm_provider == "anthropic":
         if settings.model_router_enabled:
             raise ValueError("Model Router currently supports only the configured xai-compatible gateway")
