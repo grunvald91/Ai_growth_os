@@ -209,7 +209,7 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
     return publication
 
 
-def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
+def cancel_scheduled_post(db, publication_id: UUID, *, commit=True) -> Publication:
     pub = db.get(Publication, publication_id)
     if pub is None:
         raise LookupError("Публикация не найдена")
@@ -245,7 +245,10 @@ def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
                     plan.content = json.dumps(plan_data, ensure_ascii=False)
         except (ValueError, TypeError, KeyError):
             pass
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return pub
 
 
