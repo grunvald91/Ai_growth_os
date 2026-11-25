@@ -21,11 +21,16 @@ HELD = (ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED)
 logger = logging.getLogger(__name__)
 
 
+class RepairBlocked(ValueError):
+    """Internal, allowlisted reason for a rejected repair."""
+
+
 def checked_candidate(original: ArticleArtifact, reader: HumanEditedArticle) -> ArticleArtifact:
     """Only reader prose may change; evidence, plan, conversion and CTA stay intact."""
     if original.reader_article is None or original.seo_brief is None:
         raise ValueError("Missing original SEO reader")
-    if (reader.fact_renderings != original.reader_article.fact_renderings
+    if (reader.language != original.reader_article.language
+            or reader.fact_renderings != original.reader_article.fact_renderings
             or reader.editorial_notes != original.reader_article.editorial_notes):
         raise ValueError("Immutable article evidence changed")
     if not reader.direct_answer or not reader.meta_description:
@@ -131,6 +136,23 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
                 continue
             digest, version, status = _digest(row.content), row.version, row.status
             task_id = row.task_id
+            final_run = db.scalar(select(AgentRun).where(
+                AgentRun.task_id == task_id, AgentRun.agent_name == 'marketing_editor'
+            ).order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(1))
+            previous_findings = []
+            if final_run is not None:
+                recorded = db.scalar(select(Artifact).where(
+                    Artifact.product_id == product_id, Artifact.task_id == task_id,
+                    Artifact.agent_run_id == final_run.id, Artifact.kind == 'seo_final_review'
+                ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+                if recorded is not None:
+                    try:
+                        data = json.loads(recorded.content)
+                        if (isinstance(data, dict) and data.get('reader_hash') == reader_hash(original.reader_article)
+                                and isinstance(data.get('findings'), list)):
+                            previous_findings = data['findings'][:20]
+                    except (ValueError, TypeError):
+                        pass
             request = LLMRequest(
                 system_prompt=(
                     "Доработай существующую SEO-статью для покупателя компании. "
@@ -148,6 +170,7 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
                     "company_context": context,
                     "static_problems": problems,
                     "previous_critic_status": verdict,
+                    "previous_critic_findings": previous_findings,
                 }, ensure_ascii=False))],
                 model=settings.llm_model, max_tokens=12000,
                 response_schema=HumanEditedArticle.model_json_schema(),
@@ -172,6 +195,7 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
         else:
             return 0
 
+    reply = None
     try:
         service = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
             critic_enabled=True, critic_limits={
@@ -193,7 +217,7 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
             timeout=300 + service.extra_timeout_seconds)
         review = reply.quality_review or {}
         if review.get("status") != "no_material_issues":
-            raise ValueError("repair_critic_not_clean")
+            raise RepairBlocked("repair_critic_not_clean")
         reader = HumanEditedArticle.model_validate_json(reply.content)
         candidate = checked_candidate(original, reader)
         with session_factory() as db:
@@ -202,11 +226,11 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
                 Artifact.product_id == product_id).with_for_update())
             if (product is None or row is None or not _eligible(db, row)
                     or row.version != version or row.status != status or _digest(row.content) != digest):
-                raise ValueError("repair_stale_article")
+                raise RepairBlocked("repair_stale_article")
             current_context = privacy.sanitize_text(load_context(
                 db, product, settings.products_root)["stable_context"])
             if current_context != context or _unrepairable(db, row, candidate) or _problems(db, row, candidate):
-                raise ValueError("repair_static_block")
+                raise RepairBlocked("repair_static_block")
             run = db.get(AgentRun, run_id)
             persist_critic_audit(db, product_id=product_id, task_id=task_id,
                                  run_id=run_id, response=reply)
@@ -228,11 +252,15 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
     except (Exception, asyncio.CancelledError) as exc:
         with session_factory() as db:
             run = db.get(AgentRun, run_id)
-            run.status, run.error = "failed", "seo_held_repair_failed:" + type(exc).__name__
+            reason = str(exc) if isinstance(exc, RepairBlocked) else type(exc).__name__
+            if reply is not None:
+                persist_critic_audit(db, product_id=product_id, task_id=task_id,
+                                     run_id=run_id, response=reply)
+            run.status, run.error = "failed", "seo_held_repair_failed:" + reason
             run.finished_at = datetime.now(timezone.utc)
             db.get(Artifact, marker_id).content = json.dumps({"state": "failed", "sha256": digest,
                                                             "version": version,
-                                                            "error_type": type(exc).__name__})
+                                                            "error_type": reason})
             db.commit()
         logger.warning("SEO held repair failed article=%s type=%s", article_id, type(exc).__name__)
         if isinstance(exc, asyncio.CancelledError):
