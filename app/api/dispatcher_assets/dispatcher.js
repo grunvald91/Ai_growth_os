@@ -296,7 +296,7 @@
       previousValues = signature;
       submit.disabled = true;
       var accepted = send({mode:'chip', client_key:submissionKey,
-        form_submission:{message_id:messageId, params:params}}, block.title, false, function (ok) {
+        form_submission:{message_id:messageId, revision:block.revision || 0, params:params}}, block.title, false, function (ok) {
         if (ok) {
           submissionKey = null;
           if (preparing) {
@@ -1107,9 +1107,9 @@
         return message.role === 'assistant';
       });
       var latest = assistantMessages[assistantMessages.length - 1];
-      if (latest && latest.intent === 'edit_card') {
+      if (latest && (latest.intent === 'edit_card' || latest.intent === 'edit_form')) {
         latest = assistantMessages.find(function (message) {
-          return (message.blocks || []).some(function (block) { return block.type === 'confirm'; });
+          return (message.blocks || []).some(function (block) { return block.type === 'confirm' || block.type === 'tool_form'; });
         }) || latest;
       }
       if (latest) {

@@ -11,7 +11,8 @@ from app.tools import ToolOperation
 
 # Audited individually. ANALYTICS alone is insufficient: some tools save settings.
 READ_FORMS = frozenset({"list_tasks", "list_publications", "show_schedule", "show_insights"})
-PREPARE_FORMS = frozenset({"create_post", "create_package"})
+PREPARE_FORMS = frozenset({"create_post", "create_package", "whiteboard_video"})
+VIDEO_EDIT_FIELDS = frozenset({"topic", "length", "call_to_action", "profile", "image_model", "visual_review", "science_mode"})
 FORM_CAPABILITIES = READ_FORMS | PREPARE_FORMS
 FIELD_LABELS = {
     "tab": "Статус задания", "kind": "Тип задания", "query": "Название или тема",
@@ -19,6 +20,11 @@ FIELD_LABELS = {
     "period": "Период", "topic": "Раздел аналитики", "days": "Количество дней",
     "audience": "Аудитория", "editorial_brief": "Дополнительные требования",
     "image_model": "Модель изображения", "image_ratio": "Пропорции изображения",
+    "length": "Длительность", "call_to_action": "Призыв в конце", "profile": "Профиль моделей",
+    "visual_review": "Проверка рисунков", "science_mode": "Режим содержания",
+    "max_api_calls": "Лимит вызовов ИИ", "recovery_budget": "Дополнительный резерв вызовов",
+    "source_script": "Исходный сценарий", "background_notes": "Дополнительный контекст",
+    "reference_materials": "Справочные материалы",
 }
 OPTION_LABELS = {
     "all": "Все", "active": "В работе", "approval": "На проверке", "ready": "Готовые",
@@ -34,6 +40,9 @@ OPTION_LABELS = {
     "dzen": "Дзен", "vc_ru": "vc.ru", "tenchat": "TenChat",
     "none": "Без изображения", "auto": "Автоматически", "gemini": "Gemini", "openai": "GPT Image",
     "4:5": "4:5", "1:1": "1:1",
+    "30": "30 секунд", "60": "60 секунд", "configured": "Настроенный профиль",
+    "gemini_ru": "Gemini (русская озвучка)", "gemini-3.1-flash-image": "Gemini",
+    "gpt-image-2.5-sunburst": "GPT Image", "general": "Общий", "scientific": "Научный",
 }
 
 
@@ -46,8 +55,11 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
                and cap.cost == Cost.NONE and not cap.always_confirm
                and verdict(cap.operation, cap.cost) == Verdict.RUN and cap.id in executors.EXECUTORS)
     is_prepare = (cap is not None and cap.id in PREPARE_FORMS and cap.operation == ToolOperation.GENERATE_DRAFT
-                  and cap.always_confirm and verdict(cap.operation, cap.cost) != Verdict.REFUSE
-                  and cap.id in executors.DESCRIBERS and cap.id in executors.CONFIRMERS)
+                  and verdict(cap.operation, cap.cost) != Verdict.REFUSE
+                  and cap.id in executors.CONFIRMERS
+                  and ((cap.always_confirm and cap.id in executors.DESCRIBERS)
+                       or (cap.id == "whiteboard_video" and cap.cost == Cost.PAID_LATER
+                           and cap.id in executors.EXECUTORS)))
     if not (is_read or is_prepare):
         raise ValueError("Для этого действия интерактивная форма пока недоступна.")
     schema = cap.params.model_json_schema()
@@ -56,6 +68,11 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
     # Only the known required topic may be initially blank. Validate everything
     # else using the original cross-field validators, not a second schema.
     validation_params = dict(params)
+    # Literal integer fields do not coerce HTML string values in Pydantic.
+    if capability_id == "whiteboard_video" and isinstance(validation_params.get("max_api_calls"), str):
+        value = validation_params["max_api_calls"]
+        if value in {"19", "25", "34", "45"}:
+            validation_params["max_api_calls"] = int(value)
     if partial and is_prepare and missing == {"topic"}:
         validation_params["topic"] = "Временная тема"
     initial = cap.params.model_validate(validation_params).model_dump(mode="json")
@@ -76,12 +93,18 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
             optional = True
         value = initial.get(name)
         field = {"name": name, "label": ("Тема материала" if name == "topic" and is_prepare else FIELD_LABELS[name]), "required": name in required,
-                 "value": "" if value is None else str(value)}
+                 "value": "" if value is None else str(value).lower() if isinstance(value, bool) else str(value)}
         if shape.get("type") == "string" and "enum" in shape:
             if optional or not all(v in OPTION_LABELS for v in shape["enum"]):
                 raise ValueError("Не поддерживается вариант выбора.")
             field.update(kind="select", options=[
                 {"value": v, "label": OPTION_LABELS[v]} for v in shape["enum"]])
+        elif shape.get("type") == "boolean":
+            field.update(kind="select", options=[{"value": "false", "label": "Нет"},
+                                                  {"value": "true", "label": "Да"}])
+        elif shape.get("type") == "integer" and "enum" in shape and optional:
+            field.update(kind="select", options=[{"value": "", "label": "Автоматический минимум"}] +
+                         [{"value": str(v), "label": str(v)} for v in shape["enum"]])
         elif shape.get("type") == "string" and "maxLength" in shape:
             field.update(kind="text", max_length=shape["maxLength"],
                          min_length=shape.get("minLength", 0))

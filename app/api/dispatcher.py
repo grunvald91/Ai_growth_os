@@ -31,7 +31,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "26"
+ASSET_VERSION = "27"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -72,7 +72,8 @@ from app.dispatcher.editable import CreateHints, EditCreation
 class FormSubmissionIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     message_id: UUID
-    params: dict[str, str] = Field(default_factory=dict, max_length=8)
+    revision: int = Field(default=0, ge=0)
+    params: dict[str, str] = Field(default_factory=dict, max_length=12)
 
 
 class MessageIn(BaseModel):
