@@ -14,6 +14,8 @@ from app.services.artifacts import ArtifactService
 from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDerivativeDraft
 
 async def run_content_once(session_factory, settings):
+    from app.seo.interruption import recover_interrupted_articles
+    recover_interrupted_articles(session_factory, settings.products_root)
     with session_factory() as db:
         from app.seo.queue import SEO_TASK_PREFIX, exhausted_products, SeoQuotaDeferred
         from app.seo.activation import enabled_product_ids, require_enabled
