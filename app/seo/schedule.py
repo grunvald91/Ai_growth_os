@@ -55,7 +55,7 @@ def published_today(db, product_id, *, now: datetime | None = None,
 
 def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER_DAY,
                     now: datetime | None = None, tz: ZoneInfo = OWNER_TZ,
-                    spread_days: int | None = None) -> list[datetime]:
+                    spread_days: int | None = None, preferred_days: tuple[date, ...] = ()) -> list[datetime]:
     """Reserve full calendar capacity across plans and already-published pages.
 
     Must be invoked while holding a row-level lock on this company's Product.
@@ -106,6 +106,14 @@ def available_slots(db, product_id, count: int, *, limit: int = PUBLICATIONS_PER
         due.append(planned)
         occupied[date_cursor].add(f"new:{len(due)}")
         return True
+
+    # First fill uncovered dates if the reserve scheduler supplied them.
+    # Existing reservations and the company's cap still apply.
+    for preferred in sorted(set(preferred_days)):
+        if len(due) == count:
+            break
+        if today <= preferred <= today + timedelta(days=90):
+            reserve(preferred)
 
     if spread_days is not None:
         # The SEO plan should feed the blog each day of its 7/30-day horizon,
