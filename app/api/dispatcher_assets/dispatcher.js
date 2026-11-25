@@ -139,6 +139,33 @@
       .replace(/рисованное видео/gi, 'простое видео');
   }
 
+  function renderChart(block) {
+    var figure = el('figure', 'dp-chart');
+    figure.appendChild(el('figcaption', 'dp-chart-title', block.title));
+    figure.appendChild(el('p', 'dp-chart-caption', block.period + ' · ' + block.source));
+    var points = block.points || [];
+    if (!points.length || points.some(function (p) {
+      return typeof p.value !== 'number' || !Number.isFinite(p.value) || p.value < 0;
+    })) return figure;
+    var max = Math.max.apply(null, points.map(function (p) { return p.value; }));
+    points.forEach(function (p) {
+      var row = el('div', 'dp-chart-row');
+      var heading = el('div', 'dp-chart-heading');
+      heading.appendChild(el('span', '', p.label));
+      heading.appendChild(el('strong', '', p.value.toLocaleString('ru-RU') + ' ' + block.unit));
+      row.appendChild(heading);
+      var track = el('div', 'dp-chart-track');
+      track.setAttribute('aria-hidden', 'true');
+      var bar = el('div', 'dp-chart-bar');
+      bar.style.width = (max ? 100 * p.value / max : 0) + '%';
+      track.appendChild(bar);
+      row.appendChild(track);
+      figure.appendChild(row);
+    });
+    if (block.note) figure.appendChild(el('p', 'dp-chart-caption', block.note));
+    return figure;
+  }
+
   function renderTable(block) {
     var wrap = el('div', 'dp-tablewrap');
     var table = el('table', 'dp-table');
@@ -379,6 +406,7 @@
       (step.blocks || []).forEach(function (item) {
         if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
         else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'chart') group.appendChild(renderChart(item));
         else if (item.type === 'table') group.appendChild(renderTable(item));
         else if (item.type === 'resource_list') group.appendChild(renderResourceList(item));
         else if (item.type === 'task') group.appendChild(renderTask(item));
@@ -425,8 +453,6 @@
         (block.approval.details || []).forEach(function (line) {
           preview.appendChild(el('p', '', line));
         });
-        if (block.approval.paid)
-          preview.appendChild(el('strong', 'dp-badge', 'Платно'));
         var choices = el('div', 'sg-workflow-buttons');
         var yes = el('button', 'dp-btn primary',
           block.approval.confirm_label || 'Подтвердить');
@@ -838,7 +864,6 @@
   function renderConfirm(block) {
     var card = el('div', 'dp-confirm' + (block.paid ? ' paid' : ''));
     card.appendChild(el('strong', 'dp-confirm-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
-    if (block.paid) card.appendChild(el('span', 'dp-badge', 'Платно'));
     var details = el('div', block.editable ? 'dp-create-details' : 'dp-confirm-list');
     if (block.editable) {
       var data = block.editable;
@@ -976,6 +1001,7 @@
         }) : block.items;
         if (items.length) bubble.appendChild(renderLinks(items));
       }
+      else if (block.type === 'chart') bubble.appendChild(renderChart(block));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
       else if (block.type === 'workflow') bubble.appendChild(renderWorkflow(block));

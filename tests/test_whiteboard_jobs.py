@@ -114,7 +114,7 @@ def test_simple_video_creation_uses_servgo_ui_without_changing_payload_contract(
         assert f'name="{name}"' in html, name
     assert 'id="wb-topic-dialog"' in html
     assert 'Продолжить к подтверждению' in html
-    assert 'Без платного запуска до вашего согласия.' in html
+    assert 'Создание начнётся после подтверждения.' in html
     assert 'value="robust"' in html and 'Автозавершение' in html
 
 

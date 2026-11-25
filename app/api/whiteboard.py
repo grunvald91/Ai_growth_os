@@ -227,7 +227,7 @@ def approval_card(state, product_id, error=None):
             '<div class="wb-facts"><div><span>Длительность</span>'
             f'<strong>{duration}</strong></div><div><span>Сценарий</span><strong>{scenes} сцен</strong></div>'
             f'<div><span>Лимит генерации</span><strong>До {state["max_api_calls"]} API-вызовов</strong></div></div>{cta_html}'
-            '<section class="wb-cost"><h3>Платная генерация</h3><p>Точная стоимость в долларах пока неизвестна. '
+            '<section class="wb-cost"><h3>Лимит генерации</h3><p>Точная стоимость в долларах пока неизвестна. '
             'Ограничено число API-вызовов, а не сумма списаний. '
             'После сбоя генерация автоматически продолжится только в подтверждённом лимите.</p></section>'
             '<details class="wb-details"><summary>Как будет создано видео</summary>'
@@ -236,7 +236,7 @@ def approval_card(state, product_id, error=None):
             f'<footer class="wb-actions"><form method="post" action="{base}/approve" class="sg-form">'
             f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
             '<label class="wb-consent"><input type="checkbox" name="confirmed" value="yes" required>'
-            f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов.{recovery}</span></label>'
+            f'<span>Подтверждаю создание этого видео: до {state["max_api_calls"]} API-вызовов.{recovery}</span></label>'
             '<button class="btn primary" type="submit">Подтвердить и сгенерировать</button></form>'
             f'<form method="post" action="{base}/cancel"><button class="btn secondary" type="submit">Остановить задание</button></form>'
             f'<a class="wb-back" href="/studio/products/{product_id}/whiteboard">К простым видео →</a></footer></section>')
@@ -350,7 +350,7 @@ def job_html(state, product_id, *, error=None):
                  '<p>Готовые этапы (сценарий, готовые рисунки и озвучка) сохранены и повторно не оплачиваются. '
                  'Заново будет вызван только остановившийся этап и следующие за ним.</p>'
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
-                 f'Разрешаю продолжить платную генерацию: осталось не более {left} API-вызовов из подтверждённого лимита</span></label>'
+                 f'Подтверждаю продолжение создания: осталось не более {left} API-вызовов из подтверждённого лимита</span></label>'
                  '<button class="btn primary" type="submit">Продолжить с места остановки</button></form>')
     errors = state.get('errors') or []
     if errors:
@@ -427,7 +427,7 @@ def job_html(state, product_id, *, error=None):
         model_names = ' · '.join(esc(value) for value in state['models'].values())
         body += (f'<details><summary>Модели и голос</summary><p>{model_names}</p>'
                  f'<p>Голос: {esc(state["request"]["voice"])}</p></details>'
-                 '<p>Генерация платная. Точная стоимость в долларах пока неизвестна. '
+                 '<p>Точная стоимость в долларах пока неизвестна. '
                  'Лимит ниже ограничивает число вызовов, а не сумму списаний. После временных сбоев '
                  'генерация продолжается автоматически, но только в пределах этого лимита.</p>'
                  f'<form method="post" action="{base}/approve" class="sg-form">'
@@ -575,13 +575,13 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             </label>
             <label class="sg-field"><span>Модель озвучки</span>
               <select name="profile">{profile_options}</select>
-              <small>Выбор сохраняется для этого задания. Модели и голос можно проверить до платного запуска.</small>
+              <small>Выбор сохраняется для этого задания. Модели и голос можно проверить до запуска.</small>
             </label>
             <label class="sg-field"><span>Проверка рисунков</span>
               <select name="visual_review">{review_options}</select>
               <small>Один проход критика с выборочной перерисовкой. Для 30 секунд может потребоваться 19 вызовов, для минуты — 34.</small>
             </label>
-            <label class="sg-field"><span>Максимум платных API-вызовов</span>
+            <label class="sg-field"><span>Лимит API-вызовов</span>
               <select name="max_api_calls">{call_options}</select>
               <small>При «Автозавершении» заранее подтверждается максимум на 5 вызовов больше необходимого: они расходуются только при необходимости. Отдельный резерв восстановления изображений (до 105 потенциально платных попыток) подтверждается при запуске. Это ограничение вызовов, а не стоимости в деньгах.</small>
             </label>
@@ -591,7 +591,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
         <footer class="wb-create-actions">
           <div class="wb-create-hint">
             <strong>Сначала — подтверждение</strong>
-            <span>Без платного запуска до вашего согласия.</span>
+            <span>Создание начнётся после подтверждения.</span>
           </div>
           <button class="btn primary" type="submit">Продолжить к подтверждению</button>
         </footer>

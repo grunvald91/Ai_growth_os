@@ -100,6 +100,22 @@ class TableBlock(_Block):
             raise ValueError("Table rows must match the columns")
 
 
+class ChartPoint(_Block):
+    label: str = Field(min_length=1, max_length=100)
+    value: float = Field(ge=0, allow_inf_nan=False)
+
+
+class ChartBlock(_Block):
+    """Server-computed nonnegative, comparable metrics; never model-produced data."""
+    type: Literal["chart"] = "chart"
+    title: str = Field(min_length=1, max_length=120)
+    unit: Literal["шт", "чел", "шт/день"]
+    period: str = Field(min_length=1, max_length=100)
+    source: Literal["BookingBot"] = "BookingBot"
+    note: str = Field(default="", max_length=300)
+    points: list[ChartPoint] = Field(min_length=2, max_length=8)
+
+
 class ResourceItem(_Block):
     """One clickable resource with its own status, never a detached text/link pair."""
     kind: Literal["video", "post", "plan", "material", "task"] = "material"
@@ -177,7 +193,7 @@ class PlanResultStep(_Block):
     review_href: str | None = None
     detail: str = Field(max_length=600)
     blocks: list[Annotated[
-        TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
+        TextBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | ResourceListBlock | TaskBlock | MaterialBlock,
         Field(discriminator="type"),
     ]] = Field(default_factory=list, max_length=8)
 

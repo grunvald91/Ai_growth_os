@@ -297,3 +297,12 @@
 .dp-tool-form>.dp-btn{min-height:44px;white-space:normal}
 
 .dp-tool-field textarea{resize:vertical;min-height:90px}
+
+/* Read-only analytics, accessible numeric labels and zero-based horizontal bars. */
+.dp-chart{margin:8px 0;display:grid;gap:9px;min-width:0}
+.dp-chart-title{font-weight:650;font-size:15px}
+.dp-chart-caption{font-size:12px;opacity:.8;margin:0;overflow-wrap:anywhere}
+.dp-chart-heading{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:13px}
+.dp-chart-heading span{min-width:0;overflow-wrap:anywhere}.dp-chart-heading strong{white-space:nowrap;font-variant-numeric:tabular-nums}
+.dp-chart-track{height:9px;background:var(--dp-soft,#e4e8ed);border-radius:3px;overflow:hidden}
+.dp-chart-bar{height:100%;background:#4787c9;border-radius:3px}

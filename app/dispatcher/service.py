@@ -937,7 +937,7 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
 
 async def _decline(ctx: Context, capability_id: str, stored: dict) -> Outcome:
     if capability_id == "repair_video_images":
-        return Outcome("Перерисовку не запускаю. Черновик остаётся без платного запуска.")
+        return Outcome("Перерисовку не запускаю. Черновик сохранён.")
     if capability_id == "whiteboard_video":
         from app.content.whiteboard.jobs import cancel_job
         try:
