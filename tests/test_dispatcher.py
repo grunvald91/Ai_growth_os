@@ -1596,3 +1596,52 @@ def test_clarification_rejects_actions_and_malformed_optional_choices():
     assert clean_blocks([{"type": "clarification", "options": ["A", "B"],
                           "capability": "create_post"}]) == []
     assert clean_blocks([{"type": "clarification", "options": ["A"]}]) == []
+
+
+@pytest.mark.asyncio
+async def test_conversational_edit_updates_same_pending_card_and_replays(db, product):
+    initial = await send(db, product, chip={
+        "label": "Четыре Stories", "capability": "create_creative",
+        "params": {"topic": "Уход за волосами", "format": "story", "frame_count": 4,
+                   "platform": "telegram", "audience": "Новые клиенты"}})
+    original = next(b for b in initial["messages"][1]["blocks"] if b["type"] == "confirm")
+    model, _ = llm({"intent": "edit_card", "confidence": 0.95, "params": {
+        "confirmation_id": original["confirmation_id"], "revision": 0, "frame_count": 6}})
+    result = await service.handle_message(db, context(db, product), model, text="Нет, сделай шесть экранов",
+                                          client_key="edit-six", mode="voice")
+    assert result["messages"][1]["id"] == initial["messages"][1]["id"]
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert card["revision"] == 1 and card["editable"]["frame_count"] == 6
+    assert card["editable"]["topic"] == "Уход за волосами"
+    assert card["editable"]["audience"] == "Новые клиенты"
+    assert card["state"] == "pending"
+    assert not tasks(db, "content_creative")
+    replay = await service.handle_message(db, context(db, product), model, text="Нет, сделай шесть экранов",
+                                          client_key="edit-six", mode="voice")
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == result["messages"][1]["blocks"]
+    with pytest.raises(PermissionError):
+        await service.confirm(db, context(db, product), original["confirmation_id"], accept=True, revision=0)
+    assert not tasks(db, "content_creative")
+    await service.confirm(db, context(db, product), original["confirmation_id"], accept=True, revision=1)
+    assert len(tasks(db, "content_creative")) == 1
+
+
+@pytest.mark.asyncio
+async def test_conversational_edit_rejects_stale_foreign_and_unknown_fields(db, product):
+    initial = await send(db, product, chip=post_chip())
+    card = next(b for b in initial["messages"][1]["blocks"] if b["type"] == "confirm")
+    for index, (account, params) in enumerate([
+        ("owner", {"revision": 5, "topic": "Другая тема"}),
+        ("other-owner", {"revision": 0, "topic": "Чужая тема"}),
+        ("owner", {"revision": 0, "format": "package"}),
+        ("owner", {"revision": 0, "topic": "x"}),
+    ]):
+        model, _ = llm({"intent": "edit_card", "confidence": 1, "params": {
+            "confirmation_id": card["confirmation_id"], **params}})
+        result = await send(db, product, text="Измени параметры", key=f"invalid-edit-{index}",
+                            model=model, account=account)
+        assert result["messages"][-1]["intent"] == "clarify"
+    conversation = service.open_conversation(db, product.id, "owner")
+    saved = next(m for m in service.messages(db, conversation) if m.confirmation_id == card["confirmation_id"])
+    assert next(b for b in saved.blocks if b["type"] == "confirm") == card
+    assert not list(db.scalars(select(Task)))
