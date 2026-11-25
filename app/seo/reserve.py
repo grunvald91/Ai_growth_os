@@ -8,11 +8,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from uuid import UUID
 
 from sqlalchemy import select
 
 from app.models.domain import Approval, Artifact, ArtifactStatus, Publication, Task, TaskStatus
 from app.seo.clustering import normalize
+from app.seo.contracts import SeoContentPlan
 from app.seo.publishing import (
     CLEAN_CRITIC_STATUSES, critic_verdict, duplicate_page_problems,
     public_blog_ready, servgo_buyer_intent_problems, static_problems,
@@ -79,15 +81,31 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
         Artifact.kind == "article").order_by(Artifact.created_at, Artifact.id)))
     article_tasks = {a.task_id for a in articles}
     seen_queries, seen_bodies, seen_tasks = set(), set(), set()
+    def remember_published(article):
+        seen_queries.add(normalize(article.seo.primary_query))
+        if article.reader_article:
+            body = ' '.join(' '.join(section.body.casefold().split()) for section in article.reader_article.sections)
+            if body:
+                seen_bodies.add(body)
+
     # Existing public pages must not be counted again as future supply.
     for row in db.scalars(select(Artifact).join(Publication, Publication.artifact_id == Artifact.id)
             .where(Artifact.product_id == product_id, Publication.product_id == product_id,
                    Publication.channel == 'own_site', Publication.status == 'published', Artifact.kind == 'article')):
         try:
             earlier = ArticleArtifact.model_validate_json(row.content)
-            seen_queries.add(normalize(earlier.seo.primary_query))
+            remember_published(earlier)
         except (ValueError, TypeError):
             continue
+    if exclude_article_id is not None:
+        # Simulate the proposed publication, including the queries/bodies it
+        # would render duplicates. It cannot be counted as future reserve.
+        proposed = db.get(Artifact, exclude_article_id)
+        if proposed is not None and proposed.product_id == product_id and proposed.kind == 'article':
+            try:
+                remember_published(ArticleArtifact.model_validate_json(proposed.content))
+            except (ValueError, TypeError):
+                pass
     def scheduled(task):
         return max(today, day(task.due_at, tz=tz)) if task.due_at else today
 
@@ -121,6 +139,13 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
     for request in requests:
         # Multiple source requests for one task are ambiguous, not a promise of supply.
         request_map[request.task_id] = request if request.task_id not in request_map else None
+    plans = {}
+    for plan in db.scalars(select(Artifact).where(Artifact.product_id == product_id,
+                                                  Artifact.kind == 'seo_content_plan')):
+        try:
+            plans[plan.id] = {item.id: item for item in SeoContentPlan.model_validate_json(plan.content).items}
+        except (ValueError, TypeError):
+            continue
     waits = {}
     for marker in db.scalars(select(Artifact).where(Artifact.product_id == product_id,
             Artifact.task_id.in_(task_map), Artifact.kind == 'seo_model_wait')):
@@ -139,6 +164,12 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
             data = ArticleProductionInput.model_validate_json(request.content)
             if (data.product_id != product_id or data.task_id not in (None, task.id)
                     or not data.seo_brief or not data.light or data.channel != "own_site"):
+                continue
+            _, plan_id, item_id = task.title.split(':', 2)
+            item = plans.get(UUID(plan_id), {}).get(item_id)
+            if (item is None or data.seo_brief.plan_item_id != item_id
+                    or normalize(data.seo_brief.primary_query) != normalize(item.primary_query)
+                    or data.seo_brief.stage != item.stage or data.seo_brief.intent != item.intent):
                 continue
             query = normalize(data.seo_brief.primary_query)
             if not query or query in seen_queries:
