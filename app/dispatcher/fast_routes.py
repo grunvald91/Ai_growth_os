@@ -50,7 +50,7 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     """Recognize explicit requests to CREATE an explainer/whiteboard video.
 
     A narrow fast path: it only extracts an explicitly provided topic and duration.
-    Generic video requests, scripts, previews, cancellations and ambiguous wording
+    Generic video requests (except explicit duration + topic), scripts, previews, cancellations and ambiguous wording
     still go to the language dispatcher. Approval and tenant checks remain in the
     existing whiteboard executor, not here.
     """
@@ -66,6 +66,12 @@ def quick_video_request(text: str) -> dict[str, str] | None:
         return None
     if re.match(r"^(?:пожалуйста\s+)?(?:покажи|найди|открой|посмотри|где|отмени|удали)\b", words):
         return None
+    # An explicit duration + video + subject is a complete nominal request, even without a verb.
+    nominal = re.match(r"^(?:минутн\w*|полуминутн\w*)\s+(?:видео|видеоролик|ролик)\s+на\s+тему\s*:", source, re.I)
+    if nominal and not re.search(r"[?;\n]|\b(?:и\s+(?:создай|сделай|покажи|опубликуй|отмени)|без\s+рисунк\w*)\b", source, re.I):
+        topic = source[nominal.end():].strip().strip(' «»"\t\r\n').rstrip(" .")
+        if 8 <= len(topic) <= 400:
+            return {"topic": topic, "length": "30" if source.casefold().startswith("полуминут") else "60"}
     if not re.search(r"\b(?:сделай|сделаем|создай|создадим|подготовь|подготовим|запусти|запустим|"
                      r"нарисуй|нарисуем|сгенерируй|сгенерируем|хочу|нужно|надо)\b", words[:120]):
         return None
