@@ -56,7 +56,8 @@ def failure_report(db: Session, product_id: UUID, *, limit: int = 100) -> dict:
             AgentRun.task_id == task.id,
         ).order_by(AgentRun.created_at.desc(), AgentRun.id.desc())))
         # Unstarted downstream agents may carry copies of the actual error.
-        # Prefer the latest started run with an error within the latest run batch.
+        # Report the latest started run with an error; its timestamp may be
+        # older than the latest attempt, so do not assert it caused this failure.
         latest = runs[0] if runs else None
         recorded = next((r for r in runs if r.error and r.started_at is not None
                          and r.status in {"failed", "completed"}), None)
