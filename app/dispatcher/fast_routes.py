@@ -36,7 +36,7 @@ def quick_capability(text: str) -> str | None:
     video = bool(re.search(r"\bвидео\b|\bвидеоролик\w*\b|\bролик\w*\b|\bанимаци\w*\b", words))
     creation = bool(re.match(r"^(сделай|создай|сгенерируй|запусти|нарисуй|подготовь)\s+(?:мне\s+)?(?:нов\w+\s+)?(?:видео|видеоролик|ролик|анимаци)", words))
     viewing = bool(re.search(r"\b(покажи|показать|посмотреть|посмотри|найди|открой|увидеть|где|готов\w*|последн\w*|недавн\w*|сделанн\w*|созданн\w*|запущенн\w*|мои|моих|своих|статус)\b", words))
-    diagnostic = bool(re.search(r"\b(?:почему|ошиб\w*|сломал\w*|не\s+готов\w*|не\s+додел\w*|перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*)\b", words))
+    diagnostic = bool(re.search(r"\b(?:почему|ошиб\w*|сломал\w*|не\s+готов\w*|не\s+додел\w*|перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|продолж\w*|додел\w*)\b", words))
     if video and viewing and not creation and not diagnostic:
         return "show_recent_videos"
 
@@ -63,7 +63,7 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     if re.search(r"\b(?:не\s+(?:делай|создавай|запускай)|не\s+надо)\b", words):
         return None
     # Editing and recovery requests must reach the semantic router, not a new video job.
-    if re.search(r"\b(?:перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|додел\w*)\b", words[:120]):
+    if re.search(r"\b(?:перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|додел\w*|продолж\w*)\b", words[:120]):
         return None
     # The user may want a script ABOUT a video, not the actual rendering.
     if re.search(r"\b(?:сценарий|промпт|раскадровку|обложку|превью|идею|текст\s+для\s+видео)\b", words):
