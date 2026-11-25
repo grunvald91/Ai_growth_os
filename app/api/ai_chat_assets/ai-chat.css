@@ -2163,3 +2163,34 @@ textarea {
     scroll-padding-top:58px;
   }
 }
+
+/* Shared ServGo notice standard; independent AI Chat shell.
+   Preserve composer layout, voice undo control and hidden states. */
+.ai-app :is(.ai-inline-alert,.dp-voice-note) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--s-line-2);
+  border-inline-start: 3px solid var(--s-accent);
+  border-radius: 10px;
+  background: var(--s-surface-2);
+  color: var(--s-text);
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.ai-app .ai-inline-alert {border-inline-start-color: var(--s-warning)}
+.ai-app .dp-voice-note.bad {border-inline-start-color: var(--s-danger)}
+.ai-app :is(.ai-inline-alert,.dp-voice-note) :is(strong,b) {font-weight: 650}
+.ai-app :is(.ai-inline-alert,.dp-voice-note)[hidden] {display: none !important}
+.ai-toast {
+  box-sizing: border-box;
+  max-width: min(400px, calc(100% - 48px));
+  border-radius: 10px;
+  font-weight: 400;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
