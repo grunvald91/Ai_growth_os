@@ -124,7 +124,10 @@ async def test_dispatcher_recovers_semantic_rejection_before_acting(db, tmp_path
     assert attempts == [False, True]
     answer = response["messages"][-1]
     assert answer["intent"] == "execute"
-    assert answer["capability"] == "show_work"
+    from app.dispatcher.models import DispatcherMessage
+    from uuid import UUID
+    stored = db.get(DispatcherMessage, UUID(answer["id"]))
+    assert stored.capability == "show_work"
     assert "Этого я пока не умею" not in answer["text"]
 
 
