@@ -136,8 +136,10 @@ async def show_plan(ctx: Context, params) -> Outcome:
 
 
 async def go_to(ctx: Context, params: GoToParams) -> Outcome:
+    from app.dispatcher.registry import PLATFORM_GUIDE
     label = page_label(params.target)
-    return Outcome(f"{label} — вот здесь.", f"{label} — на экране кнопка.",
+    guide = PLATFORM_GUIDE.get(params.target, label)
+    return Outcome(guide + " Откройте раздел по кнопке.", f"{label} — на экране кнопка.",
                    [{"type": "links", "items": [{"label": label, "href": page_href(params.target, ctx.product.id)}]}])
 
 
@@ -763,7 +765,11 @@ async def repair_video_images(ctx: Context, params) -> Outcome:
 async def confirm_repair_video_images(ctx: Context, stored: dict, via: str) -> Outcome:
     if ctx.studio_role not in (None, "owner", "co_owner"):
         return Outcome("Перерисовка видео доступна владельцу компании.", ok=False)
-    return await confirm_whiteboard_video(ctx, stored, via)
+    outcome = await confirm_whiteboard_video(ctx, stored, via)
+    if outcome.ok:
+        outcome.text = "Запустил перерисовку видео без повторной озвучки."
+        outcome.spoken = outcome.text
+    return outcome
 
 
 async def cancel_video(ctx: Context, params: CancelVideoParams) -> Outcome:
