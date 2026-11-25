@@ -550,3 +550,29 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 .dash-stat:focus-visible, .dash-context .ds-context-line:focus-visible, .dash-context-all:focus-visible, .ds-bn:focus-visible {
   outline: 2px solid var(--s-accent); outline-offset: 2px;
 }
+
+/* ServGo notice standard — paragraph feedback, not cards, dialogs or chips.
+   Opt in with ds-notice, or inherit it for existing paragraph alerts. */
+:is(p[role="alert"]:not(:empty),.ds-notice,.ds-error):not([hidden]) {
+  --ds-notice-accent: var(--s-accent);
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--s-line-2);
+  border-inline-start: 3px solid var(--ds-notice-accent);
+  border-radius: 10px;
+  background: var(--s-surface-2);
+  color: var(--s-text) !important;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+:is(p[role="alert"],.ds-error,.ds-notice--error) {--ds-notice-accent: var(--s-danger)}
+.ds-notice.ds-notice--warning {--ds-notice-accent: var(--s-warning)}
+.ds-notice.ds-notice--success {--ds-notice-accent: var(--s-success)}
+:is(p[role="alert"],.ds-notice,.ds-error) :is(strong,b) {font-weight: 650}
+:is(.ds-notice,.ds-error)[hidden] {display: none !important}
+.ds-toast {box-sizing:border-box;border-radius:10px;font-weight:400;line-height:1.55;overflow-wrap:anywhere}
