@@ -61,7 +61,6 @@ class Settings(BaseSettings):
     # The limit does not apply to ordinary Studio posts or content plans.
     seo_articles_per_day: int = Field(default=30, ge=1)
     seo_publications_per_day: int = Field(default=3, ge=1)
-    seo_schema_recovery_enabled: bool = False
     # Disabled by default. Set only AFTER the public verification key file
     # is accessible on servgo.ru. Key is a public domain verification token.
     geo_indexnow_key: str | None = None
@@ -71,6 +70,7 @@ class Settings(BaseSettings):
     seo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     seo_servgo_autorun_enabled: bool = False
     seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
+    seo_schema_recovery_enabled: bool = False
     # Critic bounds. The reviewer sees the complete task, so oversized contexts
     # are skipped rather than compacted; raise these together with the model.
     agent_critic_max_context_chars: int = Field(default=24000, ge=1000, le=2_000_000)
