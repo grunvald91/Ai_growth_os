@@ -46,21 +46,21 @@ class ToolFormField(_Block):
     name: str = Field(pattern=r"^[a-z][a-z_]{0,39}$")
     label: str = Field(min_length=1, max_length=100)
     kind: Literal["select", "text", "integer"]
-    value: str = Field(default="", max_length=400)
+    value: str = Field(default="", max_length=3500)
     required: bool = False
     options: list[FormOption] = Field(default_factory=list, max_length=20)
     min_length: int | None = Field(default=None, ge=0)
-    max_length: int | None = Field(default=None, ge=1, le=400)
+    max_length: int | None = Field(default=None, ge=1, le=3500)
     minimum: int | None = None
     maximum: int | None = None
 
 
 class ToolFormBlock(_Block):
     type: Literal["tool_form"] = "tool_form"
-    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights"]
+    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights", "create_post", "create_package"]
     title: str = Field(min_length=1, max_length=100)
     fields: list[ToolFormField] = Field(min_length=1, max_length=8)
-    submit_label: Literal["Показать результат"] = "Показать результат"
+    submit_label: Literal["Показать результат", "Подготовить подтверждение"] = "Показать результат"
 
 
 class Chip(_Block):

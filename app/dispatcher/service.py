@@ -447,17 +447,53 @@ def _visual_preferences(text: str) -> tuple[str | None, str | None]:
 
 
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
-                         mode: str = "text", chip: dict | None = None, creation=None) -> dict:
+                         mode: str = "text", chip: dict | None = None, creation=None, form_submission=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
+    if form_submission is not None:
+        from app.dispatcher.forms import PREPARE_FORMS, form_for
+        source = db.scalar(select(DispatcherMessage).where(
+            DispatcherMessage.id == form_submission.message_id,
+            DispatcherMessage.conversation_id == conversation.id,
+            DispatcherMessage.product_id == ctx.product.id,
+            DispatcherMessage.role == "assistant",
+            DispatcherMessage.intent == "form"))
+        if source is None:
+            raise LookupError("Форма не найдена в текущей беседе.")
+        stored_form = next((b for b in source.blocks or [] if b.get("type") == "tool_form"), None)
+        if stored_form is None or stored_form.get("capability") != source.capability:
+            raise ValueError("Форма больше недоступна.")
+        target = stored_form["capability"]
+        submitted = form_submission.params
+        if not submitted.keys() <= {f["name"] for f in stored_form["fields"]}:
+            raise ValueError("В форме есть неизвестные поля.")
+        # Re-check the current registry and validate the complete request.
+        form_for(target, submitted, partial=False)
+        if target in PREPARE_FORMS:
+            # One preparation per saved form, including cross-tab repeats.
+            client_key = "form:" + str(source.id)
+        chip = {"label": stored_form["title"], "capability": target, "params": submitted}
+        mode = "chip"
     if client_key:
         existing = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.client_key == client_key))
         if existing is not None:
             reply = db.scalar(select(DispatcherMessage).where(
-                DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.seq == existing.seq + 1))
+                DispatcherMessage.conversation_id == conversation.id,
+                DispatcherMessage.role == "assistant",
+                DispatcherMessage.params["_reply_to"].as_string() == str(existing.id)).limit(1))
+            if reply is None:
+                # Compatibility for older messages. Never replay an unrelated
+                # update or a response explicitly linked to another request.
+                candidate = db.scalar(select(DispatcherMessage).where(
+                    DispatcherMessage.conversation_id == conversation.id,
+                    DispatcherMessage.seq == existing.seq + 1,
+                    DispatcherMessage.role == "assistant"))
+                if (candidate is not None and candidate.capability != "task_result"
+                        and not (candidate.params or {}).get("_reply_to")):
+                    reply = candidate
             edited = None
             if reply is not None and (reply.params or {}).get("_edited_card_id"):
                 edited = db.scalar(select(DispatcherMessage).where(
@@ -603,7 +639,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                     intent = "clarify"
                     reply_text = spoken = "Уточните, какие данные и за какой период нужны."
                 else:
-                    reply_text = spoken = "Укажите нужные параметры и нажмите «Показать результат»."
+                    reply_text = spoken = ("Укажите параметры и нажмите «" + blocks[0]["submit_label"] + "».")
         elif decision.intent == "edit_card":
             chips = []
             if decision.confidence < CONFIDENCE_TO_ACT:
@@ -620,7 +656,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                                   text="Параметры обновлены. Проверьте карточку перед подтверждением.",
                                   spoken="Параметры обновлены.",
                                   blocks=[{"type": "text", "text": "Параметры обновлены. Проверьте карточку перед подтверждением."}],
-                                  intent="edit_card", params={"_edited_card_id": edited["id"]},
+                                  intent="edit_card", params={"_edited_card_id": edited["id"], "_reply_to": str(user.id)},
                                   confidence=decision.confidence, model=model_name)
                     db.commit()
                     return {"messages": [to_dict(user), edited, to_dict(answer)], "replayed": False}
@@ -698,6 +734,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         blocks.append({"type": "chips", "items": chips})
     params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
         (decision.params if decision else {})
+    params = {**params, "_reply_to": str(user.id)}
     if workflow_id:
         params = {**params, "_workflow_id": workflow_id}
     answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
@@ -753,7 +790,9 @@ async def edit_confirmation(db: Session, ctx: Context, edit, *, commit: bool = T
         *[replacement if b.get("type") == "confirm" else b
           for b in blocks if b.get("type") != "text"],
     ])
-    card.params = {**described.params, "_capability": capability_id}
+    reply_to = (card.params or {}).get("_reply_to")
+    card.params = {**described.params, "_capability": capability_id,
+                   **({"_reply_to": reply_to} if reply_to else {})}
     card.capability = capability_id
     card.text = "Параметры обновлены. Проверьте и подтвердите создание."
     card.spoken = card.text
@@ -794,6 +833,7 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
             raise PermissionError("Голосом можно ответить только на последний вопрос")
     stored = dict(card.params or {})
     capability_id = str(stored.pop("_capability", card.capability or ""))
+    stored.pop("_reply_to", None)
     card.confirmation_state = "confirmed" if accept else "declined"
     card.decided_at = datetime.now(timezone.utc)
     card.blocks = [({**b, "state": card.confirmation_state} if b.get("type") == "confirm" else b) for b in card.blocks]

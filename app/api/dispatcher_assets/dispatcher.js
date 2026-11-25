@@ -243,10 +243,11 @@
     return wrapper;
   }
 
-  function renderToolForm(block) {
+  function renderToolForm(block, messageId) {
     var wrapper = el('article', 'sg-resource-widget');
     wrapper.setAttribute('data-sg-resource-widget', 'tool_form');
-    var details = resourceDetails(block.title, 'Настройте параметры просмотра.');
+    var preparing = block.submit_label === 'Подготовить подтверждение';
+    var details = resourceDetails(block.title, preparing ? 'Заполните параметры. Запуск только после отдельного подтверждения.' : 'Настройте параметры просмотра.');
     details.open = true;
     var body = details.querySelector('.sg-resource-details-body');
     var fields = el('form', 'dp-tool-form');
@@ -263,8 +264,8 @@
           control.appendChild(entry);
         });
       } else {
-        control = el('input', '');
-        control.type = field.kind === 'integer' ? 'number' : 'text';
+        control = el(field.max_length > 400 ? 'textarea' : 'input', '');
+        if (control.tagName === 'INPUT') control.type = field.kind === 'integer' ? 'number' : 'text';
         if (field.minimum != null) control.min = String(field.minimum);
         if (field.maximum != null) control.max = String(field.maximum);
         if (field.min_length != null) control.minLength = field.min_length;
@@ -282,6 +283,7 @@
     var submit = el('button', 'dp-btn primary', block.submit_label);
     submit.type = 'submit';
     fields.appendChild(submit);
+    var submissionKey = null, previousValues = null;
     fields.addEventListener('submit', function (event) {
       event.preventDefault();
       if (busy || !fields.reportValidity()) return;
@@ -289,8 +291,23 @@
       controls.forEach(function (control) {
         if (control.value !== '') params[control.name] = control.value;
       });
-      // Read-only request; the regular dispatcher validates params and scope.
-      sendChip({label: block.title, capability: block.capability, params: params});
+      var signature = JSON.stringify(params);
+      if (signature !== previousValues || !submissionKey) submissionKey = newKey();
+      previousValues = signature;
+      submit.disabled = true;
+      var accepted = send({mode:'chip', client_key:submissionKey,
+        form_submission:{message_id:messageId, params:params}}, block.title, false, function (ok) {
+        if (ok) {
+          submissionKey = null;
+          if (preparing) {
+            submit.textContent = 'Подтверждение подготовлено';
+            controls.forEach(function (control) { control.disabled = true; });
+            return;
+          }
+        }
+        submit.disabled = false;
+      });
+      if (!accepted) submit.disabled = false;
     });
     body.appendChild(fields);
     wrapper.appendChild(details);
@@ -948,7 +965,7 @@
         if (!duplicate) bubble.appendChild(el('p', 'dp-text', shortProgress && started ? 'Видео создаётся' : voiceHoldEnabled ?
           String(block.text).replace(/^Запустил рисованное видео\./, 'Запустил простое видео.') : block.text));
       }
-      else if (block.type === 'tool_form') bubble.appendChild(renderToolForm(block));
+      else if (block.type === 'tool_form') bubble.appendChild(renderToolForm(block, message.id));
       else if (block.type === 'clarification') bubble.appendChild(renderClarification(block));
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
       else if (block.type === 'links') {

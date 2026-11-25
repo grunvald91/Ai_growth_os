@@ -111,8 +111,9 @@ try{
     await page.waitForFunction(()=>!document.querySelector(".dp-home").classList.contains("busy"));
     assert.equal(formCalls.length,1);
     assert.equal(formCalls[0].mode,"chip");
-    assert.equal(formCalls[0].chip.capability,"show_insights");
-    assert.deepEqual(formCalls[0].chip.params,{topic:"clients",days:"30"});
+    assert.equal(formCalls[0].form_submission.message_id,"form-message");
+    assert.equal(formCalls[0].chip,undefined);
+    assert.deepEqual(formCalls[0].form_submission.params,{topic:"clients",days:"30"});
     assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
