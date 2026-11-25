@@ -859,3 +859,10 @@ from app.dispatcher import recovery  # noqa: E402
 
 DESCRIBERS.update(recovery.DESCRIBERS)
 CONFIRMERS.update(recovery.CONFIRMERS)
+
+
+from app.dispatcher import publications  # noqa: E402
+
+EXECUTORS.update(publications.EXECUTORS)
+DESCRIBERS.update(publications.DESCRIBERS)
+CONFIRMERS.update(publications.CONFIRMERS)
