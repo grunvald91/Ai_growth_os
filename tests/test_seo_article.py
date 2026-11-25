@@ -393,3 +393,53 @@ def test_seo_critic_requires_marketing_value_without_invented_sales_claims():
     assert "не требуй искусственной продающей воронки" in SEO_CRITIC_RULES.casefold()
     assert "маркетинговую подачу" in SERVGO_CRITIC_RULES
     assert "Нельзя выдавать предполагаемую выгоду за измеренный рост бизнеса" in SERVGO_CRITIC_RULES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change_inputs", [False, True])
+async def test_seo_retry_resumes_only_compatible_checkpoints(db, product, tmp_path, change_inputs):
+    from app.models.domain import AgentRun, Task, TaskStatus, CostRecord
+    from app.seo.activation import set_enabled
+    from uuid import uuid4
+
+    set_enabled(db, product.id, enabled=True, actor="test")
+    task = Task(product_id=product.id, title=f"SEO-ARTICLE:{uuid4()}:a001",
+                assigned_agent="content_factory", status=TaskStatus.QUEUED)
+    db.add(task)
+    db.commit()
+    request = request_for(product).model_copy(update={
+        "light": True, "task_id": task.id, "channel": "own_site",
+    })
+    outputs = outputs_with_geo()[:6]
+    # Missing final answer twice: the first five stages have committed outputs.
+    bad = outputs_with_geo(final=False)[5]
+    first = SequenceProvider(outputs[:5] + [bad, bad])
+    workflow = build_article_production(db, Settings(products_root=tmp_path), first)
+    failed = await workflow.run(request)
+    assert failed.status == "failed", failed.error
+    assert len(failed.checkpoint_artifact_ids) == 5
+    assert db.get(Task, task.id).status == TaskStatus.FAILED
+    db.get(Task, task.id).status = TaskStatus.QUEUED
+    db.commit()
+
+    if change_inputs:
+        request = request.model_copy(update={"topic": "Другая тема статьи"})
+    second = SequenceProvider(outputs if change_inputs else outputs[5:])
+    completed = await build_article_production(
+        db, Settings(products_root=tmp_path), second
+    ).run(request)
+    assert completed.status == "completed", completed.error
+    expected = 6 if change_inputs else 1
+    assert len(second.requests) == expected
+    assert second.requests[-1].metadata["team_role"] == "marketing_editor"
+    reused = [db.get(AgentRun, rid) for rid in completed.run_ids
+              if db.get(AgentRun, rid).provider == "checkpoint"]
+    assert len(reused) == 6 - expected
+    assert not list(db.scalars(select(CostRecord).where(
+        CostRecord.agent_run_id.in_([run.id for run in reused])
+    )))
+    if not change_inputs:
+        assert completed.checkpoint_artifact_ids[:5] == failed.checkpoint_artifact_ids
+    assert len(list(db.scalars(select(Artifact).where(
+        Artifact.task_id == task.id, Artifact.kind == "article"
+    )))) == 1
