@@ -56,7 +56,18 @@ async def show_task(ctx: Context, params) -> Outcome:
         return Outcome("Не нашёл такое задание в выбранной компании.", ok=False,
                        blocks=[_links(ctx, "work")])
     rows = _work_items_for_tasks(ctx.db, ctx.product.id, [task])
-    return _task_rows_outcome(ctx, rows, len(rows))
+    outcome = _task_rows_outcome(ctx, rows, len(rows))
+    if ctx.studio_role in (None, "owner", "co_owner"):
+        capability = None
+        label = ""
+        if task.assigned_agent == "whiteboard_renderer" and task.status.value == "failed":
+            capability, label = "resume_video", "Продолжить видео"
+        elif task.assigned_agent in {"content_factory", "content_creative", "content_editor"} and task.status.value in {"failed", "cancelled"}:
+            capability, label = "retry_content_task", "Повторить задание"
+        if capability:
+            outcome.blocks.append({"type": "chips", "items": [{"label": label, "capability": capability,
+                                                               "params": {"task_id": str(task.id)}}]})
+    return outcome
 
 
 async def show_work(ctx: Context, params) -> Outcome:
