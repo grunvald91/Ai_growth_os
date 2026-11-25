@@ -552,3 +552,75 @@ async def test_updated_post_carries_revision_lineage_for_old_card_marker(db, pro
                              {"material_id": str(updated.id)}, key="view-revision"), "material")[0]
     assert card["revision_of"] == str(original.id)
     assert card["version"] == updated.version
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_vk_schedule_and_cancel_use_real_intent(db, product, monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+    from app import social_vk
+    post = material(db, product, status=ArtifactStatus.APPROVED, channel="vk")
+    connection = SimpleNamespace(id=uuid4(), account_id="12345", account_name="Группа",
+                                 is_community_token=False)
+    monkeypatch.setattr(social_vk, "connected", lambda *args: connection)
+    settings = Settings(_env_file=None, content_vk_autopost_enabled=True)
+    context = Context(db=db, product=product, settings=settings, account="owner")
+    outcome, card, _ = await service.act(context, "schedule_vk_post",
+                                          {"post_id": str(post.id), "when": when_text()})
+    assert card is not None and db.scalar(select(Publication)) is None
+    done = await service.executors.CONFIRMERS["schedule_vk_post"](context, card.params, "button")
+    assert done.ok
+    pub = db.scalar(select(Publication))
+    assert pub.channel == "vk" and pub.status == "scheduled" and pub.approval_id
+    _, cancel_card, _ = await service.act(context, "cancel_publication", {"publication_id": str(pub.id)})
+    assert cancel_card and pub.status == "scheduled"
+    done = await service.executors.CONFIRMERS["cancel_publication"](context, cancel_card.params, "button")
+    assert done.ok and pub.status == "cancelled" and post.status == ArtifactStatus.APPROVED
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_move_telegram_atomic_and_scope(db, product):
+    from app.content.telegram_publishing import schedule_post
+    post = material(db, product, status=ArtifactStatus.APPROVED)
+    connection = channel(db, product)
+    pub = schedule_post(db, post.id, connection.id, datetime.now(timezone.utc) + timedelta(days=1))
+    context = ctx(db, product)
+    _, card, _ = await service.act(context, "move_publication",
+        {"publication_id": str(pub.id), "when": when_text(days=3)})
+    assert card and pub.status == "scheduled"
+    # A disconnected destination must not cancel the old schedule.
+    connection.status = ArtifactStatus.REJECTED
+    db.commit()
+    done = await service.executors.CONFIRMERS["move_publication"](context, card.params, "button")
+    assert not done.ok and pub.status == "scheduled"
+    assert len(list(db.scalars(select(Publication)))) == 1
+    connection.status = ArtifactStatus.APPROVED
+    db.commit()
+    done = await service.executors.CONFIRMERS["move_publication"](context, card.params, "button")
+    assert done.ok and pub.status == "cancelled"
+    active = db.scalar(select(Publication).where(Publication.status == "scheduled"))
+    assert active and active.id != pub.id and active.artifact_id == post.id
+    other = Product(name="Other", slug="other-publications")
+    db.add(other)
+    db.commit()
+    outcome, card, _ = await service.act(ctx(db, other), "cancel_publication",
+                                        {"publication_id": str(active.id)})
+    assert not outcome.ok and card is None
+    outcome, _, _ = await service.act(ctx(db, other), "list_publications", {})
+    assert "не найдено" in outcome.text
+    active.status = "delivery_unknown"
+    db.commit()
+    outcome, card, _ = await service.act(context, "cancel_publication", {"publication_id": str(active.id)})
+    assert not outcome.ok and card is None
+
+
+@pytest.mark.asyncio
+async def test_telegram_confirmation_rejects_changed_channel(db, product):
+    material(db, product, status=ArtifactStatus.APPROVED)
+    connection = channel(db, product)
+    answer = await chip(db, product, "schedule_post", {"when": when_text()})
+    card = blocks(answer, "confirm")[0]
+    connection.content = json.dumps({"chat_id": "-100999", "title": "Другой канал"})
+    db.commit()
+    await service.confirm(db, ctx(db, product), card["confirmation_id"], accept=True)
+    assert db.scalar(select(Publication)) is None
