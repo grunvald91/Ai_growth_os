@@ -322,6 +322,16 @@ async def _seo_publication_loop(settings):
         await asyncio.sleep(60)
 
 
+async def _seo_watchdog_loop(settings):
+    from app.seo.watchdog import run_watchdog_once
+    while True:
+        try:
+            await run_watchdog_once(SessionLocal, settings)
+        except Exception as exc:
+            logging.getLogger(__name__).warning('seo_watchdog_tick_failed type=%s', type(exc).__name__)
+        await asyncio.sleep(900)
+
+
 async def _calendar_loop(settings):
     from app.content.calendar import tick_calendar
     from app.comments.instagram_oauth import prune_expired_pending_oauth
@@ -378,6 +388,8 @@ async def main() -> None:
     calendar_task = asyncio.create_task(_calendar_loop(settings))
     seo_publication_task = asyncio.create_task(_seo_publication_loop(settings))
     comment_tasks = []
+    if settings.seo_watchdog_enabled:
+        comment_tasks.append(asyncio.create_task(_seo_watchdog_loop(settings)))
     if settings.comment_background_poll_enabled:
         comment_tasks.append(asyncio.create_task(_comment_poll_loop(settings)))
     if settings.comment_background_draft_enabled:
