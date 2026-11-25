@@ -1,4 +1,4 @@
-"""SEO-only delayed failover; the ledger lives on the shared products volume.
+"""Shared delayed model failover; the ledger lives on the shared products volume.
 
 A real pending request is the availability probe. A successful primary response
 clears the outage. A fallback is permitted only after another failed primary
@@ -14,8 +14,6 @@ from pathlib import Path
 
 import httpx
 
-from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
-
 WAIT_KIND = "seo_model_wait"
 DAY = 24 * 60 * 60
 HOUR = 60 * 60
@@ -24,15 +22,14 @@ TRANSIENT_STATUS = frozenset({404, 408, 425, 429, 500, 502, 503, 504})
 
 class ModelDeferred(RuntimeError):
     def __init__(self, retry_at: float):
-        super().__init__("SEO model availability: waiting for the next check")
+        super().__init__("Model unavailable: waiting for the next scheduled check")
         self.retry_at = retry_at
 
 
 def transient(exc):
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code in TRANSIENT_STATUS
-    return isinstance(exc, (TimeoutError, httpx.TransportError,
-                            ProviderEmptyResponseError, ProviderMalformedResponseError))
+    return isinstance(exc, (TimeoutError, httpx.TransportError))
 
 
 def wait_until(deferred: ModelDeferred) -> str:
@@ -145,3 +142,12 @@ class AvailabilityPolicy:
                 if not transient(exc):
                     raise
         raise ModelDeferred(max(retry_at, self.clock() + 60))
+
+
+def policy_for(settings, *, seo=False, endpoint=None, provider=None):
+    """All configured model names are eligible; no catalog allowlist or preflight approval."""
+    if not (settings.llm_availability_enabled or (seo and settings.seo_model_availability_enabled)):
+        return None
+    provider = provider or settings.llm_provider
+    endpoint = endpoint or (settings.xai_base_url if provider == "xai" else settings.anthropic_base_url)
+    return AvailabilityPolicy(settings.products_root, provider + ":" + str(endpoint).rstrip("/"))
