@@ -33,6 +33,11 @@ state.messages.push({
       {name:"days",label:"Количество дней",kind:"integer",value:"",required:false,minimum:7,maximum:365}
     ]}]
 });
+state.messages.push({id:"chart-message",seq:4,role:"assistant",text:"Данные записей",
+  blocks:[{type:"chart",title:"Записи по дням",source:"BookingBot",period:"01.11.2026–24.11.2026",
+    unit:"шт",note:"Тестовые данные браузера",points:[
+      {label:"Пн <img src=x>",value:0},{label:"Вт",value:4},{label:"Ср",value:2}
+    ]}]});
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -115,6 +120,11 @@ try{
     assert.equal(formCalls[0].chip,undefined);
     assert.deepEqual(formCalls[0].form_submission.params,{topic:"clients",days:"30"});
     assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
+    const chart=page.locator(".dp-chart");
+    assert.equal(await chart.count(),1);
+    assert.match(await chart.innerText(),/BookingBot/);
+    assert.equal(await chart.locator("img").count(),0);
+    assert.deepEqual(await chart.locator(".dp-chart-bar").evaluateAll(nodes=>nodes.map(n=>n.style.width)),["0%","100%","50%"]);
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -129,6 +139,7 @@ try{
     assert.equal(await nativeForm.locator("details[open]").count(),1);
     await nativeForm.getByLabel("Количество дней").fill("7");
     assert.equal(await nativeForm.getByLabel("Количество дней").inputValue(),"7");
+    assert.equal(await legacy.locator(".dp-chart-row").count(),3);
     await legacy.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");

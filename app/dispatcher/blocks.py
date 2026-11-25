@@ -174,7 +174,7 @@ class ConfirmBlock(_Block):
     details: list[str] = Field(default_factory=list)
     confirm_label: str = "Подтвердить"
     cancel_label: str = "Отмена"
-    # Shown on the card so nobody confirms a payment they did not understand.
+    # Internal risk/cost metadata; the user sees the actual action and limit.
     paid: bool = False
     state: Literal["pending", "confirmed", "declined"] = "pending"
     revision: int = Field(default=0, ge=0)

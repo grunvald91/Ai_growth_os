@@ -33,7 +33,7 @@ def chart_for(insights: Insights, topic: str) -> dict | None:
         title = "Темп записей: прошлый период и ближайшие дни"
         keys = [("bookings_per_day_past", "Прошедший период"), ("bookings_per_day_upcoming", "Уже записано вперёд")]
         unit = "шт/день"
-        note = "Будущие даты могут ещё заполниться; это не прогноз."
+        note = "Будущие даты могут ещё заполниться; это не прогноз. Период выше относится к прошлым данным."
     else:
         return None
     expected_unit = "шт" if unit == "шт/день" else unit

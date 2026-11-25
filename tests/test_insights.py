@@ -688,3 +688,35 @@ async def test_tasks_from_other_sources_are_not_touched(db, linked, tmp_path):
     db.commit()
     _, builder = specialist_builder(tmp_path)
     assert await run_specialists_once(factory(db), env(), builder=builder) == 0
+
+
+def test_dispatcher_chart_uses_only_computed_comparable_facts():
+    from app.dispatcher.blocks import clean_blocks
+    from app.insights.charts import chart_for
+    result = compute(schedule(twelve_bookings()), TODAY, 30, 14)
+    weekdays = chart_for(result, "weekdays")
+    assert clean_blocks([weekdays])[0]["type"] == "chart"
+    assert weekdays["source"] == "BookingBot" and weekdays["unit"] == "шт"
+    assert len(weekdays["points"]) == 7
+    assert sum(p["value"] for p in weekdays["points"]) == 11
+    assert chart_for(result, "money") is None
+    statuses = chart_for(result, "cancellations")
+    assert [p["value"] for p in statuses["points"]] == [0, 11, 1]
+    assert chart_for(result, "clients")["unit"] == "чел"
+    assert "не подтверждение визита" in chart_for(result, "clients")["note"]
+    empty = compute(schedule([]), TODAY, 30, 14)
+    assert chart_for(empty, "clients") is None
+    assert "Мало данных" in chart_for(empty, "weekdays")["note"]
+    invalid = {**weekdays, "points": [{"label": "x", "value": -1}, {"label": "y", "value": 1}]}
+    assert clean_blocks([invalid]) == []
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_chart_presentation_and_table_fallback(db, linked, platform):
+    answer = await chip(db, linked, "show_insights", {"topic": "weekdays", "presentation": "chart"})
+    chart = next(b for b in answer["blocks"] if b["type"] == "chart")
+    assert chart["source"] == "BookingBot"
+    assert any(b["type"] == "table" for b in answer["blocks"])
+    table = await chip(db, linked, "show_insights", {"topic": "weekdays", "presentation": "table"}, key="table")
+    assert not any(b["type"] == "chart" for b in table["blocks"])
+    assert any(b["type"] == "table" for b in table["blocks"])

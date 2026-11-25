@@ -342,7 +342,7 @@ def job_html(state, product_id, *, error=None):
                  + ''.join(f'<option value="{n}"{" selected" if n == 5 else ""}>{n}</option>' for n in (3, 5, TOP_UP_STEP))
                  + '</select></label>'
                  '<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
-                 'Разрешаю дополнительные платные вызовы, чтобы доделать это видео</span></label>'
+                 'Подтверждаю дополнительные вызовы для завершения видео</span></label>'
                  '<button class="btn primary" type="submit">Добавить вызовы и доделать видео</button></form>')
     elif state.get('resumable'):
         left = state.get('call_limit_total', state['max_api_calls']) - state['calls']
@@ -398,7 +398,7 @@ def job_html(state, product_id, *, error=None):
                      'вызовов из старого общего лимита.</p>')
         if state['status'] == 'waiting_approval':
             body += ('<p class="sg-warning" role="status"><strong>Задание на перерисовку создано.</strong> '
-                     'Для запуска новых рисунков подтвердите дополнительные платные вызовы ниже.</p>')
+                     'Для создания новых рисунков подтвердите дополнительные вызовы ниже.</p>')
     review = state.get('visual_review_result')
     if isinstance(review, dict):
         if review.get('author_decision_fallback'):
