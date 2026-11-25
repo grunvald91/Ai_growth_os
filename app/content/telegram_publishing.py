@@ -99,7 +99,7 @@ def connected_channels(db, product_id: UUID) -> list[Artifact]:
 
 
 def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now=None,
-                  plan_id: UUID | None = None, slot_id: str | None = None) -> Publication:
+                  plan_id: UUID | None = None, slot_id: str | None = None, commit=True) -> Publication:
     """Explicit owner scheduling; multiple channels may be targeted independently."""
     now = now or datetime.now(timezone.utc)
     if when.tzinfo is None or when.utcoffset() is None:
@@ -202,7 +202,10 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         plan_slot["telegram_connection_id"] = str(connection.id)
         plan_slot["state"] = "scheduled"
         plan_row.content = json.dumps(plan, ensure_ascii=False)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return publication
 
 
