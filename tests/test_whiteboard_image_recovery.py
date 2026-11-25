@@ -48,3 +48,14 @@ def test_non_image_failure_and_legacy_model():
     assert schedule_image_recovery(state, p, 'provider_server_error', now=now) is None
     assert 'image_outage_since' not in state
     assert effective_image_model({'active_image_model': GPT_IMAGE_MODEL}, payload(enabled=False)) == DEFAULT_IMAGE_MODEL
+
+
+
+def test_reserve_is_bounded_and_not_available_for_legacy_approvals():
+    from app.content.whiteboard.jobs import call_limit
+    p = payload()
+    p.max_api_calls = 14
+    state = {'image_recovery_failures': 1000}
+    assert call_limit(state, p) == 14 + IMAGE_RECOVERY_RESERVE
+    p.image_recovery = False
+    assert call_limit(state, p) == 14
