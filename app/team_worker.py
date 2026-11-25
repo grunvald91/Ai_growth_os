@@ -244,6 +244,9 @@ async def run_once() -> int:
         from app.social_vk import deliver_once as run_due_vk_post_once
         if await run_due_vk_post_once(SessionLocal, settings):
             return 1
+    from app.seo.article_retry import recover_failed_schema_once
+    with SessionLocal() as db:
+        recover_failed_schema_once(db, enabled=settings.seo_schema_recovery_enabled)
     from app.content.worker import run_content_once
     content_count = await run_content_once(SessionLocal, settings)
     if content_count:
