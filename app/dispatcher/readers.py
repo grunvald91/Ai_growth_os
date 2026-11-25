@@ -82,6 +82,7 @@ def snapshot(db: Session, product: Product) -> dict:
             for s in upcoming_slots(data) if s.get("slot_id")
         ][:20]
     from app.dispatcher.publications import publication_snapshot
+    from app.content.review import material_data
     materials = list(db.scalars(select(Artifact).where(
         Artifact.product_id == product.id, Artifact.kind == "channel_text",
         Artifact.status.in_([ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED]),
@@ -89,7 +90,8 @@ def snapshot(db: Session, product: Product) -> dict:
     return {
         "recent_publications": publication_snapshot(db, product.id),
         "recent_materials": [{"material_id": str(row.id), "title": row.title[:140],
-                              "kind": row.kind, "status": row.status.value} for row in materials],
+                              "kind": row.kind, "status": row.status.value,
+                              "channel": str(material_data(row).get("channel") or "")[:40]} for row in materials],
         "editable_plan": editable,
         "recent_tasks": [{"task_id": row["id"], "title": str(row["title"])[:140],
                           "status": row["state"], "kind": row.get("kind_label", ""),
