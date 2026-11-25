@@ -27,7 +27,9 @@ def _when(value: str | None, zone: str) -> str:
 
 
 def _state(item: dict) -> tuple[str, str]:
-    if item.get("published_confirmed") or item.get("publication_path"):
+    if item.get("publication_mismatch"):
+        return "mismatch", "Проверить запись публикации"
+    if item.get("published_confirmed"):
         return "published", "Опубликована"
     if item.get("task_status") == "failed":
         reason = item.get("failure_code")
@@ -88,7 +90,7 @@ def seo_plan_board(run: dict | None, product_id: UUID, *, autorun: bool,
                    key=lambda a: (a.get("scheduled_iso") or "", str(a.get("title") or "")))
     statuses = [_state(item)[0] for item in items]
     published = statuses.count("published")
-    failed = statuses.count("failed")
+    failed = statuses.count("failed") + statuses.count("mismatch")
     review = statuses.count("review")
     ready = statuses.count("ready")
     running = statuses.count("running")

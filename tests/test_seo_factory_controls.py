@@ -260,12 +260,21 @@ def test_run_articles_link_to_queued_task_saved_material_and_public_blog(env):
     assert summary[0]["articles"][0]["publication_path"] is None
     assert f"/studio/products/{pid}/materials/{article.id}" in client.get(url(pid)).text
 
-    article.status = ArtifactStatus.PUBLISHED
     db.add(Publication(product_id=pid, artifact_id=article.id, channel="own_site",
                        status="published", external_reference="/blog/seo-test-article",
                        published_at=datetime.now(timezone.utc)))
     db.commit()
+    mismatched = seo_runs(db, pid)[0]["articles"][0]
+    assert mismatched["published_confirmed"] is False
+    assert mismatched["publication_mismatch"] is True
+    assert mismatched["publication_path"] is None
+    assert "Проверить запись публикации" in client.get(url(pid)).text
+
+    article.status = ArtifactStatus.PUBLISHED
+    db.commit()
     summary = seo_runs(db, pid)
+    assert summary[0]["articles"][0]["published_confirmed"] is True
+    assert summary[0]["articles"][0]["publication_mismatch"] is False
     assert summary[0]["articles"][0]["publication_path"] == "/blog/seo-test-article"
     page = client.get(url(pid))
     assert "https://servgo.ru/blog/seo-test-article" not in page.text
