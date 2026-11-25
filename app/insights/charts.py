@@ -19,7 +19,7 @@ def trend_points(insights: Insights) -> tuple[list[dict], str, str]:
 
 def metrics_for(insights: Insights) -> dict | None:
     facts = {f.name.removeprefix(METRIC_PREFIX): f for f in insights.facts}
-    keys = [("bookings_total", "Записей"), ("completed_visits", "Выполнено"),
+    keys = [("bookings_total", "Записей без отмен"), ("completed_visits", "Выполнено"),
             ("past_bookings_unverified", "Без отметки о выполнении"), ("bookings_cancelled", "Отменено")]
     if not all(key in facts and facts[key].unit == "шт" for key, _ in keys):
         return None

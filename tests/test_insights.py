@@ -720,3 +720,52 @@ async def test_dispatcher_chart_presentation_and_table_fallback(db, linked, plat
     table = await chip(db, linked, "show_insights", {"topic": "weekdays", "presentation": "table"}, key="table")
     assert not any(b["type"] == "chart" for b in table["blocks"])
     assert any(b["type"] == "table" for b in table["blocks"])
+
+
+def test_trend_and_distribution_preserve_booking_definitions():
+    from app.dispatcher.blocks import clean_blocks
+    from app.insights.charts import chart_for, metrics_for, trend_points
+    short = compute(schedule(twelve_bookings()), TODAY, 30, 14)
+    trend = chart_for(short, "trend")
+    assert trend["kind"] == "line" and trend["unit"] == "шт"
+    assert len(trend["points"]) == 30
+    assert sum(p["value"] for p in trend["points"]) == 11
+    assert trend["points"][-1]["label"] == (TODAY - timedelta(days=1)).strftime("%d.%m.%Y")
+    assert clean_blocks([trend])[0]["kind"] == "line"
+    distribution = chart_for(short, "cancellations")
+    assert distribution["kind"] == "donut"
+    assert sum(p["value"] for p in distribution["points"]) == 12
+    assert clean_blocks([distribution])[0]["kind"] == "donut"
+    summary = metrics_for(short)
+    assert [p["value"] for p in summary["points"]] == [11, 0, 11, 1]
+    assert clean_blocks([summary])[0]["type"] == "metrics_summary"
+    long = compute(schedule([row(1, TODAY - timedelta(days=1))]), TODAY, 365, 14)
+    points, unit, _ = trend_points(long)
+    assert len(points) == 53 and unit == "шт/день"
+    # Last interval has one day, not seven.
+    assert points[-1]["value"] == 1
+    assert clean_blocks([chart_for(long, "trend")])[0]["kind"] == "line"
+    empty = compute(schedule([]), TODAY, 30, 14)
+    assert chart_for(empty, "cancellations")["kind"] == "bar"
+    assert clean_blocks([{**distribution, "points": [{"label": "x", "value": 0},
+                                                    {"label": "y", "value": 0}]}]) == []
+
+
+@pytest.mark.asyncio
+async def test_analytics_period_switch_preserves_topic_and_does_not_save_depth(db, linked, platform):
+    answer = await chip(db, linked, "show_insights", {"topic": "trend", "presentation": "chart", "days": "30"})
+    chart = next(b for b in answer["blocks"] if b["type"] == "chart")
+    assert chart["kind"] == "line" and len(chart["points"]) == 30
+    periods = [c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+               if c["capability"] == "show_insights" and c["label"].startswith("За ")]
+    assert {c["params"]["days"] for c in periods} == {"7", "90"}
+    request = next(c for c in periods if c["params"]["days"] == "90")
+    assert request["params"] == {"days": "90", "topic": "trend", "presentation": "chart"}
+    changed = await chip(db, linked, request["capability"], request["params"], key="changed")
+    assert len(next(b for b in changed["blocks"] if b["type"] == "chart")["points"]) == 13
+    assert depth_settings.depth_for(db, linked.id) == 30
+    tabular = await chip(db, linked, "show_insights",
+        {"topic": "trend", "presentation": "table", "days": "7"}, key="tabular")
+    assert not any(b["type"] == "chart" for b in tabular["blocks"])
+    table = next(b for b in tabular["blocks"] if b["type"] == "table")
+    assert table["rows"][-1][0] == (TODAY - timedelta(days=1)).strftime("%d.%m.%Y")

@@ -38,6 +38,14 @@ state.messages.push({id:"chart-message",seq:4,role:"assistant",text:"Данны�
     unit:"шт",note:"Тестовые данные браузера",points:[
       {label:"Пн <img src=x>",value:0},{label:"Вт",value:4},{label:"Ср",value:2}
     ]}]});
+state.messages.push({id:"trend-message",seq:5,role:"assistant",text:"Динамика",
+  blocks:[{type:"chart",kind:"line",title:"Динамика записей",source:"BookingBot",period:"01.11.2026–03.11.2026",
+    unit:"шт",note:"Тестовый ряд",points:[{label:"01.11.2026",value:0},{label:"02.11.2026",value:4},{label:"03.11.2026",value:2}]}]});
+state.messages.push({id:"distribution-message",seq:6,role:"assistant",text:"Статусы",
+  blocks:[{type:"chart",kind:"donut",title:"Статусы записей",source:"BookingBot",period:"01.11.2026–03.11.2026",
+    unit:"шт",points:[{label:"Выполнены",value:8},{label:"Отменены",value:2}]},
+    {type:"metrics_summary",title:"Записи за период",source:"BookingBot",period:"01.11.2026–03.11.2026",
+    unit:"шт",points:[{label:"Записей без отмен",value:8},{label:"Отменено",value:2}]}]});
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -120,11 +128,19 @@ try{
     assert.equal(formCalls[0].chip,undefined);
     assert.deepEqual(formCalls[0].form_submission.params,{topic:"clients",days:"30"});
     assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
-    const chart=page.locator(".dp-chart");
+    const chart=page.locator('[data-id="chart-message"] .dp-chart');
     assert.equal(await chart.count(),1);
     assert.match(await chart.innerText(),/BookingBot/);
     assert.equal(await chart.locator("img").count(),0);
     assert.deepEqual(await chart.locator(".dp-chart-bar").evaluateAll(nodes=>nodes.map(n=>n.style.width)),["0%","100%","50%"]);
+    const trend=page.locator(".dp-line-chart");
+    assert.equal(await trend.locator("circle").count(),3);
+    const data=page.locator(".dp-chart-data");
+    await data.locator("summary").click();
+    assert.match(await data.innerText(),/02.11.2026/);
+    assert.equal(await page.locator(".dp-donut-ring").count(),1);
+    assert.match(await page.locator(".dp-donut-ring").evaluate(n=>n.style.background),/conic-gradient/);
+    assert.equal(await page.locator(".dp-metrics-grid .dp-metric").count(),2);
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -140,6 +156,8 @@ try{
     await nativeForm.getByLabel("Количество дней").fill("7");
     assert.equal(await nativeForm.getByLabel("Количество дней").inputValue(),"7");
     assert.equal(await legacy.locator(".dp-chart-row").count(),3);
+    assert.equal(await legacy.locator(".dp-line-chart circle").count(),3);
+    assert.equal(await legacy.locator(".dp-donut-ring").count(),1);
     await legacy.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");
