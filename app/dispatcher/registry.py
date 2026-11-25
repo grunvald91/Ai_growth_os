@@ -236,6 +236,24 @@ class SchedulePostParams(_Params):
     channel_id: str | None = Field(default=None, max_length=64)
 
 
+class VkScheduleParams(_Params):
+    post_id: UUID
+    when: str = Field(min_length=10, max_length=25)
+
+
+class PublicationListParams(_Params):
+    channel: Literal["all", "telegram", "vk"] = "all"
+    status: Literal["all", "scheduled", "sending", "published", "problems", "cancelled"] = "all"
+
+
+class PublicationParams(_Params):
+    publication_id: UUID
+
+
+class MovePublicationParams(PublicationParams):
+    when: str = Field(min_length=10, max_length=25)
+
+
 class SeoFactoryParams(_Params):
     horizon_days: Literal[7, 30] = Field(
         default=7, description="Период SEO-контент-плана: 7 дней, или 30 дней, если владелец сказал «на месяц».")
@@ -457,7 +475,24 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, ReviseParams,
                consequence="Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку.",
                always_confirm=True),
-    Capability("schedule_post", "Запланировать публикацию",
+    Capability("list_publications", "Проверить публикации",
+               "Реальные статусы публикаций Telegram и VK: запланированы, отправляются, опубликованы, отменены, проблемы. "
+               "При вопросе «что опубликовано», «почему не вышел пост», «что запланировано» выбери фильтры.",
+               ToolOperation.ANALYTICS, Cost.NONE, PublicationListParams),
+    Capability("schedule_vk_post", "Запланировать пост ВКонтакте",
+               "Назначить утверждённый пост VK в подключённое сообщество. post_id из recent_materials; when — московское время "
+               "ГГГГ-ММ-ДД ЧЧ:ММ. Только после подтверждения, с действующими проверками изображения и критика.",
+               ToolOperation.PUBLISH, Cost.NONE, VkScheduleParams),
+    Capability("cancel_publication", "Отменить назначенную публикацию",
+               "Отменить ещё не отправленную публикацию Telegram или VK. publication_id из recent_publications или карточки. "
+               "Не удаляет уже опубликованный пост. Требуется подтверждение.",
+               ToolOperation.PUBLISH, Cost.NONE, PublicationParams),
+    Capability("move_publication", "Перенести назначенную публикацию",
+               "Перенести ещё не отправленную самостоятельную публикацию Telegram или VK. "
+               "publication_id из recent_publications, when — московское время ГГГГ-ММ-ДД ЧЧ:ММ. "
+               "Для не назначенного слота контент-плана использовать move_plan_slot. Требуется подтверждение.",
+               ToolOperation.PUBLISH, Cost.NONE, MovePublicationParams),
+    Capability("schedule_post", "Запланировать публикацию в Telegram",
                "Запланировать утверждённый пост в подключённый Telegram-канал. when — московское время "
                "«ГГГГ-ММ-ДД ЧЧ:ММ» (сегодняшняя дата есть в контексте). Без post_id — последний утверждённый пост.",
                ToolOperation.PUBLISH, Cost.NONE, SchedulePostParams,
