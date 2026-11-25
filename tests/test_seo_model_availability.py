@@ -96,3 +96,28 @@ def test_durable_wait_filters_only_eligible_tasks_and_keeps_publication_date(env
         later = datetime.fromtimestamp(now.timestamp() + 301, timezone.utc)
         assert db.scalar(select(Task).where(Task.id == task_id, ready_filter(later))) is not None
         assert db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == WAIT_KIND))
+
+
+@pytest.mark.asyncio
+async def test_article_wait_is_not_failed_and_retains_previous_stage(env, tmp_path):
+    from app.models.domain import Product
+    from test_articles import SequenceProvider, Settings, build_article_production
+    from test_seo_article import request_for, outputs_with_geo
+    factory, _, company = env
+    now = datetime.now(timezone.utc)
+    with factory() as db:
+        product = db.get(Product, company)
+        task = Task(product_id=company, title="SEO-ARTICLE:plan:a001",
+            assigned_agent="content_factory", status=TaskStatus.QUEUED, due_at=now)
+        db.add(task)
+        db.commit()
+        task_id = task.id
+        due = task.due_at
+        provider = SequenceProvider([outputs_with_geo()[0], ModelDeferred(now.timestamp() + 300)])
+        workflow = build_article_production(db, Settings(products_root=tmp_path), provider)
+        result = await workflow.run(request_for(product).model_copy(update={"task_id": task_id, "light": True}))
+        assert result.status == "deferred" and not result.retryable
+        assert len(result.checkpoint_artifact_ids) == 1
+        assert db.get(Task, task_id).status == TaskStatus.QUEUED
+        assert db.get(Task, task_id).due_at == due
+        assert db.scalar(select(Task).where(Task.id == task_id, ready_filter(now))) is None
