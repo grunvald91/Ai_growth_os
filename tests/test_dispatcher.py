@@ -1645,3 +1645,51 @@ async def test_conversational_edit_rejects_stale_foreign_and_unknown_fields(db, 
     saved = next(m for m in service.messages(db, conversation) if m.confirmation_id == card["confirmation_id"])
     assert next(b for b in saved.blocks if b["type"] == "confirm") == card
     assert not list(db.scalars(select(Task)))
+
+
+def test_schema_tool_forms_allow_only_audited_reads():
+    from app.dispatcher.forms import FORM_CAPABILITIES, form_for
+    for capability in FORM_CAPABILITIES:
+        block = form_for(capability, {})
+        assert clean_blocks([block])[0]["type"] == "tool_form"
+        assert {f["name"] for f in block["fields"]} == set(CAPABILITIES[capability].params.model_fields)
+    for capability in ["create_post", "set_insights_depth", "whiteboard_video", "schedule_post", "unknown"]:
+        with pytest.raises(ValueError):
+            form_for(capability, {})
+    with pytest.raises(ValueError):
+        form_for("list_tasks", {"tab": "invented"})
+    with pytest.raises(ValueError):
+        form_for("show_insights", {"days": 366})
+    fields = {f["name"]: f for f in form_for("show_insights", {"days": "30"})["fields"]}
+    assert fields["days"]["minimum"] == 7 and fields["days"]["maximum"] == 365
+    assert fields["days"]["value"] == "30"
+    assert {x["value"] for x in fields["topic"]["options"]} == set(
+        CAPABILITIES["show_insights"].params.model_json_schema()["properties"]["topic"]["enum"])
+
+
+@pytest.mark.asyncio
+async def test_model_form_is_persisted_without_execution_then_regular_chip_reads(db, product):
+    model, _ = llm({"intent": "form", "capability": "list_tasks", "confidence": 0.95,
+                    "params": {"kind": "video", "tab": "problems"}})
+    result = await send(db, product, text="Хочу выбрать фильтры для списка заданий", model=model)
+    answer = result["messages"][-1]
+    block = next(b for b in answer["blocks"] if b["type"] == "tool_form")
+    assert answer["intent"] == "form"
+    assert {f["name"]: f["value"] for f in block["fields"]}["kind"] == "video"
+    assert not list(db.scalars(select(Task)))
+    replay = await send(db, product, text="Хочу выбрать фильтры для списка заданий", model=model)
+    assert replay["replayed"] and replay["messages"][-1]["blocks"] == answer["blocks"]
+    response = await send(db, product, key="read-form", chip={"label": block["title"],
+                         "capability": block["capability"], "params": {"kind": "video", "tab": "all"}})
+    assert response["messages"][-1]["intent"] == "execute"
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_model_cannot_make_mutating_tool_form(db, product):
+    model, _ = llm({"intent": "form", "capability": "set_insights_depth", "confidence": 1,
+                    "params": {"days": 90}})
+    result = await send(db, product, text="Настрой мне форму для просмотра", model=model)
+    assert result["messages"][-1]["intent"] == "clarify"
+    assert not any(b["type"] == "tool_form" for b in result["messages"][-1]["blocks"])
+    assert not list(db.scalars(select(Task)))

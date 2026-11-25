@@ -590,7 +590,21 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         chips = _valid_chips(decision.next_chips)
         reply_text = decision.reply_text or reply_text
         spoken = decision.spoken or decision.reply_text or spoken
-        if decision.intent == "edit_card":
+        if decision.intent == "form":
+            from app.dispatcher.forms import form_for
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = spoken = "Что именно вы хотите посмотреть?"
+            else:
+                try:
+                    blocks = [form_for(decision.capability, decision.params)]
+                except ValueError:
+                    intent = "clarify"
+                    reply_text = spoken = "Уточните, какие данные и за какой период нужны."
+                else:
+                    reply_text = spoken = "Укажите нужные параметры и нажмите «Показать результат»."
+        elif decision.intent == "edit_card":
             chips = []
             if decision.confidence < CONFIDENCE_TO_ACT:
                 intent = "clarify"
