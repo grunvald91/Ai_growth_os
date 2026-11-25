@@ -36,7 +36,8 @@ class Coverage:
     missing_pipeline_days: tuple[str, ...]
 
 
-def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_limit=3):
+def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_limit=3,
+             exclude_article_id=None):
     now = utc(now or datetime.now(timezone.utc))
     tz = ZoneInfo(timezone_name)
     today = day(now, tz=tz)
@@ -93,7 +94,8 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
     for row in sorted(articles, key=lambda a: (scheduled(task_map[a.task_id]), str(a.id))):
         task = task_map[row.task_id]
         if (task.status != TaskStatus.COMPLETED or row.status not in READY_STATUSES
-                or row.id in vetoes or row.id in published_ids or task.id in seen_tasks):
+                or row.id == exclude_article_id or row.id in vetoes
+                or row.id in published_ids or task.id in seen_tasks):
             continue
         try:
             article = ArticleArtifact.model_validate_json(row.content)
@@ -119,6 +121,14 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
     for request in requests:
         # Multiple source requests for one task are ambiguous, not a promise of supply.
         request_map[request.task_id] = request if request.task_id not in request_map else None
+    waits = {}
+    for marker in db.scalars(select(Artifact).where(Artifact.product_id == product_id,
+            Artifact.task_id.in_(task_map), Artifact.kind == 'seo_model_wait')):
+        try:
+            retry_at = utc(datetime.fromisoformat(marker.title))
+            waits[marker.task_id] = max(waits.get(marker.task_id, now), retry_at)
+        except (ValueError, TypeError):
+            continue
     for task in tasks:
         if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING) or task.id in article_tasks:
             continue
@@ -136,13 +146,14 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
         except (ValueError, TypeError):
             continue
         seen_queries.add(query)
-        preparing[scheduled(task)] += 1
+        preparing[max(scheduled(task), day(waits.get(task.id, now), tz=tz))] += 1
 
     def simulate(include_preparing):
         carry, met, missing = 0, [], []
         for date in horizon:
             carry += ready[date] + (preparing[date] if include_preparing else 0)
-            release = min(carry, max(0, daily_limit - consumed[date]))
+            # Reserve mode guarantees one per day before using surplus.
+            release = min(carry, max(0, daily_limit - consumed[date]), max(0, 1 - actual[date]))
             carry -= release
             (met if actual[date] + release > 0 else missing).append(date.isoformat())
         return tuple(met), tuple(missing)
@@ -151,3 +162,21 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
     pipeline_days, missing_pipeline = simulate(True)
     return Coverage(sum(ready[d] for d in horizon), sum(preparing[d] for d in horizon), ready_days,
                     pipeline_days, missing_ready, missing_pipeline)
+
+
+def permits_extra_release(db, row, *, now, timezone_name, daily_limit):
+    """Called under the company publication lock. First public post is always
+    eligible; an extra post must leave the next seven full days covered."""
+    from app.seo.schedule import day_bounds
+    tz = ZoneInfo(timezone_name)
+    start, stop = day_bounds(now, tz=tz)
+    already_live = db.scalar(select(Publication.id).where(
+        Publication.product_id == row.product_id, Publication.channel == "own_site",
+        Publication.status == "published", Publication.published_at >= db_time(db, start),
+        Publication.published_at < db_time(db, stop)).limit(1))
+    if already_live is None:
+        return True
+    stock = coverage(db, row.product_id, now=now, timezone_name=timezone_name,
+                     daily_limit=daily_limit, exclude_article_id=row.id)
+    today = day(now, tz=tz).isoformat()
+    return not any(date != today for date in stock.missing_ready_days)
