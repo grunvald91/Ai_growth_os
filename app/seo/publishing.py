@@ -368,7 +368,13 @@ def publish_owner_approved(db: Session, *, now: datetime | None = None,
             continue
         db.refresh(row)
         db.refresh(approval)
-        if row.status == ArtifactStatus.PUBLISHED or approval.status not in ("pending", "approved"):
+        if row.status in (ArtifactStatus.PUBLISHED, ArtifactStatus.REJECTED) or approval.status not in ("pending", "approved"):
+            continue
+        # A rejected vote on a different approval for this artifact is still a veto.
+        if db.scalar(select(Approval.id).where(
+                Approval.product_id == row.product_id, Approval.artifact_id == row.id,
+                Approval.action_type == ToolOperation.PUBLISH.value,
+                Approval.status == "rejected").limit(1)) is not None:
             continue
         if approval.decided_by == DECIDER:
             continue
@@ -441,4 +447,31 @@ def publish_pending(db: Session, *, now: datetime | None = None,
         except Exception:
             db.rollback()
             _logger.exception("SEO publication recovery failed for article %s", row.id)
-    return len(rows)
+    # A clean review may arrive after a hold. Recheck those records without
+    # repeated writes for blocked articles or requiring another owner click.
+    held = list(db.scalars(select(Artifact).join(Task, Artifact.task_id == Task.id)
+        .join(SeoFactoryActivation, SeoFactoryActivation.product_id == Artifact.product_id)
+        .where(Artifact.kind == "article",
+               Artifact.status.in_([ArtifactStatus.AWAITING_APPROVAL, ArtifactStatus.APPROVED]),
+               Task.product_id == Artifact.product_id, Task.status == TaskStatus.COMPLETED,
+               Task.assigned_agent == "content_factory", Task.title.like("SEO-ARTICLE:%"),
+               SeoFactoryActivation.enabled.is_(True),
+               or_(Task.due_at.is_(None), Task.due_at <= db_time(db, moment)))
+        .order_by(Task.due_at, Artifact.created_at, Artifact.id)))
+    checked = 0
+    for row in held:
+        try:
+            article = ArticleArtifact.model_validate_json(row.content)
+            if (critic_verdict(db, row.task_id, article.reader_article) not in CLEAN_CRITIC_STATUSES
+                    or static_problems(article) or unsupported_servgo_pricing(db, row, article)
+                    or servgo_buyer_intent_problems(db, row, article)
+                    or duplicate_page_problems(db, row, article)):
+                continue
+            publish_if_clear(db, row.id, now=moment, daily_limit=daily_limit)
+            checked += 1
+        except Exception:
+            db.rollback()
+            _logger.warning("SEO held publication recovery failed for article %s", row.id)
+        if checked >= 100:
+            break
+    return len(rows) + checked
