@@ -801,10 +801,10 @@ async def test_missing_topic_is_asked_not_guessed(db, product):
 
 
 @pytest.mark.asyncio
-async def test_unknown_capability_from_model_is_unsupported(db, product):
+async def test_unknown_capability_from_model_is_clarified_after_recovery(db, product):
     model, _ = llm({"intent": "execute", "capability": "launch_ads", "confidence": 0.99, "params": {}})
     result = await send(db, product, text="запусти рекламу", model=model)
-    assert result["messages"][1]["intent"] == "unsupported"
+    assert result["messages"][1]["intent"] == "clarify"
     assert list(db.scalars(select(Task))) == []
 
 
@@ -1328,3 +1328,74 @@ def test_video_settings_reject_wrong_format_and_unknown_profile():
     with pytest.raises(ValidationError):
         CreateHints(format="whiteboard", topic="Тема для видео",
                     video={"profile": "unverified"})
+
+
+def test_navigation_catalog_matches_page_schema():
+    from typing import get_args
+    from app.dispatcher.registry import PAGES, PLATFORM_GUIDE, PageKey, page_href
+    assert set(PAGES) == set(PLATFORM_GUIDE) == set(get_args(PageKey))
+    assert all(safe_href(page_href(key, "00000000-0000-0000-0000-000000000000")) for key in PAGES)
+    assert "mail" not in PAGES and "intelligence" not in PAGES
+    assert "repair_video_images" in executors.CONFIRMERS
+
+
+@pytest.mark.asyncio
+async def test_task_diagnostics_are_filtered_and_tenant_scoped(db, product):
+    other = Product(name="Other", slug="other-task-diagnostics")
+    db.add(other)
+    db.flush()
+    own = Task(product_id=product.id, title="OWN VIDEO", assigned_agent="whiteboard_renderer",
+               status=TaskStatus.FAILED)
+    foreign = Task(product_id=other.id, title="FOREIGN VIDEO", assigned_agent="whiteboard_renderer",
+                   status=TaskStatus.FAILED)
+    db.add_all([own, foreign])
+    db.commit()
+    result = await send(db, product, chip={"label": "Ошибки видео", "capability": "list_tasks",
+                        "params": {"tab": "problems", "kind": "video"}})
+    blocks = result["messages"][1]["blocks"]
+    assert str(own.id) in json.dumps(blocks)
+    assert str(foreign.id) not in json.dumps(blocks)
+    response = await send(db, product, key="foreign-id",
+                          chip={"label": "Проверить", "capability": "show_task",
+                                "params": {"task_id": str(foreign.id)}})
+    assert "Не нашёл" in response["messages"][1]["text"]
+    assert str(foreign.id) not in json.dumps(response["messages"][1]["blocks"])
+    assert not list(db.scalars(select(ToolCall)))
+
+
+@pytest.mark.asyncio
+async def test_repair_dispatcher_requires_paid_confirmation_and_reuses_service(db, product, monkeypatch):
+    from app.api import whiteboard
+    from app.content.whiteboard import repair
+    source = Task(product_id=product.id, title="SOURCE", assigned_agent="whiteboard_renderer",
+                  status=TaskStatus.COMPLETED)
+    draft = Task(product_id=product.id, title="REPAIR", assigned_agent="whiteboard_renderer",
+                 status=TaskStatus.WAITING_APPROVAL)
+    db.add_all([source, draft])
+    db.commit()
+    seen = []
+    def queue(db_arg, settings_arg, product_id, source_id, *, image_model=None):
+        assert product_id == product.id and source_id == source.id
+        assert image_model == "gpt-image-2.5-sunburst"
+        seen.append("draft")
+        return draft
+    monkeypatch.setattr(repair, "queue_visual_repair", queue)
+    monkeypatch.setattr(whiteboard, "job_state", lambda *a: {
+        "status": "waiting_approval", "models": {"image": "gpt-image-2.5-sunburst"},
+        "max_api_calls": 13, "request_digest": "a" * 64})
+    async def approve(*args, **kwargs):
+        seen.append("approved")
+    monkeypatch.setattr(whiteboard, "_approve", approve)
+    result = await send(db, product, chip={"label": "Перерисовать", "capability": "repair_video_images",
+                        "params": {"task_id": str(source.id), "image_model": "gpt-image-2.5-sunburst"}})
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert card["paid"] and seen == ["draft"]
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert seen == ["draft", "approved"]
+
+
+def test_fast_routes_do_not_turn_diagnostics_or_repairs_into_creation():
+    from app.dispatcher.fast_routes import quick_capability, quick_video_request
+    assert quick_capability("Покажи видео с ошибками") is None
+    assert quick_capability("Покажи последние видео") == "show_recent_videos"
+    assert quick_video_request("Хочу переделать рисованное видео на тему энергии") is None
