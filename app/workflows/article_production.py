@@ -1284,6 +1284,15 @@ class ArticleProduction:
                     + (SERVGO_EDITORIAL_RULES if product.slug == 'servgo' and safe_request.seo_brief and name in GEO_STAGES else '')
                     + '\nSchema: ' + json.dumps(schema.model_json_schema())
                 )
+                # Only resume planned, lightweight SEO work. The final editor is
+                # deliberately rerun so its independent critic is tied to this attempt.
+                resume_key = None
+                if (request.task_id and safe_request.seo_brief and safe_request.light
+                        and task.title.startswith('SEO-ARTICLE:') and name != 'marketing_editor'):
+                    resume_key = hashlib.sha256(json.dumps({
+                        'version': 1, 'stage': name, 'prompt': prompt,
+                        'inputs': stage_inputs, 'model': self.model,
+                    }, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
                 fallback_reason = None
                 strategist_twice_invalid = False
 
@@ -1320,6 +1329,53 @@ class ArticleProduction:
                         run_id=run_id, response=snapshot,
                     )
                     self.db.commit()
+
+                if resume_key:
+                    # A checkpoint is valid only for the same tenant, task, stage,
+                    # schema, exact inputs, model and prompt, from a completed run.
+                    previous = self.db.execute(
+                        select(Artifact, AgentRun).join(
+                            AgentRun, Artifact.agent_run_id == AgentRun.id
+                        ).where(
+                            Artifact.product_id == product_id, Artifact.task_id == task_id,
+                            Artifact.kind == 'content_stage_output',
+                            AgentRun.task_id == task_id, AgentRun.agent_name == name,
+                            AgentRun.status == 'completed',
+                        ).order_by(Artifact.created_at.desc(), Artifact.id.desc())
+                    ).all()
+                    for saved, source_run in previous:
+                        try:
+                            payload = json.loads(saved.content)
+                            if (not isinstance(payload, dict)
+                                    or payload.get('resume_key') != resume_key
+                                    or payload.get('stage') != name
+                                    or payload.get('schema') != schema.__name__
+                                    or payload.get('fallback_used')):
+                                continue
+                            candidate = validate_stage_revision(payload['output'])
+                        except (ValueError, TypeError, KeyError, AttributeError):
+                            continue
+                        # Keep the original evidence and identify this as reuse,
+                        # not another provider call or another billed generation.
+                        run.status = 'completed'
+                        run.provider = 'checkpoint'
+                        run.model = source_run.model
+                        run.finished_at = datetime.now(timezone.utc)
+                        run.output_references = [
+                            {'kind': 'artifact', 'id': str(saved.id)},
+                            {'kind': 'reused_agent_run', 'id': str(source_run.id)},
+                        ]
+                        self.db.commit()
+                        checkpoint_ids.append(saved.id)
+                        outputs.append(candidate)
+                        inputs['prior_stage_outputs'][name] = candidate.model_dump(mode='json')
+                        if len(json.dumps(inputs, ensure_ascii=False)) > 250000:
+                            raise ValueError('Stage context exceeds bound')
+                        break
+                    else:
+                        candidate = None
+                    if candidate is not None:
+                        continue
 
                 try:
                     for attempt in range(2):
@@ -1478,6 +1534,7 @@ class ArticleProduction:
                         'schema': schema.__name__,
                         'fallback_used': bool(fallback_reason),
                         'fallback_reason': fallback_reason,
+                        'resume_key': resume_key,
                         'output': parsed.model_dump(mode='json'),
                     }, ensure_ascii=False),
                     status='draft',
