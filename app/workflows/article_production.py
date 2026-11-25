@@ -1699,6 +1699,19 @@ class ArticleProduction:
                 approval_ids=approval_ids, status='completed')
         except (Exception, asyncio.CancelledError) as exc:
             self.db.rollback()
+            from app.llm.seo_availability import ModelDeferred, defer_task
+            if isinstance(exc, ModelDeferred) and request.seo_brief is not None and request.task_id:
+                self.db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+                for run_id in run_ids:
+                    run = self.db.get(AgentRun, run_id)
+                    if run.status != 'completed':
+                        run.status, run.error = 'failed', 'seo_model_wait'
+                        run.finished_at = datetime.now(timezone.utc)
+                defer_task(self.db, task=self.db.get(Task, task_id), deferred=exc)
+                self.db.commit()
+                return ArticleProductionResult(product_id=product_id, task_id=task_id,
+                    run_ids=run_ids, checkpoint_artifact_ids=checkpoint_ids,
+                    status='deferred', error='seo_model_wait')
             if error == 'context_preparation_failed' and not isinstance(exc, asyncio.CancelledError):
                 error = f'context_preparation_failed:{type(exc).__name__}'
             signature = validation_issue_signature(exc)
