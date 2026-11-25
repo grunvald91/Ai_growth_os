@@ -42,7 +42,7 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
     today = day(now, tz=tz)
     horizon = [today + timedelta(days=i) for i in range(RESERVE_DAYS + 1)]
     # Keep the next seven full days, plus today's obligation if not yet met.
-    ready, preparing, actual = defaultdict(int), defaultdict(int), defaultdict(int)
+    ready, preparing, actual, consumed = (defaultdict(int) for _ in range(4))
     if not public_blog_ready(db, product_id):
         missing = tuple(d.isoformat() for d in horizon)
         return Coverage(0, 0, (), (), missing, missing)
@@ -53,11 +53,14 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
         Approval.status == "rejected")))
     from app.seo.schedule import day_bounds
     start, _ = day_bounds(now, tz=tz)
-    for timestamp in db.scalars(select(Publication.published_at).where(
+    for timestamp, status in db.execute(select(Publication.published_at, Publication.status).where(
             Publication.product_id == product_id, Publication.channel == "own_site",
-            Publication.status == "published", Publication.published_at >= db_time(db, start))):
+            Publication.published_at >= db_time(db, start))):
         if timestamp is not None:
-            actual[day(timestamp, tz=tz)] += 1
+            date = day(timestamp, tz=tz)
+            consumed[date] += 1
+            if status == 'published':
+                actual[date] += 1
 
     tasks = list(db.scalars(select(Task).where(
         Task.product_id == product_id, Task.assigned_agent == "content_factory",
@@ -130,12 +133,12 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
         carry, met, missing = 0, [], []
         for date in horizon:
             carry += ready[date] + (preparing[date] if include_preparing else 0)
-            release = min(carry, max(0, daily_limit - actual[date]))
+            release = min(carry, max(0, daily_limit - consumed[date]))
             carry -= release
             (met if actual[date] + release > 0 else missing).append(date.isoformat())
         return tuple(met), tuple(missing)
 
     ready_days, missing_ready = simulate(False)
     pipeline_days, missing_pipeline = simulate(True)
-    return Coverage(sum(ready.values()), sum(preparing.values()), ready_days,
+    return Coverage(sum(ready[d] for d in horizon), sum(preparing[d] for d in horizon), ready_days,
                     pipeline_days, missing_ready, missing_pipeline)
