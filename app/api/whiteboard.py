@@ -72,6 +72,7 @@ def job_state(db, product_id, task_id):
             'models': payload.models.model_dump(), 'max_api_calls': payload.max_api_calls,
             'visual_review_enabled': payload.visual_review,
             'image_provider': payload.image_provider,
+            'image_recovery': payload.image_recovery,
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
             'repair_regenerate_images': payload.repair_regenerate_images,
@@ -204,8 +205,10 @@ def approval_card(state, product_id, error=None):
     )
     review = ('<p>Один проход визуального критика. Автор выбирает существенные исправления; '
               'каждая выбранная сцена перерисовывается максимум один раз.</p>' if state.get('visual_review_enabled') else '')
+    recovery = (' До 105 дополнительных потенциально платных попыток при сбоях изображений; '
+                'резервная модель только после 24 часов непрерывной недоступности основной.' if state.get('image_recovery') else '')
     provider = (f'<p>Новые рисунки и перерисовки: {esc(state["models"]["image"])} через API ClaudeHub. '
-                'Автоматической замены модели или провайдера нет.</p>' if state.get('image_provider') == 'claudehub' else '')
+                f'{recovery}</p>' if state.get('image_provider') == 'claudehub' else '')
     # Repair requests have additional cost and audio-reuse disclosures in the
     # regular renderer; retain that path rather than omit those conditions.
     return (f'<section class="sg-surface wb-job wb-approval"><header class="wb-heading">'
@@ -223,7 +226,7 @@ def approval_card(state, product_id, error=None):
             f'<footer class="wb-actions"><form method="post" action="{base}/approve" class="sg-form">'
             f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
             '<label class="wb-consent"><input type="checkbox" name="confirmed" value="yes" required>'
-            f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов</span></label>'
+            f'<span>Разрешаю платную генерацию этого видео: до {state["max_api_calls"]} API-вызовов.{recovery}</span></label>'
             '<button class="btn primary" type="submit">Подтвердить и сгенерировать</button></form>'
             f'<form method="post" action="{base}/cancel"><button class="btn secondary" type="submit">Остановить задание</button></form>'
             f'<a class="wb-back" href="/studio/products/{product_id}/whiteboard">К простым видео →</a></footer></section>')
@@ -304,7 +307,13 @@ def job_html(state, product_id, *, error=None):
         reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
         provider_wait = (state.get('last_error') in {'openrouter_unavailable', 'claudehub_unavailable'}
                          and state.get('auto_resumes', 0) > state.get('auto_resume_limit', 0))
-        if provider_wait:
+        if state.get('image_outage_since'):
+            body += (f'<p class="sg-warning" role="status">Ожидаем восстановления модели. '
+                     f'Начало сбоя: {esc(state["image_outage_since"][:16].replace("T", " "))} UTC. '
+                     f'Следующая проверка: {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+                     f'Модель: {esc(state.get("active_image_model", state["models"]["image"]))}. '
+                     'Готовые этапы сохранены; резервная модель только после 24 часов.</p>')
+        elif provider_wait:
             body += (f'<p class="sg-warning" role="status">Ожидаем восстановления доступа к моделям. '
                      f'Следующая автоматическая проверка не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
                      'Проверка не выполняет платных вызовов; готовые этапы сохранены.</p>')
@@ -410,7 +419,9 @@ def job_html(state, product_id, *, error=None):
                  f'<form method="post" action="{base}/approve" class="sg-form">'
                  f'<input type="hidden" name="request_digest" value="{state["request_digest"]}">'
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
-                 f'Разрешаю {"перерисовку" if state.get("visual_repair_from") else "генерацию видео"}: до {state["max_api_calls"]} API-вызовов</span></label>'
+                 f'Разрешаю {"перерисовку" if state.get("visual_repair_from") else "генерацию видео"}: до {state["max_api_calls"]} API-вызовов. '
+                 + ('До 105 дополнительных потенциально платных попыток при сбоях изображений; резервная модель только после 24 часов. ' if state.get('image_recovery') else '')
+                 + '</span></label>'
                  f'<button class="btn primary" type="submit">{"Подтвердить перерисовку" if state.get("visual_repair_from") else "Подтвердить и сгенерировать"}</button></form>')
     if state['status'] in {'queued', 'running', 'waiting_approval'}:
         body += (f'<form method="post" action="{base}/cancel"><button class="btn secondary">Остановить задание</button></form>')
