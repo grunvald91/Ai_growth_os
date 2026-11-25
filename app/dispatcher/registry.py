@@ -10,7 +10,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.dispatcher.policy import Cost
 from app.tools import ToolOperation
@@ -124,6 +124,13 @@ class VideoSettings(_Params):
     visual_review: bool = False
     science_mode: Literal["general", "auto", "scientific"] = "auto"
     max_api_calls: Literal[19, 25, 34, 45] | None = None
+    @field_validator("max_api_calls", mode="before")
+    @classmethod
+    def parse_call_limit(cls, value):
+        if isinstance(value, str) and value in {"19", "25", "34", "45"}:
+            return int(value)
+        return value
+
     recovery_budget: bool = False
     source_script: str = Field(default="", max_length=12000)
     background_notes: str = Field(default="", max_length=6000)

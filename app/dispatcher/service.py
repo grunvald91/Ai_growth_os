@@ -138,6 +138,60 @@ def pending_creation_cards(history: list[DispatcherMessage]) -> list[dict]:
     return result
 
 
+def pending_video_forms(history: list[DispatcherMessage]) -> list[dict]:
+    from app.dispatcher.forms import VIDEO_EDIT_FIELDS
+    consumed = {m.client_key for m in history if m.role == "user"}
+    result = []
+    for message in reversed(history):
+        if (message.role != "assistant" or message.intent != "form"
+                or message.capability != "whiteboard_video"
+                or "form:" + str(message.id) in consumed):
+            continue
+        for block in message.blocks or []:
+            if block.get("type") == "tool_form" and block.get("capability") == "whiteboard_video":
+                result.append({"message_id": str(message.id), "revision": block.get("revision", 0),
+                               **{f["name"]: f["value"] for f in block["fields"]
+                                  if f["name"] in VIDEO_EDIT_FIELDS}})
+                break
+        if len(result) == 2:
+            break
+    return result
+
+
+def edit_video_form(db, conversation, decision, snapshot):
+    from app.dispatcher.forms import VIDEO_EDIT_FIELDS, form_for
+    raw = dict(decision.params)
+    target = raw.pop("message_id", None)
+    revision = raw.pop("revision", None)
+    candidate = next((item for item in snapshot if item["message_id"] == target), None)
+    if candidate is None or revision != str(candidate["revision"]) or not raw or not raw.keys() <= VIDEO_EDIT_FIELDS:
+        raise ValueError("Уточните параметры открытой формы.")
+    source = db.scalar(select(DispatcherMessage).where(
+        DispatcherMessage.id == UUID(target), DispatcherMessage.conversation_id == conversation.id,
+        DispatcherMessage.role == "assistant", DispatcherMessage.intent == "form",
+        DispatcherMessage.capability == "whiteboard_video").with_for_update().execution_options(populate_existing=True))
+    if source is None:
+        raise LookupError("Форма не найдена.")
+    if db.scalar(select(DispatcherMessage.id).where(
+            DispatcherMessage.conversation_id == conversation.id,
+            DispatcherMessage.client_key == "form:" + target)):
+        raise PermissionError("Форма уже отправлена.")
+    old = next((b for b in source.blocks or [] if b.get("type") == "tool_form"), None)
+    if old is None or old.get("revision", 0) != candidate["revision"]:
+        raise PermissionError("Форма изменилась.")
+    values = {f["name"]: f["value"] for f in old["fields"] if f["value"] != ""}
+    for key, value in raw.items():
+        if key == "call_to_action" and not value:
+            values.pop(key, None)
+        else:
+            values[key] = value
+    updated = form_for("whiteboard_video", values)
+    updated["revision"] = candidate["revision"] + 1
+    source.blocks = clean_blocks([updated if b.get("type") == "tool_form" else b for b in source.blocks])
+    db.flush()
+    return to_dict(source)
+
+
 def card_edit_request(decision: DispatcherDecision, pending: list[dict]):
     """Pin model proposals to the exact snapshot; the locked editor rechecks revision."""
     from app.dispatcher.editable import EditCreation
@@ -179,7 +233,8 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
             "либо предложи ближайшее доступное действие с пояснением, либо задай один предметный вопрос. "
             "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
         messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
-                "pending_creation_cards": pending_creation_cards(history)}, text))],
+                "pending_creation_cards": pending_creation_cards(history),
+                "pending_video_forms": pending_video_forms(history)}, text))],
         model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
         max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
@@ -461,13 +516,15 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             DispatcherMessage.conversation_id == conversation.id,
             DispatcherMessage.product_id == ctx.product.id,
             DispatcherMessage.role == "assistant",
-            DispatcherMessage.intent == "form"))
+            DispatcherMessage.intent == "form").with_for_update().execution_options(populate_existing=True))
         if source is None:
             raise LookupError("Форма не найдена в текущей беседе.")
         stored_form = next((b for b in source.blocks or [] if b.get("type") == "tool_form"), None)
         if stored_form is None or stored_form.get("capability") != source.capability:
             raise ValueError("Форма больше недоступна.")
         target = stored_form["capability"]
+        if form_submission.revision != stored_form.get("revision", 0):
+            raise ValueError("Форма изменилась. Откройте актуальную версию.")
         submitted = form_submission.params
         if not submitted.keys() <= {f["name"] for f in stored_form["fields"]}:
             raise ValueError("В форме есть неизвестные поля.")
@@ -505,6 +562,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                                  *([to_dict(reply)] if reply else [])], "replayed": True}
     history = messages(db, conversation)
     edit_snapshot = pending_creation_cards(history)
+    video_snapshot = pending_video_forms(history)
     label = (chip or {}).get("label") or text
     try:
         user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
@@ -643,6 +701,26 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                     reply_text = spoken = "Уточните, какие данные и за какой период нужны."
                 else:
                     reply_text = spoken = ("Укажите параметры и нажмите «" + blocks[0]["submit_label"] + "».")
+        elif decision.intent == "edit_form":
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = spoken = "Какой параметр видео изменить?"
+            else:
+                try:
+                    edited = edit_video_form(db, conversation, decision, video_snapshot)
+                    answer = _add(db, conversation, role="assistant", input_mode="text",
+                                  text="Настройки видео обновлены. Проверьте форму перед отправкой.",
+                                  spoken="Настройки видео обновлены.",
+                                  blocks=[{"type": "text", "text": "Настройки видео обновлены. Проверьте форму перед отправкой."}],
+                                  intent="edit_form", params={"_edited_card_id": edited["id"], "_reply_to": str(user.id)},
+                                  confidence=decision.confidence, model=model_name)
+                    db.commit()
+                    return {"messages": [to_dict(user), edited, to_dict(answer)], "replayed": False}
+                except (LookupError, PermissionError, ValueError):
+                    db.rollback()
+                    intent = "clarify"
+                    reply_text = spoken = "Форма недоступна или изменилась. Уточните, что нужно изменить."
         elif decision.intent == "edit_card":
             chips = []
             if decision.confidence < CONFIDENCE_TO_ACT:

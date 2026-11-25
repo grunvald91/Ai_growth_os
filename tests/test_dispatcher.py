@@ -1653,7 +1653,7 @@ def test_schema_tool_forms_allow_only_audited_capabilities():
         block = form_for(capability, {})
         assert clean_blocks([block])[0]["type"] == "tool_form"
         assert {f["name"] for f in block["fields"]} == set(CAPABILITIES[capability].params.model_fields)
-    for capability in ["create_creative", "set_insights_depth", "whiteboard_video", "schedule_post", "unknown"]:
+    for capability in ["create_creative", "set_insights_depth", "schedule_post", "unknown"]:
         with pytest.raises(ValueError):
             form_for(capability, {})
     with pytest.raises(ValueError):
@@ -1742,3 +1742,38 @@ async def test_saved_prepare_form_requires_confirmation_and_is_single_use(db, pr
     after = await service.handle_message(db, context(db, product), None, text="",
                                           client_key="third-tab", form_submission=request)
     assert after["replayed"] and len(tasks(db, "content_factory")) == 1
+
+
+@pytest.mark.asyncio
+async def test_video_form_edit_same_revision_and_no_task_before_submit(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    from app.dispatcher.forms import form_for
+    initial_model, _ = llm({"intent": "form", "capability": "whiteboard_video", "confidence": 0.95,
+                            "params": {"topic": "Как устроена онлайн-запись", "length": "30"}})
+    initial = await send(db, product, text="Дай настройки видео", model=initial_model)
+    original = initial["messages"][-1]
+    block = next(b for b in original["blocks"] if b["type"] == "tool_form")
+    assert block["revision"] == 0 and len(block["fields"]) == 12
+    assert not list(db.scalars(select(Task)))
+    edit_model, _ = llm({"intent": "edit_form", "confidence": 0.95, "params": {
+        "message_id": original["id"], "revision": 0, "length": "60",
+        "image_model": "gpt-image-2.5-sunburst"}})
+    result = await service.handle_message(db, context(db, product), edit_model, text="Минуту, с GPT Image",
+                                          client_key="edit-video-form", mode="voice")
+    assert result["messages"][1]["id"] == original["id"]
+    revised = next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")
+    fields = {f["name"]: f["value"] for f in revised["fields"]}
+    assert revised["revision"] == 1 and fields["length"] == "60"
+    assert fields["image_model"] == "gpt-image-2.5-sunburst"
+    assert fields["topic"] == "Как устроена онлайн-запись" and fields["max_api_calls"] == ""
+    assert not list(db.scalars(select(Task)))
+    with pytest.raises(ValueError):
+        await service.handle_message(db, context(db, product), None, text="", client_key="stale-video",
+            form_submission=FormSubmissionIn(message_id=original["id"], revision=0,
+                                              params={"topic": fields["topic"]}))
+    with pytest.raises(ValueError):
+        form_for("whiteboard_video", {"topic": fields["topic"], "length": "45"}, partial=False)
+    replay = await service.handle_message(db, context(db, product), edit_model, text="Минуту, с GPT Image",
+                                          client_key="edit-video-form", mode="voice")
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == result["messages"][1]["blocks"]
+    assert not list(db.scalars(select(Task)))
