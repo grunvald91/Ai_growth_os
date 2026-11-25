@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     seo_autorun_enabled: bool = False
     seo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     seo_servgo_autorun_enabled: bool = False
+    seo_model_availability_enabled: bool = False
     seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     # Critic bounds. The reviewer sees the complete task, so oversized contexts
     # are skipped rather than compacted; raise these together with the model.
