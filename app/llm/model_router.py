@@ -279,36 +279,20 @@ class ModelRouter:
 class ModelRoutingProvider:
     """Drop-in LLMProvider decorator; fallback only on transient transport failures."""
 
-    def __init__(self, *, provider: LLMProvider, router: ModelRouter) -> None:
+    def __init__(self, *, provider: LLMProvider, router: ModelRouter, availability=None) -> None:
         self.provider = provider
         self.router = router
+        self.availability = availability
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
         decision = self.router.select(request)
+        if self.availability is not None:
+            return await self.availability.generate(decision.candidates,
+                lambda model: self._generate_model(request, model))
         last_error: Exception | None = None
         for model in decision.candidates:
             try:
-                forwarded = request.model_copy(update={
-                    "model": model,
-                    "metadata": {
-                        key: value for key, value in request.metadata.items()
-                        if key not in {"routing_phase", "routing_complexity"}
-                    },
-                })
-                response = await self.provider.generate(forwarded)
-                profile = self.router._catalog[model]
-                # A gateway may reply with a different canonical model ID. Never
-                # claim the configured tariff applies to an unknown upstream alias.
-                if (response.usage is not None and response.model == model
-                        and profile.input_usd_per_million is not None
-                        and profile.output_usd_per_million is not None):
-                    estimate = estimate_cost_usd(
-                        response.usage.input_tokens, response.usage.output_tokens,
-                        input_usd_per_million=profile.input_usd_per_million,
-                        output_usd_per_million=profile.output_usd_per_million,
-                    )
-                    response = response.model_copy(update={"estimated_cost_usd": estimate})
-                return response
+                return await self._generate_model(request, model)
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code not in _TRANSIENT_STATUS:
                     raise
@@ -317,3 +301,26 @@ class ModelRoutingProvider:
                 last_error = exc
         assert last_error is not None
         raise last_error
+
+    async def _generate_model(self, request, model):
+        forwarded = request.model_copy(update={
+            "model": model,
+            "metadata": {
+                key: value for key, value in request.metadata.items()
+                if key not in {"routing_phase", "routing_complexity"}
+            },
+        })
+        response = await self.provider.generate(forwarded)
+        profile = self.router._catalog[model]
+        # A gateway may reply with a different canonical model ID. Never
+        # claim the configured tariff applies to an unknown upstream alias.
+        if (response.usage is not None and response.model == model
+                and profile.input_usd_per_million is not None
+                and profile.output_usd_per_million is not None):
+            estimate = estimate_cost_usd(
+                response.usage.input_tokens, response.usage.output_tokens,
+                input_usd_per_million=profile.input_usd_per_million,
+                output_usd_per_million=profile.output_usd_per_million,
+            )
+            response = response.model_copy(update={"estimated_cost_usd": estimate})
+        return response
