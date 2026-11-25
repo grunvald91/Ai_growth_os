@@ -1556,3 +1556,18 @@ async def test_redraw_missing_title_is_explained_without_confirmation(db, produc
                                                 {"material_id": str(post.id)})
     assert not outcome.ok and confirmation is None and "заголовок" in outcome.text
     assert not tasks(db, "content_image_regen")
+
+
+def test_catalog_includes_required_fields_for_exact_targets():
+    from app.dispatcher.registry import catalog_for_model
+    catalog = {item["id"]: item for item in catalog_for_model()}
+    assert "task_id" in catalog["resume_video"]["required"]
+    assert "publication_id" in catalog["cancel_publication"]["required"]
+    assert {"post_id", "when"} <= set(catalog["schedule_vk_post"]["required"])
+
+
+def test_video_publication_requests_bypass_readonly_video_shortcut():
+    from app.dispatcher.fast_routes import quick_capability
+    assert quick_capability("Покажи последние видео") == "show_recent_videos"
+    assert quick_capability("Покажи опубликованные видео") is None
+    assert quick_capability("Покажи видео и отмени его публикацию") is None
