@@ -1571,3 +1571,28 @@ def test_video_publication_requests_bypass_readonly_video_shortcut():
     assert quick_capability("Покажи последние видео") == "show_recent_videos"
     assert quick_capability("Покажи опубликованные видео") is None
     assert quick_capability("Покажи видео и отмени его публикацию") is None
+
+
+@pytest.mark.asyncio
+async def test_dynamic_clarification_is_saved_and_does_not_execute(db, product):
+    model, _ = llm({"intent": "clarify", "reply_text": "Какой результат нужен?",
+                    "confidence": 0.4, "clarification_options": [
+                        "Привлечь новых клиентов", "Вернуть прежних клиентов",
+                        {"capability": "create_post"}, "Привлечь новых клиентов"]})
+    result = await send(db, product, text="Мне хотелось бы улучшить ситуацию с клиентами", model=model)
+    answer = result["messages"][1]
+    assert answer["intent"] == "clarify"
+    assert {"type": "clarification", "options": ["Привлечь новых клиентов",
+                                                 "Вернуть прежних клиентов"]} in answer["blocks"]
+    assert not any(b["type"] in ("confirm", "task", "chips") for b in answer["blocks"])
+    assert not list(db.scalars(select(Task)))
+    replay = await send(db, product, text="Мне хотелось бы улучшить ситуацию с клиентами", model=model)
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == answer["blocks"]
+
+
+def test_clarification_rejects_actions_and_malformed_optional_choices():
+    from app.dispatcher.decision import DispatcherDecision
+    assert DispatcherDecision(intent="clarify", clarification_options={"bad": "value"}).clarification_options == []
+    assert clean_blocks([{"type": "clarification", "options": ["A", "B"],
+                          "capability": "create_post"}]) == []
+    assert clean_blocks([{"type": "clarification", "options": ["A"]}]) == []

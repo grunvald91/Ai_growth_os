@@ -218,6 +218,31 @@
 
   // Shared workflow disclosure: pure reads stay static; durable workflows
   // fetch their latest state from the server and approve each write separately.
+  function renderClarification(block) {
+    var wrapper = el('article', 'sg-resource-widget');
+    wrapper.setAttribute('data-sg-resource-widget', 'clarification');
+    var details = resourceDetails('Варианты ответа', 'Выберите вариант или напишите свой. Ответ можно изменить перед отправкой.');
+    details.open = true;
+    var body = details.querySelector('.sg-resource-details-body');
+    (block.options || []).forEach(function (option) {
+      var button = el('button', 'dp-btn ghost', option);
+      button.type = 'button';
+      button.classList.add('dp-clarification-option');
+      button.addEventListener('click', function () {
+        if (busy) return;
+        var existing = input.value.trim();
+        if (!existing) input.value = option;
+        else if (existing !== option && !existing.endsWith('\n' + option))
+          input.value = input.value.trimEnd() + '\n' + option;
+        grow();
+        input.focus();
+      });
+      body.appendChild(button);
+    });
+    wrapper.appendChild(details);
+    return wrapper;
+  }
+
   function renderWorkflow(block, synchronized) {
     var main = el('section', 'sg-workflow-main');
     main.appendChild(el('strong', 'sg-workflow-title', block.title));
@@ -869,6 +894,7 @@
         if (!duplicate) bubble.appendChild(el('p', 'dp-text', shortProgress && started ? 'Видео создаётся' : voiceHoldEnabled ?
           String(block.text).replace(/^Запустил рисованное видео\./, 'Запустил простое видео.') : block.text));
       }
+      else if (block.type === 'clarification') bubble.appendChild(renderClarification(block));
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
       else if (block.type === 'links') {
         var items = voiceHoldEnabled ? block.items.filter(function (item) {

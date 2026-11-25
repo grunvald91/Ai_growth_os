@@ -442,3 +442,7 @@ Reconciliation, repair, reindexing and external availability checks remain
 separate future tasks, with explicit authorization and controlled execution.
 
 Recovery: ported from PR #355 onto the November 25 main revision. The current multiline notice styling and later Studio UI changes are preserved. The older branch's unrelated visual audit changes are not part of this recovery. CI and deployment must be independently verified.
+
+## Phase 9 — goal-driven conversational UI
+
+See [the canonical ServGo AI roadmap](servgo-ai-dynamic-ui-roadmap.md). Phase 9a introduces an optional clarification block containing only editable text choices. The existing dispatcher and local UI SDK resource enhancer remain the sole execution/presentation paths. No new permissions or provider calls are introduced by selecting a choice.

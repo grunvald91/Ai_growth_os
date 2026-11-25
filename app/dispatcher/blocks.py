@@ -31,6 +31,12 @@ class TextBlock(_Block):
     text: str
 
 
+class ClarificationBlock(_Block):
+    """Model-suggested conversational answers only, never callable actions."""
+    type: Literal["clarification"] = "clarification"
+    options: list[Annotated[str, Field(min_length=1, max_length=160)]] = Field(min_length=2, max_length=4)
+
+
 class Chip(_Block):
     """A complete request: pressing it sends the capability and parameters at once."""
     label: str = Field(min_length=1, max_length=80)
@@ -189,7 +195,7 @@ class WorkflowBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
+    TextBlock | ClarificationBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)
