@@ -139,6 +139,33 @@ def run():
                             folder = bounds(page, ".mail-v3-folders > nav")
                             assert folder["x"] >= 0 and folder["x"] + folder["width"] <= width + 2, (
                                 name, width, "folder menu escapes viewport", folder)
+                        notices = page.evaluate("""(design) => {
+                            const target=document.querySelector('#notice, #toast');
+                            const before=getComputedStyle(target).display;
+                            target.style.display='block';
+                            target.textContent='Длинное уведомление '+ 'проверка'.repeat(80);
+                            const read=e=>{const s=getComputedStyle(e);return {
+                                radius:s.borderTopLeftRadius,weight:s.fontWeight,
+                                width:e.clientWidth,scroll:e.scrollWidth,accent:s.borderInlineStartColor};};
+                            const mail=read(target);
+                            target.style.removeProperty('display');
+                            const style=document.createElement('style');
+                            style.textContent=design;document.head.append(style);
+                            const wrap=document.createElement('section');
+                            wrap.style.cssText='position:fixed;left:0;top:0;width:calc(100% - 16px)';
+                            wrap.innerHTML='<p role="alert">Ошибка '+ 'проверка'.repeat(80)+'</p>'+
+                                '<p class="ds-notice ds-notice--warning">Внимание</p>';
+                            document.body.append(wrap);
+                            const error=read(wrap.children[0]),warning=read(wrap.children[1]);
+                            wrap.remove();style.remove();
+                            return {before,mail,error,warning};
+                        }""", DESIGN)
+                        assert notices["before"]=="none",notices
+                        for kind in ("mail","error","warning"):
+                            assert notices[kind]["radius"]=="10px",notices
+                            assert notices[kind]["weight"]=="400",notices
+                            assert notices[kind]["scroll"]<=notices[kind]["width"]+1,notices
+                        assert notices["error"]["accent"]!=notices["warning"]["accent"],notices
                         overflow = page.evaluate(
                             "() => document.documentElement.scrollWidth - innerWidth")
                         assert overflow <= 2, (name, width, theme, "horizontal overflow", overflow)
