@@ -1399,3 +1399,119 @@ def test_fast_routes_do_not_turn_diagnostics_or_repairs_into_creation():
     assert quick_capability("Покажи видео с ошибками") is None
     assert quick_capability("Покажи последние видео") == "show_recent_videos"
     assert quick_video_request("Хочу переделать рисованное видео на тему энергии") is None
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_retry_uses_shared_gate_and_confirmation(db, product):
+    task = Task(product_id=product.id, title="POST: retry test", assigned_agent="content_factory",
+                status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    result = await send(db, product, chip={"label": "Повторить", "capability": "retry_content_task",
+                        "params": {"task_id": str(task.id)}})
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert card["paid"] and task.status == TaskStatus.FAILED
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    db.refresh(task)
+    assert task.status == TaskStatus.QUEUED
+    replay = await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert replay["replayed"] is True
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_retry_rejects_foreign_task_and_role(db, product):
+    other = Product(name="Other", slug="other-retry")
+    db.add(other)
+    db.flush()
+    task = Task(product_id=other.id, title="Foreign", assigned_agent="content_factory",
+                status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    outcome, confirmation, _ = await service.act(context(db, product), "retry_content_task",
+                                                  {"task_id": str(task.id)})
+    assert not outcome.ok and confirmation is None
+    ctx = context(db, other)
+    ctx.studio_role = "staff"
+    outcome, confirmation, _ = await service.act(ctx, "retry_content_task", {"task_id": str(task.id)})
+    assert not outcome.ok and confirmation is None
+    assert task.status == TaskStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_retry_stale_card_does_not_requeue(db, product):
+    task = Task(product_id=product.id, title="POST: stale retry", assigned_agent="content_factory",
+                status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    result = await send(db, product, chip={"label": "Повторить", "capability": "retry_content_task",
+                        "params": {"task_id": str(task.id)}})
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    task.updated_at = task.updated_at + timedelta(seconds=60)
+    db.commit()
+    response = await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert "изменилось" in response["messages"][-1]["text"]
+    db.refresh(task)
+    assert task.status == TaskStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_resume_pins_state_and_only_calls_existing_resume_after_approval(db, product, monkeypatch):
+    from types import SimpleNamespace
+    from app.content.whiteboard import jobs
+    task = Task(product_id=product.id, title="VIDEO", assigned_agent="whiteboard_renderer",
+                status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    source = SimpleNamespace(content="request")
+    state = SimpleNamespace(content=json.dumps({"calls": 3, "extra_calls": 0}))
+    approval = SimpleNamespace(status="approved")
+    payload = SimpleNamespace(request=SimpleNamespace(topic="Тема видео"), max_api_calls=25)
+    monkeypatch.setattr(jobs, "records", lambda *args, **kwargs: (source, state, approval, payload))
+    monkeypatch.setattr(jobs, "can_resume", lambda *args: True)
+    seen = []
+    def resume(*args, **kwargs):
+        assert kwargs["confirmed"] and kwargs["extra_calls"] == 0
+        seen.append("resume")
+        task.status = TaskStatus.QUEUED
+        db.commit()
+        return task
+    monkeypatch.setattr(jobs, "resume_job", resume)
+    chip = {"label": "Продолжить", "capability": "resume_video", "params": {"task_id": str(task.id)}}
+    first = await send(db, product, chip=chip)
+    card = next(b for b in first["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert card["paid"] and seen == []
+    state.content = json.dumps({"calls": 4, "extra_calls": 0})
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert seen == [] and task.status == TaskStatus.FAILED
+    second = await send(db, product, chip=chip, key="fresh")
+    card = next(b for b in second["messages"][1]["blocks"] if b["type"] == "confirm")
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert seen == ["resume"] and task.status == TaskStatus.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_vk_redraw_preserves_text_and_shows_job(db, product):
+    from app.models.domain import ArtifactStatus
+    from app.api.content_studio_activity import work_page
+    origin = Task(product_id=product.id, title="POST: vk", assigned_agent="content_factory",
+                  status=TaskStatus.COMPLETED)
+    db.add(origin)
+    db.flush()
+    post = Artifact(product_id=product.id, task_id=origin.id, kind="channel_text",
+                    title="VK post", status=ArtifactStatus.AWAITING_APPROVAL,
+                    content=json.dumps({"channel": "vk", "body": "Original text", "image_model": "gemini",
+                                        "image_ratio": "4:5", "image_state": "failed"}))
+    db.add(post)
+    db.commit()
+    chip = {"label": "Переделать картинку", "capability": "redraw_post_image",
+            "params": {"material_id": str(post.id), "feedback": "Сделай фон светлее"}}
+    result = await send(db, product, chip=chip)
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert card["paid"] and not tasks(db, "content_image_regen")
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    db.refresh(post)
+    assert json.loads(post.content)["body"] == "Original text"
+    assert json.loads(post.content)["image_state"] == "regenerating"
+    job = tasks(db, "content_image_regen")[0]
+    assert job.status == TaskStatus.QUEUED
+    assert any(row["id"] == str(job.id) for row in work_page(db, product.id, kind="edit")["items"])
