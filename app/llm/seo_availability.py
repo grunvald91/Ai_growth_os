@@ -14,6 +14,8 @@ from pathlib import Path
 
 import httpx
 
+from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
+
 WAIT_KIND = "seo_model_wait"
 DAY = 24 * 60 * 60
 HOUR = 60 * 60
@@ -115,6 +117,10 @@ class AvailabilityPolicy:
                     result = await call(primary)
                 except Exception as exc:
                     if not transient(exc):
+                        # The gateway answered, but its reply was unusable. Do not
+                        # continue an availability outage through a response error.
+                        if isinstance(exc, (ProviderEmptyResponseError, ProviderMalformedResponseError)):
+                            self._save(path, None)
                         raise
                     now = self.clock()
                     first = min(state["first"], now) if state else now
