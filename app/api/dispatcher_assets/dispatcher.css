@@ -286,3 +286,6 @@
   outline:2px solid var(--dp-accent,#3478d6);outline-offset:2px}
 .dp-plan-change-collapsible ui-collapsible-panel{display:block}
 .dp-plan-change-collapsible ui-collapsible-panel[hidden]{display:none!important}
+
+/* Conversational clarification choices: readable, full-width and not action chips. */
+.dp-msg .dp-clarification-option{width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:left;justify-content:flex-start;min-height:44px;height:auto;padding:10px 12px;border-radius:8px}

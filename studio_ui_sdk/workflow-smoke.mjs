@@ -23,7 +23,7 @@ const state = {hints:[], messages:[{
       blocks:[{type:"links",items:[{label:"Открыть план",href:"/studio/products/demo/plan"}]}]},
     {title:"Что ждёт проверки",status:"skipped",detail:"Не выполнялось.",
       blocks:[]},
-  ]}]}]};
+  ]}]},{id:"clarification-message",seq:2,role:"assistant",text:"Какой результат нужен?",blocks:[{type:"text",text:"Какой результат нужен?"},{type:"clarification",options:["Привлечь новых клиентов","<img src=x onerror=alert(1)>"]}]}]};
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -76,6 +76,14 @@ try{
     assert.equal(await workflow.locator(".dp-link").getAttribute("href"),
       "/studio/products/demo/plan");
     assert.equal(await page.locator(".dp-confirm").count(),0);
+    const clarification=page.locator('[data-sg-resource-widget="clarification"]');
+    await clarification.locator("ui-collapsible").waitFor();
+    const posted=[];page.on("request",req=>{if(req.method()==="POST")posted.push(req.url());});
+    await page.locator("#dp-input").fill("Мой черновик");
+    await clarification.getByRole("button",{name:"Привлечь новых клиентов"}).click();
+    assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
+    assert.equal(await clarification.locator("img").count(),0);
+    assert.equal(posted.length,0);
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -84,6 +92,8 @@ try{
     assert.equal(await legacy.locator("ui-collapsible").count(),0);
     await legacy.locator('[data-sg-resource-widget="workflow"] details summary').click();
     assert.equal(await legacy.locator(".sg-workflow-result").count(),3);
+    await legacy.locator('[data-sg-resource-widget="clarification"]').getByRole("button",{name:"Привлечь новых клиентов"}).click();
+    assert.equal(await legacy.locator("#dp-input").inputValue(),"Привлечь новых клиентов");
     await legacy.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");
