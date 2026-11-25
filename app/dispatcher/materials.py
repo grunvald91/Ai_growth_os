@@ -113,6 +113,11 @@ async def show_material(ctx: Context, params: MaterialParams) -> Outcome:
         if not blocks[0].get("truncated"):
             blocks.append({"type": "chips", "items": [
                 {"label": "Утвердить", "capability": "approve_material", "params": {"material_id": str(row.id)}}]})
+        if row.kind == "channel_text" and ctx.studio_role in (None, "owner", "co_owner"):
+            data = material_data(row)
+            if row.task_id is not None and data.get("channel") == "vk" and data.get("image_model", "none") != "none":
+                blocks.append({"type": "chips", "items": [{"label": "Перегенерировать картинку",
+                    "capability": "redraw_post_image", "params": {"material_id": str(row.id)}}]})
         hint = " Чтобы доработать пост, напишите, что поправить." if row.kind == "channel_text" else ""
         text = f"{kind} «{row.title[:80]}» ждёт вашего решения.{hint}"
     else:
