@@ -89,3 +89,51 @@ def test_new_slots_prefer_missing_days_without_moving_existing_tasks(env):
     slots = available_slots(db, product.id, 1, now=now, tz=tz, limit=1,
                             spread_days=7, preferred_days=(desired,))
     assert day(slots[0], tz=tz) != desired
+
+
+def test_backlog_spreads_across_days_instead_of_consuming_three_today(env):
+    db, product = env
+    now = datetime(2026, 11, 26, 12, tzinfo=timezone.utc)
+    for i in range(8):
+        queued(db, product.id, now, "запись клиентов тема " + str(i))
+    stock = coverage(db, product.id, now=now, daily_limit=3)
+    assert len(stock.pipeline_days) == 8
+    assert not stock.missing_pipeline_days
+    assert stock.ready_articles == 0
+
+
+def test_waiting_model_does_not_cover_a_day_before_retry(env):
+    db, product = env
+    now = datetime(2026, 11, 26, 20, 59, tzinfo=timezone.utc)
+    task = queued(db, product.id, now, "запись клиентов")
+    db.add(Artifact(product_id=product.id, task_id=task.id, kind="seo_model_wait",
+        title=(now + timedelta(minutes=5)).isoformat(timespec="microseconds"), content="{}"))
+    db.commit()
+    stock = coverage(db, product.id, now=now)
+    assert stock.pipeline_days == ("2026-11-27",)
+    assert "2026-11-26" in stock.missing_pipeline_days
+
+
+def test_extra_release_requires_seven_future_days_but_first_release_is_allowed(env, monkeypatch):
+    from app.models.domain import Publication
+    from app.seo.reserve import Coverage, permits_extra_release
+    import app.seo.reserve as reserve
+    db, product = env
+    now = datetime(2026, 11, 26, 12, tzinfo=timezone.utc)
+    row = Artifact(product_id=product.id, kind="article", title="candidate", content="{}")
+    first = Artifact(product_id=product.id, kind="article", title="first", content="{}")
+    db.add_all([row, first])
+    db.commit()
+    def check():
+        return permits_extra_release(db, row, now=now, timezone_name="Europe/Moscow", daily_limit=3)
+    assert check()
+    db.add(Publication(product_id=product.id, artifact_id=first.id, channel="own_site",
+                       status="published", published_at=now))
+    db.commit()
+    def short(db, product_id, **kw):
+        assert kw["exclude_article_id"] == row.id
+        return Coverage(6, 0, (), (), ("2026-12-03",), ())
+    monkeypatch.setattr(reserve, "coverage", short)
+    assert not check()
+    monkeypatch.setattr(reserve, "coverage", lambda *a, **kw: Coverage(7, 0, (), (), (), ()))
+    assert check()
