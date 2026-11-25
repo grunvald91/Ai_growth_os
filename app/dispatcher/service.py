@@ -601,6 +601,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 reply_text = decision.reply_text or "Прямого действия для этой просьбы нет. Вот доступные варианты."
                 spoken = reply_text
     blocks = [{"type": "text", "text": reply_text}, *blocks]
+    if (decision is not None and decision.intent == "clarify" and intent == "clarify"
+            and confirmation is None and outcome is None and decision.clarification_options):
+        blocks.append({"type": "clarification", "options": decision.clarification_options})
+        chips = []
     confirmation_id = None
     if confirmation is not None:
         confirmation_id = uuid4().hex
