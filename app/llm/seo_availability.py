@@ -4,7 +4,6 @@ A real pending request is the availability probe. A successful primary response
 clears the outage. A fallback is permitted only after another failed primary
 request at/after 24h. No sleeps or network calls while waiting for the next slot.
 """
-import asyncio
 import fcntl
 import hashlib
 import json
@@ -81,6 +80,11 @@ class AvailabilityPolicy:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temp, path)
+            directory_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         finally:
             Path(temp).unlink(missing_ok=True)
 
