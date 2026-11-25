@@ -221,7 +221,7 @@ async def test_connected_company_article_reaches_own_blog_with_critic_and_demo_s
     generated = CriticUnavailableProvider(article_outputs())
     monkeypatch.setattr(
         content_worker, "build_article_production",
-        lambda db, settings, *, force_critic=False: build_article_production(
+        lambda db, settings, *, force_critic=False, seo_availability=False: build_article_production(
             db, settings, generated, force_critic=force_critic
         ),
     )
