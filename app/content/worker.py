@@ -147,7 +147,8 @@ async def run_content_once(session_factory, settings):
                         # Clean critic verdict + static checks publish automatically; failures wait for review.
                         from app.seo.publishing import publish_if_clear
                         try:
-                            publish_if_clear(db, result.artifact_ids[0], daily_limit=settings.seo_publications_per_day)
+                            publish_if_clear(db, result.artifact_ids[0], daily_limit=settings.seo_publications_per_day,
+                                             reserve_enabled=settings.seo_reserve_enabled)
                         except Exception:
                             db.rollback()
                             logging.getLogger(__name__).exception('SEO article publication failed for task %s', task_id)
