@@ -65,6 +65,8 @@ async def run_content_once(session_factory, settings):
             .correlate(Task).scalar_subquery()
         )
         retry_ready = db_time(db, datetime.now(timezone.utc) - timedelta(minutes=10))
+        from app.llm.seo_availability import ready_filter
+        query = query.where(ready_filter())
         query = query.where(or_(
             ~Task.title.like(f'{SEO_TASK_PREFIX}%'),
             last_transient_retry.is_(None),
@@ -125,7 +127,7 @@ async def run_content_once(session_factory, settings):
                     if data.seo_brief is not None:
                         require_enabled(db, product_id)
                     result = await build_article_production(
-                        db, settings, force_critic=True
+                        db, settings, force_critic=True, seo_availability=data.seo_brief is not None
                     ).run(data.model_copy(update={'task_id': task_id}))
                     if (data.seo_brief is not None and result.status == 'failed'
                             and getattr(result, 'retryable', False)):

@@ -33,15 +33,27 @@ def build_intake(db: Session, settings: Settings, provider: LLMProvider | None =
     from app.llm.router_store import role_override
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     factory, models = None, ()
+    from app.llm.seo_availability import policy_for
+    availability = policy_for(settings)
     if provider is None and settings.llm_provider == "xai" and settings.xai_api_key:
         def factory(model: str) -> LLMService:
-            # A fixed model per attempt, bypassing the router: each retry deliberately goes to another provider.
-            return LLMService(privacy_gateway=privacy, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS, provider=XAIProvider(
-                api_key=settings.xai_api_key, model=model, base_url=settings.xai_base_url,
-                reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds))
+            # With the shared policy, the whole configured chain is guarded;
+            # the intake service must not independently switch on a bad answer.
+            def fixed(name):
+                return XAIProvider(api_key=settings.xai_api_key, model=name, base_url=settings.xai_base_url,
+                    reasoning_effort=settings.xai_reasoning_effort, timeout_seconds=settings.xai_timeout_seconds)
+            if availability is not None:
+                chain = intake_model_order(role_override(settings, 'company_intake'),
+                    [m.strip() for m in settings.intake_models.split(',') if m.strip()], settings.intake_max_attempts)
+                chosen = FallbackProvider(providers=[(name, fixed(name)) for name in chain], availability=availability)
+            else:
+                chosen = fixed(model)
+            return LLMService(privacy_gateway=privacy, critic_enabled=True, critic_limits=INTAKE_CRITIC_LIMITS, provider=chosen)
         models = intake_model_order(role_override(settings, "company_intake"),
                                     [m.strip() for m in settings.intake_models.split(",") if m.strip()],
                                     settings.intake_max_attempts)
+        if availability is not None:
+            models = models[:1]
     return CompanyIntakeService(
         db, products_root=settings.products_root,
         # Every extracted value is checked against a verbatim quote from its source, and a second model reviews the
@@ -74,8 +86,10 @@ def build_dispatcher_provider(settings: Settings) -> LLMProvider:
         timeout_seconds=settings.xai_timeout_seconds,
     )
     effective = effective_router_settings(settings)
+    from app.llm.seo_availability import policy_for
+    availability = policy_for(effective)
     if not effective.model_router_enabled:
-        return provider
+        return FallbackProvider(providers=[(model, provider)], availability=availability) if availability else provider
     # Preserve the owner's existing router catalog and per-call price ceiling.
     # Override only this interactive role in memory; all other roles retain
     # their saved selections. The dedicated model must be enabled in the catalog.
@@ -88,21 +102,24 @@ def build_dispatcher_provider(settings: Settings) -> LLMProvider:
         max_call_usd=effective.model_router_max_call_usd,
         provider_supports_web_search=False,
     )
-    return ModelRoutingProvider(provider=provider, router=router)
+    return ModelRoutingProvider(provider=provider, router=router, availability=availability)
 
 
-def build_llm_provider(settings: Settings) -> LLMProvider:
+def build_llm_provider(settings: Settings, *, seo_availability: bool = False) -> LLMProvider:
     settings = effective_router_settings(settings)
+    from app.llm.seo_availability import policy_for
+    availability = policy_for(settings, seo=seo_availability)
     if settings.llm_provider == "anthropic":
         if settings.model_router_enabled:
             raise ValueError("Model Router currently supports only the configured xai-compatible gateway")
         if not settings.anthropic_api_key:
             raise ValueError("Configure ANTHROPIC_API_KEY")
-        return AnthropicProvider(
+        primary = AnthropicProvider(
             api_key=settings.anthropic_api_key,
             model=settings.llm_model,
             base_url=settings.anthropic_base_url,
         )
+        return FallbackProvider(providers=[(settings.llm_model, primary)], availability=availability) if availability else primary
     if settings.llm_provider == "xai":
         if not settings.xai_api_key:
             raise ValueError("Configure XAI_API_KEY")
@@ -124,17 +141,17 @@ def build_llm_provider(settings: Settings) -> LLMProvider:
                 max_call_usd=settings.model_router_max_call_usd,
                 provider_supports_web_search=False,  # No search-tool adapter in XAIProvider yet.
             )
-            return ModelRoutingProvider(provider=primary, router=router)
+            return ModelRoutingProvider(provider=primary, router=router, availability=availability)
         fallback_models = []
         for raw in settings.llm_fallback_models.split(","):
             model = raw.strip()
             if model and model != settings.llm_model and model not in fallback_models:
                 fallback_models.append(model)
-        if not fallback_models:
+        if not fallback_models and availability is None:
             return primary
         chain: list[tuple[str, LLMProvider]] = [(settings.llm_model, primary)]
         chain.extend((model, make_provider(model)) for model in fallback_models[:3])
-        return FallbackProvider(providers=chain)
+        return FallbackProvider(providers=chain, availability=availability)
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
@@ -156,7 +173,7 @@ def build_schema_normalizer_llm(settings: Settings) -> LLMService:
 
 def build_seo_llm(settings: Settings, provider: LLMProvider | None = None) -> tuple[LLMService, PrivacyGateway]:
     """The model service used by the SEO factory: same privacy gateway and critic settings as the article pipeline."""
-    provider = provider or build_llm_provider(settings)
+    provider = provider or build_llm_provider(settings, seo_availability=True)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     return LLMService(privacy_gateway=privacy, provider=provider, critic_enabled=settings.agent_critic_enabled), privacy
 
@@ -167,9 +184,10 @@ def build_article_production(
     provider: LLMProvider | None = None,
     *,
     force_critic: bool = False,
+    seo_availability: bool = False,
 ) -> ArticleProduction:
     injected_provider = provider is not None
-    provider = provider or build_llm_provider(settings)
+    provider = provider or build_llm_provider(settings, seo_availability=seo_availability)
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     # SEO articles contain a verified company profile, references and multiple
     # stage outputs. A 24k-character critic budget skips the final review before

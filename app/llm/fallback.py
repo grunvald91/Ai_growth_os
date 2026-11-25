@@ -19,12 +19,19 @@ class FallbackProvider:
         self,
         *,
         providers: list[tuple[str, LLMProvider]],
+        availability=None,
     ) -> None:
         if not providers:
             raise ValueError("At least one LLM provider is required")
         self._providers = providers
+        self.availability = availability
 
     async def generate(self, request: LLMRequest) -> LLMResponse:
+        if self.availability is not None:
+            providers = dict(self._providers)
+            async def call(model):
+                return await providers[model].generate(request.model_copy(update={"model": model}))
+            return await self.availability.generate(tuple(providers), call)
         last_error: Exception | None = None
         for index, (model, provider) in enumerate(self._providers):
             candidate = request.model_copy(update={"model": model})
