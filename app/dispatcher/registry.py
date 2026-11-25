@@ -34,9 +34,22 @@ PAGES = {
     "team": ("/studio/team", "ИИ-команда"),
     "schedule": ("https://servgo.ru/admin/schedule", "Расписание записи в ServGo"),
     "admin": ("https://servgo.ru/admin", "Админка ServGo"),
+    "seo": ("/studio/products/{p}/seo", "SEO-завод"),
+    "seo_queue": ("/studio/products/{p}/seo/queue", "Очередь SEO-статей"),
+    "seo_metrics": ("/studio/products/{p}/seo/search-metrics", "Поисковые показатели"),
+    "campaigns": ("/studio/products/{p}/campaigns", "Кампании"),
+    "market_research": ("/studio/products/{p}/market-research", "Поиск организаций и конкурентов"),
+    "brand_kit": ("/studio/products/{p}/brand-kit", "Бренд-кит"),
+    "brand_library": ("/studio/products/{p}/brand-kit/library", "Библиотека дизайна"),
+    "vk": ("/studio/products/{p}/vk", "Публикации ВКонтакте"),
+    "vk_settings": ("/studio/products/{p}/vk/settings", "Настройки ВКонтакте"),
+    "ai_chat": ("/studio/chat", "ИИ-чат"),
+    "accounts": ("/studio/products/{p}/accounts", "Доступы компании"),
 }
 PageKey = Literal["create", "work", "review", "plan", "calendar", "materials", "channels", "whiteboard",
-                  "analytics", "comments", "profile", "team", "schedule", "admin"]
+                  "analytics", "comments", "profile", "team", "schedule", "admin", "seo", "seo_queue",
+                  "seo_metrics", "campaigns", "market_research", "brand_kit", "brand_library", "vk",
+                  "vk_settings", "ai_chat", "accounts"]
 
 
 def page_href(key: str, product_id: UUID | str) -> str:
@@ -123,6 +136,21 @@ class VideoParams(VideoSettings):
 
 class GoToParams(_Params):
     target: PageKey
+
+
+class TaskListParams(_Params):
+    tab: Literal["all", "active", "approval", "ready", "problems"] = "all"
+    kind: Literal["all", "post", "article", "creative", "video", "plan", "edit", "seo", "business"] = "all"
+    query: str = Field(default="", max_length=120)
+
+
+class TaskDetailParams(_Params):
+    task_id: UUID
+
+
+class RepairVideoParams(_Params):
+    task_id: UUID
+    image_model: Literal["gemini-3.1-flash-image", "gpt-image-2.5-sunburst"] | None = None
 
 
 class CancelVideoParams(_Params):
@@ -273,6 +301,21 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "«покажи последние видео», «какие видео готовы», «где недавно созданные ролики». "
                "Это просмотр результата, не запуск нового видео.",
                ToolOperation.ANALYTICS, Cost.NONE, NoParams),
+    Capability("list_tasks", "Найти задания",
+               "Показать задания выбранной компании по статусу и типу: ошибки/отмены problems, выполняемые active, "
+               "на проверке approval, завершённые ready, все all; kind=video для видео, seo для SEO, article для статей. "
+               "query — явно указанная тема или часть названия. Для «почему видео не готово», «что сломалось», "
+               "«найди задание»; показывает реальные причины, если известны, и кнопки открытия.",
+               ToolOperation.ANALYTICS, Cost.NONE, TaskListParams),
+    Capability("show_task", "Проверить конкретное задание",
+               "Показать статус, этап и известную причину остановки конкретного задания. task_id только из recent_tasks "
+               "или явно выбранного задания; если не знаешь ID, сначала list_tasks.",
+               ToolOperation.ANALYTICS, Cost.NONE, TaskDetailParams),
+    Capability("repair_video_images", "Перерисовать видео без новой озвучки",
+               "Подготовить визуальную перегенерацию завершённого исходного рисованного видео с сохранением аудио и сценария. "
+               "task_id только из recent_tasks или явно выбранного задания. Если исходник неясен, найди видео через list_tasks; "
+               "image_model необязательна, по умолчанию модель исходника. Платный запуск отдельно подтверждается.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, RepairVideoParams),
     Capability("show_work", "Что в работе",
                "Показать, какие задания сейчас выполняются, ждут решения или завершились.",
                ToolOperation.ANALYTICS, Cost.NONE, NoParams),
@@ -284,7 +327,8 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                ToolOperation.ANALYTICS, Cost.NONE, NoParams),
     Capability("go_to", "Где это находится",
                "Подсказать, где на платформе нужная страница, и дать кнопку-ссылку. "
-               "target — один из: " + ", ".join(PAGES) + ".",
+               "Используй карту разделов platform_guide: для неподключённого действия объясни шаги, "
+               "не утверждай, что оно выполнено. target — один из: " + ", ".join(PAGES) + ".",
                ToolOperation.ANALYTICS, Cost.NONE, GoToParams),
     Capability("show_schedule", "Расписание записей",
                "Записи клиентов онлайн-записи, свободные окна, загрузка мастеров, кто следующий клиент. "
