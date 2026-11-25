@@ -710,7 +710,7 @@ def approved_posts(db, product_id):
     return output
 
 
-def schedule(db, product_id, post_id, when, *, products_root=None):
+def schedule(db, product_id, post_id, when, *, products_root=None, commit=True):
     if when.tzinfo is None or when.utcoffset() is None:
         raise ValueError("Для публикации укажите часовой пояс")
     now = datetime.now(timezone.utc)
@@ -782,7 +782,10 @@ def schedule(db, product_id, post_id, when, *, products_root=None):
             "image_artifact_id": str(image.id) if image else None,
             "image_sha256": image_hash,
         }, ensure_ascii=False)))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return pub
 
 
