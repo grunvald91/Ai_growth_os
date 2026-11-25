@@ -37,7 +37,8 @@ def quick_capability(text: str) -> str | None:
     creation = bool(re.match(r"^(сделай|создай|сгенерируй|запусти|нарисуй|подготовь)\s+(?:мне\s+)?(?:нов\w+\s+)?(?:видео|видеоролик|ролик|анимаци)", words))
     viewing = bool(re.search(r"\b(покажи|показать|посмотреть|посмотри|найди|открой|увидеть|где|готов\w*|последн\w*|недавн\w*|сделанн\w*|созданн\w*|запущенн\w*|мои|моих|своих|статус)\b", words))
     diagnostic = bool(re.search(r"\b(?:почему|ошиб\w*|сломал\w*|не\s+готов\w*|не\s+додел\w*|перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|продолж\w*|додел\w*)\b", words))
-    if video and viewing and not creation and not diagnostic:
+    publishing = bool(re.search(r"\b(?:публикаци\w*|опубликов\w*|опублику\w*|отправ\w*|вылож\w*|перенес\w*|перенос\w*|отмен\w*)\b", words))
+    if video and viewing and not creation and not diagnostic and not publishing:
         return "show_recent_videos"
 
     business = bool(re.search(r"\b(бизнес\w*|компани\w*|маркетинг\w*|продвижени\w*)\b", words))
