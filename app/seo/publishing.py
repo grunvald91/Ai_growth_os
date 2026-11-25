@@ -451,7 +451,7 @@ def publish_pending(db: Session, *, now: datetime | None = None,
                Task.status == TaskStatus.COMPLETED, Task.title.like("SEO-ARTICLE:%"),
                SeoFactoryActivation.enabled.is_(True),
                or_(Task.due_at.is_(None), Task.due_at <= db_time(db, moment)))
-        .order_by(Task.due_at, Artifact.created_at, Artifact.id).limit(100)))
+        .order_by(Task.due_at, Artifact.created_at, Artifact.id)))
     for row in rows:
         if not is_enabled(db, row.product_id):
             continue
@@ -489,6 +489,4 @@ def publish_pending(db: Session, *, now: datetime | None = None,
             _logger.warning("SEO held publication recovery failed for article %s", row.id)
         finally:
             db.rollback()
-        if checked >= 100:
-            break
     return len(rows) + checked
