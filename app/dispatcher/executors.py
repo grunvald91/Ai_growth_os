@@ -27,12 +27,12 @@ _links = links_block
 # ---- reading -----------------------------------------------------------------------------
 
 def _task_rows_outcome(ctx: Context, rows: list[dict], total: int) -> Outcome:
-    from app.api.content_studio_activity import work_url
+    from app.api.content_studio_activity import ANIMATOR_PHASES, work_url
     if not rows:
         return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")])
     table = {"type": "table", "columns": ["Задание", "Статус", "Этап / причина"],
              "rows": [[str(row["title"]), str(row["label"]),
-                       str(row.get("display_summary") or row.get("current_stage") or row.get("description") or "Не указано")]
+                       str(row.get("display_summary") or ANIMATOR_PHASES.get(row.get("animator_stage")) or row.get("current_stage") or row.get("description") or "Не указано")]
                       for row in rows]}
     links = {"type": "links", "items": [{"label": str(row["title"])[:80] or "Открыть задание",
                                        "href": work_url(ctx.product.id, row)} for row in rows]}
