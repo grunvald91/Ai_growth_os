@@ -83,6 +83,9 @@ def snapshot(db: Session, product: Product) -> dict:
         ][:20]
     return {
         "editable_plan": editable,
+        "recent_tasks": [{"task_id": row["id"], "title": str(row["title"])[:140],
+                          "status": row["state"], "kind": row.get("kind_label", ""),
+                          "agent": row.get("agent", "")} for row in rows[:15]],
         "company": product.name,
         "today": datetime.now(ZoneInfo("Europe/Moscow")).strftime("%Y-%m-%d, %A, %H:%M (Москва)"),
         "in_work": sum(1 for row in rows if row["state"] in ACTIVE),
