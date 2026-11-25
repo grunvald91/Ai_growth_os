@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.core.config import Settings
 from app.dispatcher import service
+from app.dispatcher.decision import DispatcherDecision
 from app.dispatcher.executors import Context
 from app.dispatcher.fast_routes import quick_video_request
 from app.models.domain import Product, Task, TaskStatus
@@ -95,3 +96,58 @@ async def test_video_explainer_works_without_llm_and_requires_paid_confirmation(
                                            Task.assigned_agent == "whiteboard_renderer"))
     assert task_b is not None and task_b.id != task_a.id
     assert task_b.status == TaskStatus.WAITING_APPROVAL
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial", ["unsupported", "unknown"])
+async def test_dispatcher_recovers_semantic_rejection_before_acting(db, tmp_path, monkeypatch, initial):
+    product = Product(name="Recovery", slug="dispatcher-recovery")
+    db.add(product)
+    db.commit()
+    ctx = Context(db=db, product=product, settings=Settings(_env_file=None, products_root=tmp_path),
+                  account="owner")
+    attempts = []
+
+    async def fake_ask(*args, recovery=False):
+        attempts.append(recovery)
+        if recovery:
+            return DispatcherDecision(intent="execute", capability="show_work", confidence=0.95), "test-model"
+        if initial == "unknown":
+            return DispatcherDecision(intent="execute", capability="made_up_tool", confidence=0.95), "test-model"
+        return DispatcherDecision(intent="unsupported", confidence=0.95), "test-model"
+
+    monkeypatch.setattr(service, "ask_model", fake_ask)
+    response = await service.handle_message(
+        db, ctx, object(), text="Расскажи, какие поручения сейчас выполняются",
+        client_key="semantic-recovery",
+    )
+    assert attempts == [False, True]
+    answer = response["messages"][-1]
+    assert answer["intent"] == "execute"
+    assert answer["capability"] == "show_work"
+    assert "Этого я пока не умею" not in answer["text"]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_exhausted_recovery_offers_clarification(db, tmp_path, monkeypatch):
+    product = Product(name="Clarification", slug="dispatcher-clarification")
+    db.add(product)
+    db.commit()
+    ctx = Context(db=db, product=product, settings=Settings(_env_file=None, products_root=tmp_path),
+                  account="owner")
+    attempts = []
+
+    async def fake_ask(*args, recovery=False):
+        attempts.append(recovery)
+        return DispatcherDecision(intent="unsupported", confidence=0.95), "test-model"
+
+    monkeypatch.setattr(service, "ask_model", fake_ask)
+    response = await service.handle_message(
+        db, ctx, object(), text="Уладь это по-другому", client_key="exhausted-recovery",
+    )
+    assert attempts == [False, True]
+    answer = response["messages"][-1]
+    assert answer["intent"] == "clarify"
+    assert any(block["type"] == "chips" for block in answer["blocks"])
+    assert "Я записал" not in answer["text"]
+    assert not list(db.scalars(select(Task).where(Task.product_id == product.id)))
