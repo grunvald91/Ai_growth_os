@@ -89,7 +89,7 @@ def reader_hash(reader) -> str:
 def critic_verdict(db: Session, task_id, reader=None) -> str:
     """Status of the critic review of the final reader-facing editor, or 'missing' when no review happened."""
     run = db.scalar(select(AgentRun).where(AgentRun.task_id == task_id, AgentRun.agent_name == FINAL_EDITOR)
-                    .order_by(AgentRun.created_at.desc()).limit(1))
+                    .order_by(AgentRun.created_at.desc(), AgentRun.started_at.desc().nulls_last(), AgentRun.id.desc()).limit(1))
     if run is None:
         return "missing"
     reviews = db.scalars(select(Artifact).where(Artifact.agent_run_id == run.id, Artifact.kind == "seo_final_review")
