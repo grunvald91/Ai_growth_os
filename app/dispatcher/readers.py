@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.domain import Product, Task, TaskStatus
+from app.models.domain import Artifact, ArtifactStatus, Product, Task, TaskStatus
 
 ACTIVE = {"queued", "running", "waiting_approval"}
 
@@ -81,7 +81,13 @@ def snapshot(db: Session, product: Product) -> dict:
              "publish_at": str(s.get("publish_at") or "")}
             for s in upcoming_slots(data) if s.get("slot_id")
         ][:20]
+    materials = list(db.scalars(select(Artifact).where(
+        Artifact.product_id == product.id, Artifact.kind == "channel_text",
+        Artifact.status == ArtifactStatus.AWAITING_APPROVAL,
+    ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(15)))
     return {
+        "recent_materials": [{"material_id": str(row.id), "title": row.title[:140],
+                              "kind": row.kind, "status": row.status.value} for row in materials],
         "editable_plan": editable,
         "recent_tasks": [{"task_id": row["id"], "title": str(row["title"])[:140],
                           "status": row["state"], "kind": row.get("kind_label", ""),
