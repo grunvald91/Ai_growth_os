@@ -517,7 +517,8 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
 def catalog_for_model() -> list[dict]:
     """The list sent to the model: ids, meaning and parameter shapes. No policy details."""
     return [{"id": c.id, "title": c.title, "description": c.description,
-             "params": c.params.model_json_schema().get("properties", {})}
+             "params": c.params.model_json_schema().get("properties", {}),
+             "required": c.params.model_json_schema().get("required", [])}
             for c in CAPABILITIES.values()]
 
 
