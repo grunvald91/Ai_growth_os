@@ -667,3 +667,49 @@ async def test_consumer_service_company_may_publish_its_own_booking_query(env, t
     row.content = article.model_dump_json()
     db.commit()
     assert publish_if_clear(db, article_id).published
+
+
+@pytest.mark.asyncio
+async def test_clean_held_article_reconsidered_without_owner_confirmation(env, tmp_path):
+    from app.models.domain import Task
+    from app.seo.publishing import publish_pending
+    db, product = env
+    aid = await make_article(db, product, tmp_path, critic_status=None)
+    row = db.get(Artifact, aid)
+    task = db.get(Task, row.task_id)
+    task.title, task.assigned_agent = "SEO-ARTICLE:plan:a001", "content_factory"
+    db.commit()
+    assert not publish_if_clear(db, aid).published
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == task.id,
+                                         AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(Artifact.agent_run_id == run.id,
+                                              Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({"status": "no_material_issues", "reader_hash": reader_hash(
+        ArticleArtifact.model_validate_json(row.content).reader_article)})
+    db.commit()
+    publish_pending(db)
+    assert row.status == ArtifactStatus.PUBLISHED
+
+
+@pytest.mark.asyncio
+async def test_second_owner_approval_cannot_override_another_rejected_vote(env, tmp_path):
+    db, product = env
+    aid = await make_article(db, product, tmp_path, critic_status=None)
+    assert not publish_if_clear(db, aid).published
+    row = db.get(Artifact, aid)
+    approval = db.scalar(select(Approval).where(Approval.artifact_id == aid))
+    approval.status = "rejected"
+    db.add(Approval(product_id=product.id, artifact_id=aid,
+                    action_type=approval.action_type, risk_level=approval.risk_level,
+                    requested_by="seo_factory", decided_by="owner:studio",
+                    status="approved", reason="test another approval"))
+    row.status = ArtifactStatus.APPROVED
+    run = db.scalar(select(AgentRun).where(AgentRun.task_id == row.task_id,
+                                         AgentRun.agent_name == "marketing_editor"))
+    review = db.scalar(select(Artifact).where(Artifact.agent_run_id == run.id,
+                                              Artifact.kind == "seo_final_review"))
+    review.content = json.dumps({"status": "no_material_issues", "reader_hash": reader_hash(
+        ArticleArtifact.model_validate_json(row.content).reader_article)})
+    db.commit()
+    assert publish_owner_approved(db) == 0
+    assert not list(db.scalars(select(Publication)))
