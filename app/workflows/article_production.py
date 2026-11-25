@@ -1132,6 +1132,19 @@ class ArticleProduction:
         self.schema_repair_llm = schema_repair_llm
 
     async def run(self, request: ArticleProductionInput) -> ArticleProductionResult:
+        """Hold a cross-process lease for the full lifetime of every SEO task."""
+        if request.task_id and request.seo_brief is not None:
+            from app.seo.interruption import article_lease, ArticleLeaseBusy
+            from app.seo.queue import SeoQuotaDeferred
+            try:
+                with article_lease(self.products_root, request.product_id, request.task_id):
+                    return await self._run(request)
+            except ArticleLeaseBusy:
+                self.db.rollback()
+                raise SeoQuotaDeferred('SEO task already owned by another worker') from None
+        return await self._run(request)
+
+    async def _run(self, request: ArticleProductionInput) -> ArticleProductionResult:
         """Owns transactions; use a dedicated clean session. No raw failure data persists."""
         product = self.db.get(Product, request.product_id)
         if product is None:
@@ -1172,6 +1185,8 @@ class ArticleProduction:
                 raise ValueError('Article task must be queued')
             if request.seo_brief is not None and task.title.startswith('SEO-ARTICLE:'):
                 from app.seo.queue import record_article_start
+                from app.seo.interruption import record_lease
+                record_lease(self.db, task)
                 record_article_start(self.db, task)
         else:
             task = TaskService(self.db).create(product_id=product.id, title='Article production',
