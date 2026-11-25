@@ -216,10 +216,10 @@ async def confirm_cancel_publication(ctx: Context, stored, via):
             raise ValueError("Публикация уже не подлежит отмене.")
         if pub.channel == "vk":
             from app.social_vk import cancel
-            cancel(ctx.db, ctx.product.id, pub.id)
+            cancel(ctx.db, ctx.product.id, pub.id, commit=False)
         else:
             from app.content.telegram_publishing import cancel_scheduled_post
-            cancel_scheduled_post(ctx.db, pub.id)
+            cancel_scheduled_post(ctx.db, pub.id, commit=False)
         _audit(ctx, post, "cancel_publication", via)
         return Outcome("Назначение отменено. Материал сохранён.", blocks=[links_block(ctx, "channels", "vk")])
     except (ValueError, LookupError, KeyError, TypeError) as exc:
@@ -233,7 +233,7 @@ async def describe_move_publication(ctx: Context, params):
         pub, post = _get(ctx, params.publication_id)
         data = _intent(ctx, pub)
         when = _when(params.when)
-        if pub.status != "scheduled" or _utc(pub.scheduled_at) <= datetime.now(timezone.utc):
+        if pub.status != "scheduled" or pub.scheduled_at is None or _utc(pub.scheduled_at) <= datetime.now(timezone.utc):
             raise ValueError("Перенос доступен только для ещё не наступившей публикации.")
         if data.get("plan_id") or data.get("slot_id"):
             return Outcome("Публикация связана с контент-планом. Сначала отмените назначение, затем перенесите слот календаря и назначьте публикацию заново.",
@@ -255,7 +255,7 @@ async def confirm_move_publication(ctx: Context, stored, via):
         pub, post = _locked(ctx, stored)
         data = _intent(ctx, pub)
         when = _when(stored["when"])
-        if (pub.status != "scheduled" or _utc(pub.scheduled_at) <= datetime.now(timezone.utc)
+        if (pub.status != "scheduled" or pub.scheduled_at is None or _utc(pub.scheduled_at) <= datetime.now(timezone.utc)
                 or data.get("plan_id") or data.get("slot_id")):
             raise ValueError("Публикация больше не подлежит прямому переносу.")
         post = ctx.db.scalar(select(Artifact).where(Artifact.id == post.id, Artifact.product_id == ctx.product.id)
