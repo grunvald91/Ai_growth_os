@@ -452,6 +452,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
+    if form_submission is None and client_key and client_key.startswith("form:"):
+        raise ValueError("Ключ зарезервирован для отправки формы.")
     if form_submission is not None:
         from app.dispatcher.forms import PREPARE_FORMS, form_for
         source = db.scalar(select(DispatcherMessage).where(
@@ -484,7 +486,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 DispatcherMessage.conversation_id == conversation.id,
                 DispatcherMessage.role == "assistant",
                 DispatcherMessage.params["_reply_to"].as_string() == str(existing.id)).limit(1))
-            if reply is None:
+            if reply is None and not (existing.params or {}).get("_linked_reply"):
                 # Compatibility for older messages. Never replay an unrelated
                 # update or a response explicitly linked to another request.
                 candidate = db.scalar(select(DispatcherMessage).where(
@@ -506,7 +508,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     label = (chip or {}).get("label") or text
     try:
         user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
-                              capability=(chip or {}).get("capability"), params=(chip or {}).get("params") or {})
+                              capability=(chip or {}).get("capability"),
+                              params={**((chip or {}).get("params") or {}), "_linked_reply": True})
     except IntegrityError:
         return {"messages": [], "replayed": True}
 
@@ -810,7 +813,7 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     card = db.scalar(select(DispatcherMessage).where(
         DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.confirmation_id == confirmation_id,
-        DispatcherMessage.role == "assistant").with_for_update())
+        DispatcherMessage.role == "assistant").with_for_update().execution_options(populate_existing=True))
     if card is None:
         raise LookupError("Карточка не найдена")
     if card.confirmation_state != "pending":

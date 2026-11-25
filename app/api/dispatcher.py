@@ -331,9 +331,11 @@ async def dispatch_message(product_id: UUID, request: Request, db: Session = Dep
             mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None,
             creation=body.creation, form_submission=body.form_submission)
     except LookupError:
-        raise HTTPException(404, "Форма не найдена") from None
-    except ValueError as exc:
         if body.form_submission is None:
+            raise
+        raise HTTPException(404, "Форма не найдена") from None
+    except ValueError:
+        if body.form_submission is None and not (body.client_key or "").startswith("form:"):
             raise
         raise HTTPException(422, "Проверьте параметры формы и совместимость выбранных значений") from None
     result["hints"] = _hints(db, product, settings)

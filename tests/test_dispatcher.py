@@ -1647,13 +1647,13 @@ async def test_conversational_edit_rejects_stale_foreign_and_unknown_fields(db, 
     assert not list(db.scalars(select(Task)))
 
 
-def test_schema_tool_forms_allow_only_audited_reads():
+def test_schema_tool_forms_allow_only_audited_capabilities():
     from app.dispatcher.forms import FORM_CAPABILITIES, form_for
     for capability in FORM_CAPABILITIES:
         block = form_for(capability, {})
         assert clean_blocks([block])[0]["type"] == "tool_form"
         assert {f["name"] for f in block["fields"]} == set(CAPABILITIES[capability].params.model_fields)
-    for capability in ["create_post", "set_insights_depth", "whiteboard_video", "schedule_post", "unknown"]:
+    for capability in ["create_creative", "set_insights_depth", "whiteboard_video", "schedule_post", "unknown"]:
         with pytest.raises(ValueError):
             form_for(capability, {})
     with pytest.raises(ValueError):
@@ -1679,8 +1679,9 @@ async def test_model_form_is_persisted_without_execution_then_regular_chip_reads
     assert not list(db.scalars(select(Task)))
     replay = await send(db, product, text="Хочу выбрать фильтры для списка заданий", model=model)
     assert replay["replayed"] and replay["messages"][-1]["blocks"] == answer["blocks"]
-    response = await send(db, product, key="read-form", chip={"label": block["title"],
-                         "capability": block["capability"], "params": {"kind": "video", "tab": "all"}})
+    from app.api.dispatcher import FormSubmissionIn
+    response = await service.handle_message(db, context(db, product), None, text="", client_key="read-form",
+        form_submission=FormSubmissionIn(message_id=answer["id"], params={"kind": "video", "tab": "all"}))
     assert response["messages"][-1]["intent"] == "execute"
     assert not list(db.scalars(select(Task)))
 
@@ -1693,3 +1694,51 @@ async def test_model_cannot_make_mutating_tool_form(db, product):
     assert result["messages"][-1]["intent"] == "clarify"
     assert not any(b["type"] == "tool_form" for b in result["messages"][-1]["blocks"])
     assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_saved_prepare_form_requires_confirmation_and_is_single_use(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    from app.dispatcher.forms import form_for
+    from uuid import UUID
+    model, _ = llm({"intent": "form", "capability": "create_post", "confidence": 0.95, "params": {}})
+    initial = await send(db, product, text="Дай форму, где я сам укажу тему поста", model=model)
+    answer = initial["messages"][-1]
+    block = next(b for b in answer["blocks"] if b["type"] == "tool_form")
+    assert block["submit_label"] == "Подготовить подтверждение"
+    topic = next(f for f in block["fields"] if f["name"] == "topic")
+    assert topic["required"] and topic["value"] == ""
+    assert not list(db.scalars(select(Task)))
+    with pytest.raises(ValueError):
+        form_for("create_post", {}, partial=False)
+    with pytest.raises(ValueError):
+        form_for("create_post", {"topic": "Тема", "channel": "telegram", "image_model": "openai"}, partial=False)
+    request = FormSubmissionIn(message_id=answer["id"], params={"topic": "Как снизить неявки", "channel": "vk"})
+    with pytest.raises(LookupError):
+        await service.handle_message(db, context(db, product, "other-owner"), None, text="",
+                                     client_key="foreign", form_submission=request)
+    with pytest.raises(ValueError):
+        await service.handle_message(db, context(db, product), None, text="", client_key="tamper",
+            form_submission=FormSubmissionIn(message_id=answer["id"], params={"topic": "Тема", "capability": "whiteboard_video"}))
+    prepared = await service.handle_message(db, context(db, product), None, text="",
+                                             client_key="first", form_submission=request)
+    card = next(b for b in prepared["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["state"] == "pending" and card["editable"]["topic"] == "Как снизить неявки"
+    assert not list(db.scalars(select(Task)))
+    # Interleaved task result must not be mistaken for the original response.
+    saved = db.get(DispatcherMessage, UUID(prepared["messages"][-1]["id"]))
+    old_seq = saved.seq
+    saved.seq += 1
+    db.flush()
+    db.add(DispatcherMessage(conversation_id=saved.conversation_id, product_id=product.id,
+                             seq=old_seq, role="assistant", text="Другой результат", capability="task_result"))
+    db.commit()
+    duplicate = await service.handle_message(db, context(db, product), None, text="",
+                                              client_key="second-tab", form_submission=request)
+    assert duplicate["replayed"]
+    assert duplicate["messages"][-1]["id"] == prepared["messages"][-1]["id"]
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True, revision=0)
+    assert len(tasks(db, "content_factory")) == 1
+    after = await service.handle_message(db, context(db, product), None, text="",
+                                          client_key="third-tab", form_submission=request)
+    assert after["replayed"] and len(tasks(db, "content_factory")) == 1
