@@ -1499,7 +1499,7 @@ async def test_dispatcher_vk_redraw_preserves_text_and_shows_job(db, product):
     db.flush()
     post = Artifact(product_id=product.id, task_id=origin.id, kind="channel_text",
                     title="VK post", status=ArtifactStatus.AWAITING_APPROVAL,
-                    content=json.dumps({"channel": "vk", "body": "Original text", "image_model": "gemini",
+                    content=json.dumps({"channel": "vk", "title": "VK post", "body": "Original text", "image_model": "gemini",
                                         "image_ratio": "4:5", "image_state": "failed"}))
     db.add(post)
     db.commit()
@@ -1508,7 +1508,8 @@ async def test_dispatcher_vk_redraw_preserves_text_and_shows_job(db, product):
     result = await send(db, product, chip=chip)
     card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
     assert card["paid"] and not tasks(db, "content_image_regen")
-    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    response = await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert "Поставил новую картинку в очередь" in response["messages"][-1]["text"]
     db.refresh(post)
     assert json.loads(post.content)["body"] == "Original text"
     assert json.loads(post.content)["image_state"] == "regenerating"
