@@ -106,7 +106,8 @@ def test_seo_run_shows_tenant_schedule_and_clear_pending_states():
             "scheduled_at": "10.11.2026 09:00",
             "scheduled_iso": "2026-11-10T08:00:00+00:00",
             "task_status": "completed", "article_status": "published",
-            "publication_path": "/blog/second", "task_id": str(uuid4()), "article_id": str(uuid4()),
+            "publication_path": "/blog/second", "published_confirmed": True,
+            "task_id": str(uuid4()), "article_id": str(uuid4()),
             "critic_findings": [], "critic_status": "missing",
         },
     ]
@@ -136,7 +137,7 @@ def test_seo_run_detail_uses_publication_record_without_permalink():
         "title": "Вышедшая статья без адреса в записи публикации",
         "scheduled_at": "08.11.2026 12:00",
         "scheduled_iso": "2026-11-08T09:00:00+00:00",
-        "task_status": "completed", "article_status": "approved",
+        "task_status": "completed", "article_status": "published",
         "publication_path": None, "published_confirmed": True,
         "task_id": str(uuid4()), "article_id": str(uuid4()),
         "critic_status": "no_material_issues", "critic_findings": [],

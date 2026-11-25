@@ -33,6 +33,7 @@ def test_seo_board_distinguishes_planned_from_actual_publication_and_escapes():
              "scheduled_at": "08.11.2026 09:00", "scheduled_iso": "2026-11-08T06:00:00+00:00",
              "task_status": "completed", "article_status": "published",
              "published_at": "08.11.2026 12:32", "publication_path": "/blog/record",
+             "published_confirmed": True,
              "task_id": str(uuid4()), "article_id": str(uuid4())},
             {"title": "На согласовании", "scheduled_at": "10.11.2026 09:00",
              "scheduled_iso": "2026-11-10T06:00:00+00:00", "task_status": "completed",
@@ -58,6 +59,32 @@ def test_seo_board_distinguishes_planned_from_actual_publication_and_escapes():
     assert "Вышла 08.11.2026 12:32" in page_confirmed
     assert "&lt;script&gt;" in page and "<script>" not in page
     assert page.index("Опубликованная статья") < page.index("&lt;script&gt;")
+
+
+
+def test_seo_board_rejects_blog_path_as_success_without_matching_publication_evidence():
+    task_id = uuid4()
+    run = {
+        "status": "completed", "articles_queued": 1,
+        "articles": [{
+            "title": "Неподтверждённый выпуск",
+            "task_id": str(task_id), "article_id": str(uuid4()),
+            "task_status": "completed", "article_status": "approved",
+            "publication_path": "/blog/stale-record",
+            "published_confirmed": False, "publication_mismatch": True,
+        }],
+    }
+    page = seo_plan_board(run, uuid4(), autorun=False, enabled=True)
+    assert "Проверить запись публикации" in page
+    assert "Повторить генерацию" not in page
+    assert "Опубликована" not in page
+    assert "Ещё не опубликована" in page
+
+    # A saved blog URL by itself is not an auditable publication receipt.
+    run["articles"][0]["publication_mismatch"] = False
+    page = seo_plan_board(run, uuid4(), autorun=False, enabled=True)
+    assert "Опубликована" not in page
+    assert "Текст подготовлен" in page
 
 
 def test_empty_board_discloses_no_plan_or_dates():

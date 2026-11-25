@@ -772,3 +772,21 @@ def test_unified_review_escapes_markup_and_fact_checks_require_detail(studio_db)
         assert malicious.status == ArtifactStatus.AWAITING_APPROVAL
     finally:
         app.dependency_overrides.clear()
+
+
+def test_review_preview_removes_repeated_markdown_title_and_collapses_whitespace():
+    """The owner should read the substance, not a duplicated # heading."""
+    from types import SimpleNamespace
+    from app.api.content_studio_ui import _review_preview
+
+    title = "Искусственный интеллект для бизнеса"
+    row = SimpleNamespace(title=title)
+    preview = _review_preview(row, {
+        "body": "# " + title + "\n\nПервый абзац.\n\t Второй абзац."
+    })
+    assert preview == "Первый абзац. Второй абзац."
+    assert not preview.startswith("#")
+    assert _review_preview(row, {"body": "   \n# Другая тема\n  Текст"}) == "# Другая тема Текст"
+    assert _review_preview(row, {"production_brief": {
+        "voiceover_or_dialogue_script": "Один кадр.\n\nВторой кадр."
+    }}) == "Один кадр. Второй кадр."
