@@ -75,11 +75,13 @@ def topic_picker_html(product_id) -> str:
         quote.textContent = "Выбранный лимит слишком мал: нужно не меньше " + data.required_calls + " вызовов. Измените настройки формы.";
         return;
       }
-      quote.textContent = "Выбранная тема: " + chosen + ". Максимум " + data.limit + " API-вызовов. " +
+      const reserve = data.image_recovery_reserve || 0;
+      const recovery = reserve ? " При сбоях изображений до " + reserve + " дополнительных потенциально платных попыток; резервная модель только после 24 часов. " : "";
+      quote.textContent = "Выбранная тема: " + chosen + ". Максимум " + data.limit + " API-вызовов. " + recovery +
         (data.science_review ? "Перед созданием рисунков будет проведена проверка научных утверждений." :
           "Стандартное видео без отдельной научной проверки.") +
         " Точная денежная стоимость не известна.";
-      caption.textContent = "Разрешаю платную генерацию выбранной темы: до " + data.limit + " API-вызовов.";
+      caption.textContent = "Разрешаю платную генерацию выбранной темы: до " + data.limit + " API-вызовов." + recovery;
       quoteReady = true; consent.disabled = false;
     } catch (_) {
       if (version !== quoteVersion || chosen !== selected || !dialog.open) return;
