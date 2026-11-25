@@ -63,3 +63,19 @@ test('client booking journey inherits dark ServGo Air without changing its light
   assert.match(booking, /color-scheme: dark/)
   assert.match(booking, /color-scheme: light/)
 })
+
+
+test('paragraph alerts share the notice contract without restyling page-level alert containers', () => {
+  const contract = canonical.split('/* ServGo notice standard — paragraph feedback')[1]
+  assert.ok(contract)
+  assert.match(contract, /p\[role="alert"\]:not\(:empty\)/)
+  assert.match(contract, /border-radius: 10px/)
+  assert.match(contract, /font-weight: 400/)
+  assert.match(contract, /overflow-wrap: anywhere/)
+  assert.match(contract, /--ds-notice-accent: var\(--s-danger\)/)
+  assert.match(contract, /--ds-notice-accent: var\(--s-warning\)/)
+  const mail = load('../../api/routes/servgo-mail-air.css').split('/* Shared ServGo notice geometry.')[1]
+  assert.ok(mail)
+  assert.match(mail, /border-radius: 10px/)
+  assert.match(mail, /overflow-wrap: anywhere/)
+})
