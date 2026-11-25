@@ -16,6 +16,10 @@ from app.models.domain import Product, Task, TaskStatus
      "Горячий предмет тяжелее холодного?", "30"),
     ("Давай сделаем видеообъяснение на тему «Горячий предмет тяжелее холодного»",
      "Горячий предмет тяжелее холодного", "30"),
+    ("Минутное видео на тему: как шумоподавление в наушниках убирает шум метро.",
+     "как шумоподавление в наушниках убирает шум метро", "60"),
+    ("Полуминутный ролик на тему: как устроены наушники.",
+     "как устроены наушники", "30"),
     ("Создай рисованное видео про закон сохранения энергии",
      "закон сохранения энергии", "30"),
     ("Подготовь минутное видеообъяснение: почему заряженная батарея массивнее",
@@ -36,6 +40,9 @@ def test_explicit_video_explanations_have_an_exact_topic(utterance, topic, lengt
     "Отмени рисованное видео про энергию",
     "Не делай видеообъяснение на тему тепловой энергии",
     "Сделай видеообъяснение",
+    "Минутное видео на тему: как устроены наушники?",
+    "Минутное видео на тему: шум метро; опубликуй его",
+    "Минутное видео на тему: шум метро без рисунков",
 ])
 def test_ambiguous_or_non_rendering_requests_do_not_start_video(utterance):
     assert quick_video_request(utterance) is None
@@ -60,7 +67,7 @@ async def test_video_explainer_works_without_llm_and_requires_paid_confirmation(
         async def generate(self, *args, **kwargs):
             raise AssertionError("The dispatcher must not call the LLM for a clear video request")
 
-    request = "Давай сделаем видео. Объяснение. на тему «Горячий предмет тяжелее холодного?»"
+    request = "Минутное видео на тему: как шумоподавление в наушниках убирает шум метро."
     ctx_a = Context(db=db, product=product, settings=settings, account="owner")
     first = await service.handle_message(
         db, ctx_a, OfflineLLM(), text=request, client_key="same-mobile-message", mode="voice",
