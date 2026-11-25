@@ -62,6 +62,9 @@ def quick_video_request(text: str) -> dict[str, str] | None:
         return None
     if re.search(r"\b(?:не\s+(?:делай|создавай|запускай)|не\s+надо)\b", words):
         return None
+    # Editing and recovery requests must reach the semantic router, not a new video job.
+    if re.search(r"\b(?:перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|додел\w*)\b", words[:120]):
+        return None
     # The user may want a script ABOUT a video, not the actual rendering.
     if re.search(r"\b(?:сценарий|промпт|раскадровку|обложку|превью|идею|текст\s+для\s+видео)\b", words):
         return None
