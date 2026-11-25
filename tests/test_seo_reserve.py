@@ -17,14 +17,23 @@ from test_seo_article import BRIEF
 
 
 def queued(db, product_id, when, query, *, status=TaskStatus.QUEUED):
+    from app.seo.contracts import PlanItem, SeoContentPlan
+    brief = BRIEF.model_copy(update={"primary_query": query})
+    item = PlanItem(id=brief.plan_item_id, cluster_ids=["c001"], primary_query=query,
+        working_title="Практическая статья: " + query, stage=brief.stage, intent=brief.intent,
+        reader_problem=brief.reader_problem, ai_questions=brief.ai_questions, next_step=brief.next_step)
+    plan = Artifact(product_id=product_id, kind="seo_content_plan", title="Reserve plan",
+                    content=SeoContentPlan(items=[item]).model_dump_json())
+    db.add(plan)
+    db.flush()
     task = Task(product_id=product_id, assigned_agent="content_factory",
-                title="SEO-ARTICLE:reserve:" + query, status=status, due_at=when)
+                title=f"SEO-ARTICLE:{plan.id}:{item.id}", status=status, due_at=when)
     db.add(task)
     db.flush()
     db.add(Artifact(product_id=product_id, task_id=task.id, kind="content_request",
         title="Request", content=ArticleProductionInput(product_id=product_id,
             task_id=task.id, topic=query, light=True, channel="own_site",
-            seo_brief=BRIEF.model_copy(update={"primary_query": query})).model_dump_json()))
+            seo_brief=brief).model_dump_json()))
     db.commit()
     return task
 
@@ -137,3 +146,12 @@ def test_extra_release_requires_seven_future_days_but_first_release_is_allowed(e
     assert not check()
     monkeypatch.setattr(reserve, "coverage", lambda *a, **kw: Coverage(7, 0, (), (), (), ()))
     assert check()
+
+
+def test_broken_or_foreign_plan_is_not_future_supply(env):
+    db, product = env
+    now = datetime.now(timezone.utc)
+    task = queued(db, product.id, now, "уникальная тема")
+    task.title = "SEO-ARTICLE:missing:a001"
+    db.commit()
+    assert coverage(db, product.id, now=now).preparing_articles == 0
