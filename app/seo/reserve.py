@@ -78,6 +78,15 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
         Artifact.kind == "article").order_by(Artifact.created_at, Artifact.id)))
     article_tasks = {a.task_id for a in articles}
     seen_queries, seen_bodies, seen_tasks = set(), set(), set()
+    # Existing public pages must not be counted again as future supply.
+    for row in db.scalars(select(Artifact).join(Publication, Publication.artifact_id == Artifact.id)
+            .where(Artifact.product_id == product_id, Publication.product_id == product_id,
+                   Publication.channel == 'own_site', Publication.status == 'published', Artifact.kind == 'article')):
+        try:
+            earlier = ArticleArtifact.model_validate_json(row.content)
+            seen_queries.add(normalize(earlier.seo.primary_query))
+        except (ValueError, TypeError):
+            continue
     def scheduled(task):
         return max(today, day(task.due_at, tz=tz)) if task.due_at else today
 
