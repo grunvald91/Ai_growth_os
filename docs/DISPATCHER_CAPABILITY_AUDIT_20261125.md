@@ -19,7 +19,7 @@ Scope: static audit of the mounted Studio routers in app/main.py and the dispatc
 | Video — whiteboard | whiteboard_video, show_recent_videos, cancel_video, repair_video_images, resume_video (explicit approved top-up only) | video files via UI |
 | Materials — content_studio | show_material, approve_material, revise_material, redraw_post_image (VK) | arbitrary material editing, download |
 | Calendar/plan — content_studio | show_plan, make_plan, approve_plan, edit_plan_package, move_plan_slot | pause plan, queue specific package |
-| Publishing — content_studio, vk_publishing | schedule_post (Telegram only) | VK schedule, publication cancel/reconcile, channel connection |
+| Publishing — content_studio, vk_publishing | schedule_post (Telegram), schedule_vk_post, list_publications, cancel_publication, move_publication (standalone) | linked calendar publication transfer, uncertain delivery reconciliation, channel connection |
 | SEO — growth_live | seo_factory; list_tasks/show_task for owner-visible jobs | activation/preferences, queue, retry/cancel individual articles, inspect/search metrics |
 | Campaigns — growth_campaigns, growth_live | navigation; recommend_today for recommendations | create/edit/launch/stop/finish campaign, assign resources, measurements |
 | Market research — yandex_discovery | navigation to tenant-scoped market-research page | Yandex organization search and saving selected sources; do not conflate with email lead search |
@@ -37,7 +37,7 @@ Scope: static audit of the mounted Studio routers in app/main.py and the dispatc
 ## Next implementation order
 
 1. Implemented in branch: task resume/retry and VK image regeneration, with paid confirmation, pinned state/version/digest and existing service checks. CI still required.
-2. Publication status, VK scheduling/cancellation and plan pause: typed parameters, exact resource IDs, confirmation and authorization.
+2. Implemented in branch: Telegram/VK scheduling, publication status, cancellation and atomic transfer of standalone schedules. Linked calendar transfer and plan pause remain separate work; uncertain delivery requires platform verification. CI still required.
 3. SEO read-only status/metrics plus explicit action wrappers for individual articles.
 4. Market research read/search (quota-aware), then campaign and comments tools; brand tools.
 5. Booking/CRM and Mail independent role-aware API audit and adapters; no generic HTTP tool, no arbitrary URLs, no credentials in context.
@@ -53,3 +53,5 @@ New tools must not be listed as executable until server handlers and tests exist
 - Verify regression suite and CI before merge/deploy. Static source review is not production verification.
 
 Recovery review: task retry reuses the original Studio gate; video resume uses the original checkpoint/ledger service and never auto-adds calls; VK redraw uses the existing immutable image workflow. Redraw jobs are visible in the work list. The automatic provider polling/fallback policy is not changed here. New tests cover role and tenant boundaries, stale confirmations, no action before confirmation, and visibility. Runtime verification remains pending.
+
+Publishing review: scheduling uses existing approved-material and VK image verification gates. Move creates a replacement intent and cancels the original within one database transaction; the old intent is retained for audit. A move of a linked Telegram calendar slot is deliberately refused rather than detaching the slot. No automatic re-send of uncertain delivery. Confirmations pin material and destination; legacy open Telegram schedule cards without digests must be requested again. Tests cover scheduling/cancellation, rollback on disconnected destination, tenant scope and changed channel. Runtime CI remains pending.
