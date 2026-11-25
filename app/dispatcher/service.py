@@ -635,7 +635,7 @@ async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
     card = db.scalar(select(DispatcherMessage).where(
         DispatcherMessage.conversation_id == conversation.id,
         DispatcherMessage.confirmation_id == edit.confirmation_id,
-        DispatcherMessage.role == "assistant").with_for_update())
+        DispatcherMessage.role == "assistant").with_for_update().execution_options(populate_existing=True))
     if card is None:
         raise LookupError("Карточка не найдена")
     if card.confirmation_state != "pending":
@@ -703,6 +703,9 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
     card.confirmation_state = "confirmed" if accept else "declined"
     card.decided_at = datetime.now(timezone.utc)
     card.blocks = [({**b, "state": card.confirmation_state} if b.get("type") == "confirm" else b) for b in card.blocks]
+    # Consume the user decision durably before any handler that may commit or roll back.
+    # A failed or interrupted operation needs a fresh card, never a replay of this approval.
+    db.commit()
     if accept:
         outcome = await executors.CONFIRMERS[capability_id](ctx, stored, via)
         _record_tool_call(db, ctx, capability_id, stored, outcome)
