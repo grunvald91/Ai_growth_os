@@ -73,6 +73,7 @@ def job_state(db, product_id, task_id):
             'visual_review_enabled': payload.visual_review,
             'image_provider': payload.image_provider,
             'image_recovery': payload.image_recovery,
+            'image_recovery_reserve': 105 if payload.image_recovery else 0,
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
             'repair_regenerate_images': payload.repair_regenerate_images,
@@ -368,7 +369,11 @@ def job_html(state, product_id, *, error=None):
     if state.get('visual_review_enabled'):
         body += '<p>Один проход визуального критика. Автор выбирает существенные исправления; каждая выбранная сцена перерисовывается максимум один раз.</p>'
     if state.get('image_provider') == 'claudehub':
-        body += f'<p>Новые рисунки и перерисовки: {esc(state["models"]["image"])} через API ClaudeHub. Автоматической замены модели или провайдера нет.</p>'
+        policy = ('Резервная модель разрешена только после 24 часов недоступности основной.'
+                  if state.get('image_recovery') else 'Автоматической замены модели нет для этого разрешения.')
+        body += (f'<p>Основная модель рисунков: {esc(state["models"]["image"])} через API ClaudeHub. {policy}</p>')
+        if state.get('active_image_model'):
+            body += f'<p>Текущая резервная модель: {esc(state["active_image_model"])}.</p>'
     if state.get('visual_repair_from'):
         source_link = f'/studio/products/{product_id}/whiteboard/{state["visual_repair_from"]}'
         body += ('<p><strong>Перерисовка без новой озвучки.</strong> Новые изображения создаются отдельно. '
