@@ -139,6 +139,95 @@
       .replace(/рисованное видео/gi, 'простое видео');
   }
 
+  function chartValue(p, unit) {
+    return p.value.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ' + unit;
+  }
+
+  function renderMetricsSummary(block) {
+    var section = el('section', 'dp-chart');
+    section.appendChild(el('strong', 'dp-chart-title', block.title));
+    section.appendChild(el('p', 'dp-chart-caption', block.period + ' · ' + block.source));
+    var grid = el('div', 'dp-metrics-grid');
+    (block.points || []).forEach(function (p) {
+      var item = el('div', 'dp-metric');
+      item.appendChild(el('strong', 'dp-metric-value', chartValue(p, block.unit)));
+      item.appendChild(el('span', 'dp-metric-label', p.label));
+      grid.appendChild(item);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderLineChart(figure, points, unit, max) {
+    var wrap = el('div', 'dp-line-chart');
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 320 144');
+    svg.setAttribute('aria-hidden', 'true');
+    var scale = max || 1;
+    [12, 72, 132].forEach(function (y) {
+      var line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', '8'); line.setAttribute('x2', '312');
+      line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
+      line.setAttribute('class', 'dp-line-grid');
+      svg.appendChild(line);
+    });
+    var coords = points.map(function (p, i) {
+      return [8 + 304 * i / Math.max(1, points.length - 1), 132 - 120 * p.value / scale];
+    });
+    var polyline = document.createElementNS(ns, 'polyline');
+    polyline.setAttribute('points', coords.map(function (p) { return p.join(','); }).join(' '));
+    polyline.setAttribute('class', 'dp-line-series');
+    svg.appendChild(polyline);
+    coords.forEach(function (p) {
+      var dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', String(p[0])); dot.setAttribute('cy', String(p[1]));
+      dot.setAttribute('r', '2.1'); dot.setAttribute('class', 'dp-line-point');
+      svg.appendChild(dot);
+    });
+    wrap.appendChild(el('p', 'dp-chart-caption', 'Шкала: 0–' + scale.toLocaleString('ru-RU') + ' ' + unit));
+    wrap.appendChild(svg);
+    var dates = el('div', 'dp-line-dates');
+    dates.appendChild(el('span', '', points[0].label));
+    dates.appendChild(el('span', '', points[points.length - 1].label));
+    wrap.appendChild(dates);
+    figure.appendChild(wrap);
+    var detail = el('details', 'dp-chart-data');
+    detail.appendChild(el('summary', '', 'Все значения по датам'));
+    detail.appendChild(renderTable({columns: ['Дата / интервал', 'Значение'],
+      rows: points.map(function (p) { return [p.label, chartValue(p, unit)]; })}));
+    figure.appendChild(detail);
+  }
+
+  function renderDonutChart(figure, points, unit) {
+    var total = points.reduce(function (sum, p) { return sum + p.value; }, 0);
+    if (!total || !Number.isFinite(total)) return false;
+    var colors = ['#4787c9', '#a7792e', '#9969ba', '#56938c', '#a3a3a3', '#716fba', '#c37b68', '#608db4'];
+    var cursor = 0;
+    var stops = points.map(function (p, i) {
+      var start = cursor;
+      cursor += 100 * (p.value / total);
+      return colors[i] + ' ' + start + '% ' + cursor + '%';
+    });
+    var ring = el('div', 'dp-donut-ring');
+    ring.setAttribute('aria-hidden', 'true');
+    ring.style.background = 'conic-gradient(' + stops.join(', ') + ')';
+    ring.appendChild(el('span', 'dp-donut-center', total.toLocaleString('ru-RU')));
+    figure.appendChild(ring);
+    points.forEach(function (p, i) {
+      var row = el('div', 'dp-chart-heading');
+      var label = el('span', 'dp-donut-label');
+      var swatch = el('span', 'dp-donut-swatch');
+      swatch.setAttribute('aria-hidden', 'true'); swatch.style.backgroundColor = colors[i];
+      label.appendChild(swatch); label.appendChild(el('span', '', p.label));
+      row.appendChild(label);
+      row.appendChild(el('strong', '', chartValue(p, unit) + ' · ' +
+        (100 * p.value / total).toLocaleString('ru-RU', {maximumFractionDigits: 1}) + '%'));
+      figure.appendChild(row);
+    });
+    return true;
+  }
+
   function renderChart(block) {
     var figure = el('figure', 'dp-chart');
     figure.appendChild(el('figcaption', 'dp-chart-title', block.title));
@@ -148,7 +237,11 @@
       return typeof p.value !== 'number' || !Number.isFinite(p.value) || p.value < 0;
     })) return figure;
     var max = Math.max.apply(null, points.map(function (p) { return p.value; }));
-    points.forEach(function (p) {
+    if (block.kind === 'line' && points.length >= 2) {
+      renderLineChart(figure, points, block.unit, max);
+    } else if (block.kind === 'donut' && renderDonutChart(figure, points, block.unit)) {
+      // The text legend is the accessible data representation.
+    } else points.forEach(function (p) {
       var row = el('div', 'dp-chart-row');
       var heading = el('div', 'dp-chart-heading');
       heading.appendChild(el('span', '', p.label));
@@ -406,6 +499,7 @@
       (step.blocks || []).forEach(function (item) {
         if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
         else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'metrics_summary') group.appendChild(renderMetricsSummary(item));
         else if (item.type === 'chart') group.appendChild(renderChart(item));
         else if (item.type === 'table') group.appendChild(renderTable(item));
         else if (item.type === 'resource_list') group.appendChild(renderResourceList(item));
@@ -1001,6 +1095,7 @@
         }) : block.items;
         if (items.length) bubble.appendChild(renderLinks(items));
       }
+      else if (block.type === 'metrics_summary') bubble.appendChild(renderMetricsSummary(block));
       else if (block.type === 'chart') bubble.appendChild(renderChart(block));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
