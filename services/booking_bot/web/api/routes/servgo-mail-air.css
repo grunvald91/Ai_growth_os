@@ -1003,3 +1003,13 @@ html[data-theme] body.servgo-mail-v2 .mail-workspace-links .mail-workspace-studi
 @media (prefers-reduced-motion: reduce) {
   html[data-theme] body.servgo-mail-v2 .mail-v3-nav a::after {animation:none;}
 }
+
+/* Shared ServGo notice geometry. Do not change visibility or fixed position. */
+html[data-theme] body.servgo-mail-v2 :is(.toast,#notice) {
+  box-sizing: border-box;
+  border-radius: 10px;
+  font-weight: 400;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
