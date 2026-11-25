@@ -12,7 +12,7 @@ from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Prod
 from app.seo.activation import SeoFactoryActivation, is_enabled
 from app.seo.publishing import (
     CLEAN_CRITIC_STATUSES, critic_verdict, duplicate_page_problems, reader_hash,
-    servgo_buyer_intent_problems, static_problems, unsupported_servgo_pricing,
+    servgo_buyer_intent_problems, static_problems, unsupported_servgo_pricing, public_blog_ready,
 )
 from app.workflows.article_contracts import ArticleArtifact, HumanEditedArticle
 
@@ -57,7 +57,7 @@ def _eligible(db: Session, row: Artifact) -> bool:
     return bool(row.kind == "article" and row.status in HELD and task
         and task.product_id == row.product_id and task.assigned_agent == "content_factory"
         and task.title.startswith("SEO-ARTICLE:") and task.status == TaskStatus.COMPLETED
-        and is_enabled(db, row.product_id)
+        and is_enabled(db, row.product_id) and public_blog_ready(db, row.product_id)
         and not db.scalar(select(exists().where(
             Publication.artifact_id == row.id)))
         and not db.scalar(select(exists().where(
@@ -88,6 +88,7 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
     from app.llm.service import LLMService
     from app.privacy import PrivacyGateway
     from app.workflows.context import load_context
+    from app.workflows.article_production import product_facts
 
     privacy = PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS)
     with session_factory() as db:
@@ -128,7 +129,8 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
                     continue
                 context = privacy.sanitize_text(load_context(
                     db, product, settings.products_root)["stable_context"])
-                if not context.strip():
+                facts = product_facts(context)
+                if (not context.strip() or not set(f.source_id for f in original.reader_article.fact_renderings) <= set(facts)):
                     db.rollback()
                     continue
             except (ValueError, TypeError):
@@ -168,6 +170,7 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
                     "reader": original.reader_article.model_dump(mode="json"),
                     "cta": original.conversion.cta,
                     "company_context": context,
+                    "verified_product_facts": facts,
                     "static_problems": problems,
                     "previous_critic_status": verdict,
                     "previous_critic_findings": previous_findings,
@@ -218,7 +221,13 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
         review = reply.quality_review or {}
         if review.get("status") != "no_material_issues":
             raise RepairBlocked("repair_critic_not_clean")
-        reader = HumanEditedArticle.model_validate_json(reply.content)
+        if reply.stop_reason not in (None, "end_turn", "stop_sequence") or len(reply.content) > 70000:
+            raise RepairBlocked("repair_incomplete_output")
+        # Never persist a reviewer hash for silently modified/redacted output.
+        raw_reader = HumanEditedArticle.model_validate_json(reply.content)
+        if privacy.sanitize_text(reply.content) != reply.content:
+            raise RepairBlocked("repair_sensitive_output")
+        reader = raw_reader
         candidate = checked_candidate(original, reader)
         with session_factory() as db:
             product = db.scalar(select(Product).where(Product.id == product_id).with_for_update())
