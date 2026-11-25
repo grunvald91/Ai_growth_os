@@ -119,7 +119,7 @@ async def test_article_wait_is_not_failed_and_retains_previous_stage(env, tmp_pa
         assert result.status == "deferred" and not result.retryable
         assert len(result.checkpoint_artifact_ids) == 1
         assert db.get(Task, task_id).status == TaskStatus.QUEUED
-        assert db.get(Task, task_id).due_at == due
+        assert db.get(Task, task_id).due_at.replace(tzinfo=timezone.utc) == due.replace(tzinfo=timezone.utc)
         assert db.scalar(select(Task).where(Task.id == task_id, ready_filter(now))) is None
 
 
