@@ -647,7 +647,7 @@ def render_v4(page, request, pid, switch):
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=31-create-video-controls">'
         '<link rel="stylesheet" href="/studio/assets/servgo-air-tokens.css?v=1">'
-        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=20-material-post-preview">'
+        '<link rel="stylesheet" href="/studio/assets/growth-servgo-air.css?v=21-system-notices">'
         '<script src="/studio/assets/servgo-air-theme.js?v=1"></script>'
         '</head>'
     ))
