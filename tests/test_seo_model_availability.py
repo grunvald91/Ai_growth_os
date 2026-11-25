@@ -121,3 +121,19 @@ async def test_article_wait_is_not_failed_and_retains_previous_stage(env, tmp_pa
         assert db.get(Task, task_id).status == TaskStatus.QUEUED
         assert db.get(Task, task_id).due_at == due
         assert db.scalar(select(Task).where(Task.id == task_id, ready_filter(now))) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [ValueError("bad response"),
+    __import__("app.llm.errors", fromlist=["ProviderEmptyResponseError"]).ProviderEmptyResponseError("empty"),
+    __import__("app.llm.errors", fromlist=["ProviderMalformedResponseError"]).ProviderMalformedResponseError("malformed")])
+async def test_response_error_does_not_start_unavailability_or_select_reserve(tmp_path, error):
+    calls = []
+    policy = AvailabilityPolicy(tmp_path, "gateway")
+    async def call(model):
+        calls.append(model)
+        raise error
+    with pytest.raises(type(error)):
+        await policy.generate(("any-new-model", "reserve"), call)
+    assert calls == ["any-new-model"]
+    assert not list(policy.root.glob("*.json"))
