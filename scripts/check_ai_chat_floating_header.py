@@ -94,6 +94,31 @@ def main() -> None:
                 assert result["contentWidth"]<=width,result
                 assert result["controlHit"],result
                 assert result["composeBottom"]<=801,result
+                notices = page.evaluate("""() => {
+                  const warning=document.getElementById('composer-warning');
+                  const voice=document.getElementById('dp-voice-note');
+                  const hidden=getComputedStyle(warning).display;
+                  warning.hidden=false;
+                  warning.textContent='Длинное предупреждение '+ 'тест'.repeat(120);
+                  voice.hidden=false;
+                  voice.classList.add('bad');
+                  voice.textContent='Ошибка голосового ввода';
+                  const read=e=>{const s=getComputedStyle(e);return {
+                    radius:s.borderTopLeftRadius,weight:s.fontWeight,
+                    accent:s.borderInlineStartColor,color:s.color,
+                    background:s.backgroundColor,width:e.clientWidth,scroll:e.scrollWidth};};
+                  const data={hidden,warning:read(warning),voice:read(voice),
+                    pageWidth:document.documentElement.scrollWidth};
+                  warning.hidden=true;voice.hidden=true;
+                  return data;
+                }""")
+                assert notices["hidden"]=="none",notices
+                for key in ("warning","voice"):
+                    assert notices[key]["radius"]=="10px",notices
+                    assert notices[key]["weight"]=="400",notices
+                    assert notices[key]["scroll"]<=notices[key]["width"]+1,notices
+                assert notices["warning"]["accent"]!=notices["voice"]["accent"],notices
+                assert notices["pageWidth"]<=width,notices
                 if width>=861:
                     assert result["leftRight"]<=result["rightLeft"]+2,result
                 if width in (320,390,861,1440):
