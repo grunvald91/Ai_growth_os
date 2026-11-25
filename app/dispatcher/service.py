@@ -188,7 +188,7 @@ def _valid_chips(raw: list) -> list[dict]:
 
 
 def _missing(error: ValidationError) -> str:
-    names = {"task_id": "какое именно задание", "material_id": "какой именно материал",
+    names = {"task_id": "какое именно задание", "material_id": "какой именно материал", "publication_id": "какую именно публикацию", "post_id": "какой именно пост",
              "extra_calls": "число дополнительных обращений (от 0 до 10)",
              "topic": "тему", "channel": "площадку", "target": "раздел", "kind": "что именно",
              "feedback": "что поправить (хотя бы несколько слов)", "when": "дату и время",
