@@ -842,3 +842,9 @@ from app.dispatcher import plan_changes  # noqa: E402
 
 DESCRIBERS.update(plan_changes.DESCRIBERS)
 CONFIRMERS.update(plan_changes.CONFIRMERS)
+
+
+from app.dispatcher import recovery  # noqa: E402
+
+DESCRIBERS.update(recovery.DESCRIBERS)
+CONFIRMERS.update(recovery.CONFIRMERS)
