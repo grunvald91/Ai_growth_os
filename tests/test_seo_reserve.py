@@ -62,9 +62,9 @@ def test_reserve_scheduler_checks_coverage_and_has_daily_cooldown(env, tmp_path)
     job = queue_factory(db, product.id)
     job.status = TaskStatus.COMPLETED
     db.commit()
-    for offset in range(1, 9):
+    for offset in range(1, 10):
         queued(db, product.id, now + timedelta(days=offset), "тема " + str(offset))
-    later = now + timedelta(days=1, hours=1)
+    later = now + timedelta(days=1, seconds=5)
     assert not coverage(db, product.id, now=later).missing_pipeline_days
     assert not enqueue_enabled_if_due(db, settings, now=later)
     for task in db.scalars(select(Task).where(Task.assigned_agent == "content_factory")):
