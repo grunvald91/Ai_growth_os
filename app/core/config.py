@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     # Global safe rollout switch; individual owners also must enable SEO.
     # Keep it OFF until three real end-to-end production canaries pass.
     seo_autorun_enabled: bool = False
+    # Refill the next seven publication days only when coverage is lacking.
+    seo_reserve_enabled: bool = False
     seo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     seo_servgo_autorun_enabled: bool = False
     seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
