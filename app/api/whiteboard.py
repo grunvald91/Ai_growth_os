@@ -18,6 +18,7 @@ from app.content.whiteboard.contracts import SCENES_FOR_SECONDS, Contract, White
 from app.content.whiteboard.science import requires_science_review
 from app.content.whiteboard.topics import suggest_company_video_topics, suggest_company_create_topics
 from app.content.whiteboard.selector_ui import topic_picker_html
+from app.content.whiteboard.image_recovery import IMAGE_RECOVERY_RESERVE
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
                                          digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
 from app.content.whiteboard.runtime import (MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings,
@@ -73,7 +74,7 @@ def job_state(db, product_id, task_id):
             'visual_review_enabled': payload.visual_review,
             'image_provider': payload.image_provider,
             'image_recovery': payload.image_recovery,
-            'image_recovery_reserve': 105 if payload.image_recovery else 0,
+            'image_recovery_reserve': IMAGE_RECOVERY_RESERVE if payload.image_recovery else 0,
             'visual_repair_from': str(payload.visual_repair_from) if payload.visual_repair_from else None,
             'inherited_calls': payload.inherited_calls,
             'repair_regenerate_images': payload.repair_regenerate_images,
@@ -131,6 +132,14 @@ async def _approve(db, product_id, task_id, body, actor, settings):
                         payload.models, payload.request.voice,
                         **({'skip_speech': True} if payload.repair_regenerate_images else {}))
     except ReadinessError as exc:
+        if payload.image_recovery and exc.code in {'claudehub_unavailable', 'claudehub_image_unavailable'}:
+            # The worker owns the persisted outage clock; the owner must not
+            # have to repeat approval while the chosen image model is offline.
+            try:
+                return approve_job(db, product_id, task_id, request_digest=body.request_digest,
+                                   confirmed=body.confirmed, decided_by=actor or 'local-owner')
+            except ReadinessError:
+                raise HTTPException(409, MESSAGES['approval_invalid']) from None
         # Short transaction after network I/O. Do not overwrite cancellation.
         task = owner_task(db, product_id, task_id, lock=True)
         _, saved, _, _ = records(db, task, lock=True)
@@ -574,7 +583,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
             </label>
             <label class="sg-field"><span>Максимум платных API-вызовов</span>
               <select name="max_api_calls">{call_options}</select>
-              <small>При «Автозавершении» заранее подтверждается максимум на 5 вызовов больше необходимого: они расходуются только при необходимости. Минимальный режим не оставляет запаса на сбои. Это ограничение вызовов, а не стоимости в деньгах.</small>
+              <small>При «Автозавершении» заранее подтверждается максимум на 5 вызовов больше необходимого: они расходуются только при необходимости. Отдельный резерв восстановления изображений (до 105 потенциально платных попыток) подтверждается при запуске. Это ограничение вызовов, а не стоимости в деньгах.</small>
             </label>
           </div>
         </details>
@@ -743,6 +752,7 @@ async def studio_topic_quote(product_id: UUID, request: Request, db: Session = D
     except (TypeError, ValueError, KeyError, ValidationError):
         raise HTTPException(422, 'Проверьте тему и лимит API-вызовов.') from None
     return {'required_calls': needed, 'limit': limit, 'allowed': limit >= needed,
+            'image_recovery_reserve': IMAGE_RECOVERY_RESERVE,
             'science_review': requires_science_review(draft)}
 
 
