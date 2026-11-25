@@ -488,6 +488,6 @@ class ArticleProductionResult(Contract):
     artifact_ids: list[UUID] = Field(default_factory=list)
     checkpoint_artifact_ids: list[UUID] = Field(default_factory=list)
     approval_ids: list[UUID] = Field(default_factory=list)
-    status: Literal['completed', 'failed']
+    status: Literal['completed', 'failed', 'deferred']
     error: str | None = None
     retryable: bool = False  # true only for verified transient provider failures
