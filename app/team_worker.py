@@ -224,6 +224,9 @@ async def run_once() -> int:
         publish_pending(db, daily_limit=settings.seo_publications_per_day)
         if publish_owner_approved(db, daily_limit=settings.seo_publications_per_day):
             return 1
+    from app.seo.held_repair import run_held_repair_once
+    if await run_held_repair_once(SessionLocal, settings):
+        return 1
     # Durable, opt-in IndexNow notices for committed ServGo public articles.
     # When no public verification key is configured, this does no network IO.
     if settings.geo_indexnow_key:
