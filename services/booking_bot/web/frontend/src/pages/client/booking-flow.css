@@ -1188,3 +1188,12 @@ html[data-theme='dark'] .bf-shell-page .ds-btn--ghost {
 html[data-theme='dark'] .bf-account-card a {
   color: var(--s-accent);
 }
+
+/* Match the shared paragraph-alert contract even in the client flow skin. */
+.bf-root .bf-error[role="alert"] {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}

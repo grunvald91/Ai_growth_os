@@ -1915,3 +1915,67 @@ body[data-growth-design="v4"] .sg-material-post .sg-post-details .sg-inline-form
   body[data-growth-design="v4"] .route-content .sg-material-post {padding:12px;gap:10px}
   body[data-growth-design="v4"] #main:has(.sg-material-post) > .route-page-head .route-actions .btn {flex:0 1 auto}
 }
+
+/* ServGo notice system: block messages are not badges. */
+body[data-growth-design="v4"] {
+  --sg-notice-radius: 10px;
+  --sg-notice-padding: 12px;
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-warning,.sg-notice,.sg-intake-notice,.sg-form-error,.sg-vk-image-verdict,.sg-seo-task-error) {
+  --sg-notice-accent: var(--s-accent);
+  box-sizing: border-box;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--s-line-2);
+  border-inline-start: 3px solid var(--sg-notice-accent);
+  border-radius: var(--sg-notice-radius) !important;
+  background: var(--s-surface-2) !important;
+  color: var(--s-text) !important;
+  -webkit-text-fill-color: currentColor !important;
+  padding: var(--sg-notice-padding);
+  margin-block: 10px;
+  font-size: 14px;
+  font-weight: 400 !important;
+  line-height: 1.55;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: none;
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-warning,.sg-vk-image-verdict) {
+  --sg-notice-accent: var(--s-warning);
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-form-error,.sg-seo-task-error,.sg-notice[role="alert"],.sg-message--error) {
+  --sg-notice-accent: var(--s-danger);
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-intake-notice,.sg-message--success) {
+  --sg-notice-accent: var(--s-success);
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-warning,.sg-notice,.sg-intake-notice,.sg-form-error,.sg-vk-image-verdict,.sg-seo-task-error) :is(p,li) {
+  color: inherit;
+  font-weight: 400;
+  line-height: 1.55;
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-warning,.sg-notice,.sg-intake-notice,.sg-form-error,.sg-vk-image-verdict,.sg-seo-task-error) :is(strong,b) {
+  font-weight: 650;
+}
+body[data-growth-design="v4"] .route-content :is(p,div,section,aside,article):is(.sg-warning,.sg-notice,.sg-intake-notice,.sg-form-error,.sg-vk-image-verdict,.sg-seo-task-error) a {
+  color: var(--s-accent);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+body[data-growth-design="v4"] .route-content .wb-create .sg-warning {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  padding: var(--sg-notice-padding);
+}
+body[data-growth-design="v4"] .route-content .sg-material-post :is(.sg-warning,.sg-vk-image-verdict) {
+  border: 1px solid var(--s-line-2);
+  border-inline-start: 3px solid var(--s-warning);
+}
+body[data-growth-design="v4"] .route-content .sg-warning[hidden],
+body[data-growth-design="v4"] .route-content .sg-notice[hidden] {
+  display: none !important;
+}

@@ -157,6 +157,34 @@ try{
           cardColor:css(".sg-work-item"),
         };
       });
+      // Exercise the same block classes used by Whiteboard, VK, profile and forms.
+      const notices=await page.evaluate(()=>{
+        const wrapper=document.createElement("div");
+        wrapper.innerHTML='<p class="sg-warning" role="status" style="border-radius:999px;font-weight:750"><strong>Ожидание API</strong><br>Длинное предупреждение '+("домен".repeat(80))+'</p>'+
+          '<div class="sg-notice" role="alert">Ошибка подключения</div>'+
+          '<p class="sg-warning" hidden>Скрытое сообщение</p>'+
+          '<span class="sg-warning" style="border-radius:999px">1</span>';
+        document.querySelector(".route-content").append(wrapper);
+        const read=e=>{const s=getComputedStyle(e);return {radius:s.borderTopLeftRadius,weight:s.fontWeight,
+          color:s.color,background:s.backgroundColor,accent:s.borderInlineStartColor,
+          display:s.display,width:e.clientWidth,scroll:e.scrollWidth};};
+        const result={warning:read(wrapper.children[0]),error:read(wrapper.children[1]),
+          hidden:read(wrapper.children[2]),badge:read(wrapper.children[3]),
+          title:read(wrapper.querySelector("strong")),
+          pageWidth:document.documentElement.scrollWidth};
+        wrapper.remove();
+        return result;
+      });
+      assert.equal(notices.warning.radius,"10px");
+      assert.equal(notices.warning.weight,"400");
+      assert.ok(Number(notices.title.weight)>=600);
+      assert.notEqual(notices.warning.accent,notices.error.accent);
+      assert.equal(notices.hidden.display,"none");
+      assert.equal(notices.badge.radius,"999px");
+      assert.ok(notices.warning.scroll<=notices.warning.width+1);
+      assert.ok(notices.pageWidth<=width+1);
+      assert.ok(contrast(notices.warning.color,notices.warning.background)>=4.5);
+      assert.ok(contrast(notices.error.color,notices.error.background)>=4.5);
       assert.ok(layout.pageWidth<=width+1,
         "horizontal overflow "+theme+" "+width+": "+JSON.stringify(layout));
       for(const key of ["button","card","search","period","kind"]){

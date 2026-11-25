@@ -24,7 +24,7 @@ def test_growth_v4_loads_canonical_css_and_theme_script():
         "/studio/team?design=classic",
     )
     assert "/studio/assets/servgo-air-tokens.css?v=1" in html
-    assert "/studio/assets/growth-servgo-air.css?v=20-material-post-preview" in html
+    assert "/studio/assets/growth-servgo-air.css?v=21-system-notices" in html
     assert "/studio/assets/servgo-air-theme.js?v=1" in html
     assert 'action="/studio/team/apply"' in html
     assert 'name="role"' in html
@@ -140,8 +140,8 @@ def test_growth_profile_adapter_is_after_legacy_studio_css_in_html_head():
     result = render_v4(legacy, request, None, "/studio?design=classic")
     assert "Материалы · 1" in result
     assert "ServGo: данные заведения" in result
-    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=20-material-post-preview")
-    assert result.count("/studio/assets/growth-servgo-air.css?v=20-material-post-preview") == 1
+    assert result.index("/studio/assets/studio.css?v=14") < result.index("/studio/assets/growth-servgo-air.css?v=21-system-notices")
+    assert result.count("/studio/assets/growth-servgo-air.css?v=21-system-notices") == 1
 
 
 
@@ -230,5 +230,19 @@ def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separat
         '-webkit-line-clamp: 5',
     ):
         assert fragment in adapter, fragment
-    assert 'growth-servgo-air.css?v=20-material-post-preview' in v4
+    assert 'growth-servgo-air.css?v=21-system-notices' in v4
     assert 'create-studio.js?v=create-video-gpt-image-20261124' in v4
+
+
+def test_system_notices_keep_block_messages_separate_from_inline_badges():
+    adapter = (ASSETS / "growth-servgo-air.css").read_text(encoding="utf-8")
+    notices = adapter.split("/* ServGo notice system: block messages are not badges. */", 1)[1]
+    assert ":is(p,div,section,aside,article):is(.sg-warning,.sg-notice" in notices
+    assert "--sg-notice-radius: 10px" in notices
+    assert "border-radius: var(--sg-notice-radius) !important" in notices
+    assert "font-weight: 400 !important" in notices
+    assert "line-height: 1.55" in notices
+    assert "overflow-wrap: anywhere" in notices
+    assert "var(--s-warning)" in notices and "var(--s-danger)" in notices
+    assert "var(--s-text) !important" in notices
+    assert ".sg-warning[hidden]" in notices and "display: none !important" in notices
