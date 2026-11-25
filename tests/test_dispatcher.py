@@ -419,7 +419,8 @@ async def test_simple_video_selected_in_create_uses_paid_approval_without_llm(db
     assert answer["intent"] == "execute"
     card = next(block for block in answer["blocks"] if block["type"] == "confirm")
     assert card["paid"] is True
-    assert any("платная" in line.lower() for line in card["details"])
+    assert any("Создание начнётся после подтверждения" in line for line in card["details"])
+    assert not any("платн" in line.lower() for line in card["details"])
     assert tasks(db, "content_factory") == []
     assert tasks(db, "content_creative") == []
     videos = tasks(db, "whiteboard_renderer")
@@ -942,7 +943,9 @@ async def test_video_is_prepared_free_and_started_only_after_confirmation(db, pr
     job = tasks(db, "whiteboard_renderer")[0]
     assert job.status == TaskStatus.WAITING_APPROVAL
     card = [b for b in result["messages"][1]["blocks"] if b["type"] == "confirm"][0]
-    assert card["paid"] is True and any("платная" in line for line in card["details"])
+    assert card["paid"] is True
+    assert any("Создание начнётся после подтверждения" in line for line in card["details"])
+    assert not any("платн" in line.lower() for line in card["details"])
     started = []
 
     async def fake_approve(db_, product_id, task_id, body, actor, settings_):

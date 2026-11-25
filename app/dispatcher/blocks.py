@@ -238,7 +238,7 @@ class WorkflowBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
+    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)
