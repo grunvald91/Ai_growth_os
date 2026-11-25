@@ -114,6 +114,21 @@ textarea:focus-visible,select:focus-visible{outline:3px solid #83b8d8;outline-of
 .sg-tag,.sg-channel,.sg-warning{padding:5px 9px;border-radius:7px;font-size:10px;font-weight:750;background:#ecf3f8;color:#346381}
 .sg-channel{background:#f2f4f7;color:#647588}
 .sg-warning{background:#fff3e7;color:#9a6228}
+
+/* Block notices and inline badges have separate typography and geometry. */
+:is(p,div,section,aside,article):is(.sg-warning,.sg-notice,.sg-form-error) {
+  box-sizing:border-box;display:block;min-width:0;max-width:100%;
+  border-radius:10px;padding:12px;border:1px solid var(--sg-line);
+  border-inline-start:3px solid var(--sg-blue);
+  background:var(--sg-bg);color:var(--sg-text);
+  font-size:14px;font-weight:400;line-height:1.55;
+  white-space:normal;text-align:start;overflow-wrap:anywhere;
+}
+:is(p,div,section,aside,article).sg-warning {border-inline-start-color:var(--sg-orange)}
+:is(p,div,section,aside,article):is(.sg-form-error,.sg-notice[role="alert"]) {border-inline-start-color:var(--sg-red)}
+:is(p,div,section,aside,article):is(.sg-warning,.sg-notice,.sg-form-error) :is(strong,b) {font-weight:650}
+.sg-warning[hidden],.sg-notice[hidden]{display:none!important}
+
 .sg-review-item h3{margin:0 0 7px;font-size:16px;line-height:1.35;color:#203951;letter-spacing:-.015em}
 .sg-review-item p{max-width:760px;white-space:pre-line;word-break:break-word;font-size:13px;color:#64788a;line-height:1.55;margin:0 0 16px}
 .sg-review-footer,.sg-inline-actions{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
