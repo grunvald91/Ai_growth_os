@@ -148,6 +148,16 @@ class TaskDetailParams(_Params):
     task_id: UUID
 
 
+class ResumeVideoParams(_Params):
+    task_id: UUID
+    extra_calls: int = Field(default=0, ge=0, le=10)
+
+
+class RedrawPostImageParams(_Params):
+    material_id: UUID
+    feedback: str = Field(default="", max_length=700)
+
+
 class RepairVideoParams(_Params):
     task_id: UUID
     image_model: Literal["gemini-3.1-flash-image", "gpt-image-2.5-sunburst"] | None = None
@@ -307,6 +317,21 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "query — явно указанная тема или часть названия. Для «почему видео не готово», «что сломалось», "
                "«найди задание»; показывает реальные причины, если известны, и кнопки открытия.",
                ToolOperation.ANALYTICS, Cost.NONE, TaskListParams),
+    Capability("resume_video", "Продолжить остановленное видео",
+               "Возобновить именно существующее неудачное рисованное видео с сохранённых этапов. "
+               "task_id из recent_tasks; extra_calls по умолчанию 0, больше только если владелец явно назвал число "
+               "дополнительных обращений. Платное подтверждение обязательно; не создавать новое видео.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, ResumeVideoParams),
+    Capability("retry_content_task", "Повторить остановленное задание",
+               "Повторить неудачную или отменённую генерацию поста, статьи, креатива или редактуру. "
+               "task_id из recent_tasks. Для рисованного видео использовать resume_video, не этот инструмент. "
+               "Повтор может потребовать платных вызовов; сначала подтверждение.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, TaskDetailParams),
+    Capability("redraw_post_image", "Перегенерировать картинку поста ВКонтакте",
+               "Переделать только картинку существующего поста VK до утверждения, не менять текст. "
+               "material_id из recent_materials или выбранной карточки; feedback — пожелание к картинке. "
+               "Использует модель исходного поста, платный запуск после подтверждения.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, RedrawPostImageParams),
     Capability("show_task", "Проверить конкретное задание",
                "Показать статус, этап и известную причину остановки конкретного задания. task_id только из recent_tasks "
                "или явно выбранного задания; если не знаешь ID, сначала list_tasks.",
