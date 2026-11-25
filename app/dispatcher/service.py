@@ -558,7 +558,9 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 outcome, confirmation, capability_id = await act(ctx, decision.capability, decision.params)
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
                 blocks = outcome.blocks
-                chips = [] if confirmation else FOLLOW_UP
+                # Keep validated alternatives when the chosen action cannot run.
+                # They are opt-in chips, not additional executed operations.
+                chips = [] if confirmation else (chips or FOLLOW_UP)
         elif decision.intent == "plan":
             if decision.confidence < CONFIDENCE_TO_ACT:
                 intent = "clarify"
