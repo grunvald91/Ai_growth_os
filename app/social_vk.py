@@ -789,7 +789,7 @@ def schedule(db, product_id, post_id, when, *, products_root=None, commit=True):
     return pub
 
 
-def cancel(db, product_id, publication_id):
+def cancel(db, product_id, publication_id, *, commit=True):
     pub = db.scalar(select(Publication).where(
         Publication.product_id == product_id, Publication.id == publication_id,
         Publication.channel == "vk").with_for_update())
@@ -798,7 +798,10 @@ def cancel(db, product_id, publication_id):
     if pub.status != "scheduled":
         raise ValueError("Можно отменить только ещё не отправленный пост")
     pub.status = "cancelled"
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return pub
 
 
