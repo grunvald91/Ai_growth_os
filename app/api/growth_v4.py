@@ -70,7 +70,7 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
         ("story", "Stories", "Сценарий и готовые изображения каждого экрана. Доступны PNG и ZIP."),
         ("static_image", "Изображение", "Готовая картинка PNG с возможностью скачать файл."),
         ("short_video", "Видеосценарий", "Сценарий, кадры и озвучка, без готового MP4."),
-        ("whiteboard", "Простое видео", "Анимированный MP4 с озвучкой и субтитрами; платный запуск подтверждается отдельно."),
+        ("whiteboard", "Простое видео", "Анимированный MP4 с озвучкой и субтитрами; создание подтверждается отдельно."),
         ("package", "Полный пакет", "Статья, адаптации и сценарии. Готовый MP4 пока в этот пакет не включён."),
     ]
     summaries = {
@@ -600,8 +600,8 @@ def render_v4(page, request, pid, switch):
     if home:
         extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-start-fast-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=dynamic-clarification-20261125"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=dynamic-clarification-20261125"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=analytics-trends-20261125"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=analytics-trends-20261125"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'

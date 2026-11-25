@@ -139,6 +139,126 @@
       .replace(/рисованное видео/gi, 'простое видео');
   }
 
+  function chartValue(p, unit) {
+    return p.value.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ' + unit;
+  }
+
+  function renderMetricsSummary(block) {
+    var section = el('section', 'dp-chart');
+    section.appendChild(el('strong', 'dp-chart-title', block.title));
+    section.appendChild(el('p', 'dp-chart-caption', block.period + ' · ' + block.source));
+    var grid = el('div', 'dp-metrics-grid');
+    (block.points || []).forEach(function (p) {
+      var item = el('div', 'dp-metric');
+      item.appendChild(el('strong', 'dp-metric-value', chartValue(p, block.unit)));
+      item.appendChild(el('span', 'dp-metric-label', p.label));
+      grid.appendChild(item);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderLineChart(figure, points, unit, max) {
+    var wrap = el('div', 'dp-line-chart');
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 320 144');
+    svg.setAttribute('aria-hidden', 'true');
+    var scale = max || 1;
+    [12, 72, 132].forEach(function (y) {
+      var line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', '8'); line.setAttribute('x2', '312');
+      line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
+      line.setAttribute('class', 'dp-line-grid');
+      svg.appendChild(line);
+    });
+    var coords = points.map(function (p, i) {
+      return [8 + 304 * i / Math.max(1, points.length - 1), 132 - 120 * p.value / scale];
+    });
+    var polyline = document.createElementNS(ns, 'polyline');
+    polyline.setAttribute('points', coords.map(function (p) { return p.join(','); }).join(' '));
+    polyline.setAttribute('class', 'dp-line-series');
+    svg.appendChild(polyline);
+    coords.forEach(function (p) {
+      var dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', String(p[0])); dot.setAttribute('cy', String(p[1]));
+      dot.setAttribute('r', '2.1'); dot.setAttribute('class', 'dp-line-point');
+      svg.appendChild(dot);
+    });
+    wrap.appendChild(el('p', 'dp-chart-caption', 'Шкала: 0–' + scale.toLocaleString('ru-RU') + ' ' + unit));
+    wrap.appendChild(svg);
+    var dates = el('div', 'dp-line-dates');
+    dates.appendChild(el('span', '', points[0].label));
+    dates.appendChild(el('span', '', points[points.length - 1].label));
+    wrap.appendChild(dates);
+    figure.appendChild(wrap);
+    var detail = el('details', 'dp-chart-data');
+    detail.appendChild(el('summary', '', 'Все значения по датам'));
+    detail.appendChild(renderTable({columns: ['Дата / интервал', 'Значение'],
+      rows: points.map(function (p) { return [p.label, chartValue(p, unit)]; })}));
+    figure.appendChild(detail);
+  }
+
+  function renderDonutChart(figure, points, unit) {
+    var total = points.reduce(function (sum, p) { return sum + p.value; }, 0);
+    if (!total || !Number.isFinite(total)) return false;
+    var colors = ['#4787c9', '#a7792e', '#9969ba', '#56938c', '#a3a3a3', '#716fba', '#c37b68', '#608db4'];
+    var cursor = 0;
+    var stops = points.map(function (p, i) {
+      var start = cursor;
+      cursor += 100 * (p.value / total);
+      return colors[i] + ' ' + start + '% ' + cursor + '%';
+    });
+    var ring = el('div', 'dp-donut-ring');
+    ring.setAttribute('aria-hidden', 'true');
+    ring.style.background = 'conic-gradient(' + stops.join(', ') + ')';
+    ring.appendChild(el('span', 'dp-donut-center', total.toLocaleString('ru-RU')));
+    figure.appendChild(ring);
+    points.forEach(function (p, i) {
+      var row = el('div', 'dp-chart-heading');
+      var label = el('span', 'dp-donut-label');
+      var swatch = el('span', 'dp-donut-swatch');
+      swatch.setAttribute('aria-hidden', 'true'); swatch.style.backgroundColor = colors[i];
+      label.appendChild(swatch); label.appendChild(el('span', '', p.label));
+      row.appendChild(label);
+      row.appendChild(el('strong', '', chartValue(p, unit) + ' · ' +
+        (100 * p.value / total).toLocaleString('ru-RU', {maximumFractionDigits: 1}) + '%'));
+      figure.appendChild(row);
+    });
+    return true;
+  }
+
+  function renderChart(block) {
+    var figure = el('figure', 'dp-chart');
+    figure.appendChild(el('figcaption', 'dp-chart-title', block.title));
+    figure.appendChild(el('p', 'dp-chart-caption', block.period + ' · ' + block.source));
+    var points = block.points || [];
+    if (!points.length || points.some(function (p) {
+      return typeof p.value !== 'number' || !Number.isFinite(p.value) || p.value < 0;
+    })) return figure;
+    var max = Math.max.apply(null, points.map(function (p) { return p.value; }));
+    if (block.kind === 'line' && points.length >= 2) {
+      renderLineChart(figure, points, block.unit, max);
+    } else if (block.kind === 'donut' && renderDonutChart(figure, points, block.unit)) {
+      // The text legend is the accessible data representation.
+    } else points.forEach(function (p) {
+      var row = el('div', 'dp-chart-row');
+      var heading = el('div', 'dp-chart-heading');
+      heading.appendChild(el('span', '', p.label));
+      heading.appendChild(el('strong', '', p.value.toLocaleString('ru-RU') + ' ' + block.unit));
+      row.appendChild(heading);
+      var track = el('div', 'dp-chart-track');
+      track.setAttribute('aria-hidden', 'true');
+      var bar = el('div', 'dp-chart-bar');
+      bar.style.width = (max ? 100 * p.value / max : 0) + '%';
+      track.appendChild(bar);
+      row.appendChild(track);
+      figure.appendChild(row);
+    });
+    if (block.note) figure.appendChild(el('p', 'dp-chart-caption', block.note));
+    return figure;
+  }
+
   function renderTable(block) {
     var wrap = el('div', 'dp-tablewrap');
     var table = el('table', 'dp-table');
@@ -243,6 +363,77 @@
     return wrapper;
   }
 
+  function renderToolForm(block, messageId) {
+    var wrapper = el('article', 'sg-resource-widget');
+    wrapper.setAttribute('data-sg-resource-widget', 'tool_form');
+    var preparing = block.submit_label === 'Подготовить подтверждение';
+    var details = resourceDetails(block.title, preparing ? 'Заполните параметры. Запуск только после отдельного подтверждения.' : 'Настройте параметры просмотра.');
+    details.open = true;
+    var body = details.querySelector('.sg-resource-details-body');
+    var fields = el('form', 'dp-tool-form');
+    var controls = [];
+    (block.fields || []).forEach(function (field) {
+      var label = el('label', 'dp-tool-field');
+      label.appendChild(el('span', '', field.label));
+      var control;
+      if (field.kind === 'select') {
+        control = el('select', '');
+        (field.options || []).forEach(function (option) {
+          var entry = el('option', '', option.label);
+          entry.value = option.value;
+          control.appendChild(entry);
+        });
+      } else {
+        control = el(field.max_length > 400 ? 'textarea' : 'input', '');
+        if (control.tagName === 'INPUT') control.type = field.kind === 'integer' ? 'number' : 'text';
+        if (field.minimum != null) control.min = String(field.minimum);
+        if (field.maximum != null) control.max = String(field.maximum);
+        if (field.min_length != null) control.minLength = field.min_length;
+        if (field.max_length != null) control.maxLength = field.max_length;
+        if (field.kind === 'integer') control.step = '1';
+        if (field.kind === 'integer' && !field.required) control.placeholder = 'По умолчанию';
+      }
+      control.name = field.name;
+      control.required = field.required;
+      control.value = field.value;
+      label.appendChild(control);
+      fields.appendChild(label);
+      controls.push(control);
+    });
+    var submit = el('button', 'dp-btn primary', block.submit_label);
+    submit.type = 'submit';
+    fields.appendChild(submit);
+    var submissionKey = null, previousValues = null;
+    fields.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (busy || !fields.reportValidity()) return;
+      var params = Object.create(null);
+      controls.forEach(function (control) {
+        if (control.value !== '') params[control.name] = control.value;
+      });
+      var signature = JSON.stringify(params);
+      if (signature !== previousValues || !submissionKey) submissionKey = newKey();
+      previousValues = signature;
+      submit.disabled = true;
+      var accepted = send({mode:'chip', client_key:submissionKey,
+        form_submission:{message_id:messageId, revision:block.revision || 0, params:params}}, block.title, false, function (ok) {
+        if (ok) {
+          submissionKey = null;
+          if (preparing) {
+            submit.textContent = 'Подтверждение подготовлено';
+            controls.forEach(function (control) { control.disabled = true; });
+            return;
+          }
+        }
+        submit.disabled = false;
+      });
+      if (!accepted) submit.disabled = false;
+    });
+    body.appendChild(fields);
+    wrapper.appendChild(details);
+    return wrapper;
+  }
+
   function renderWorkflow(block, synchronized) {
     var main = el('section', 'sg-workflow-main');
     main.appendChild(el('strong', 'sg-workflow-title', block.title));
@@ -308,6 +499,8 @@
       (step.blocks || []).forEach(function (item) {
         if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
         else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'metrics_summary') group.appendChild(renderMetricsSummary(item));
+        else if (item.type === 'chart') group.appendChild(renderChart(item));
         else if (item.type === 'table') group.appendChild(renderTable(item));
         else if (item.type === 'resource_list') group.appendChild(renderResourceList(item));
         else if (item.type === 'task') group.appendChild(renderTask(item));
@@ -354,8 +547,6 @@
         (block.approval.details || []).forEach(function (line) {
           preview.appendChild(el('p', '', line));
         });
-        if (block.approval.paid)
-          preview.appendChild(el('strong', 'dp-badge', 'Платно'));
         var choices = el('div', 'sg-workflow-buttons');
         var yes = el('button', 'dp-btn primary',
           block.approval.confirm_label || 'Подтвердить');
@@ -767,7 +958,6 @@
   function renderConfirm(block) {
     var card = el('div', 'dp-confirm' + (block.paid ? ' paid' : ''));
     card.appendChild(el('strong', 'dp-confirm-title', voiceHoldEnabled ? friendlyTitle(block.title) : block.title));
-    if (block.paid) card.appendChild(el('span', 'dp-badge', 'Платно'));
     var details = el('div', block.editable ? 'dp-create-details' : 'dp-confirm-list');
     if (block.editable) {
       var data = block.editable;
@@ -894,6 +1084,7 @@
         if (!duplicate) bubble.appendChild(el('p', 'dp-text', shortProgress && started ? 'Видео создаётся' : voiceHoldEnabled ?
           String(block.text).replace(/^Запустил рисованное видео\./, 'Запустил простое видео.') : block.text));
       }
+      else if (block.type === 'tool_form') bubble.appendChild(renderToolForm(block, message.id));
       else if (block.type === 'clarification') bubble.appendChild(renderClarification(block));
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
       else if (block.type === 'links') {
@@ -904,6 +1095,8 @@
         }) : block.items;
         if (items.length) bubble.appendChild(renderLinks(items));
       }
+      else if (block.type === 'metrics_summary') bubble.appendChild(renderMetricsSummary(block));
+      else if (block.type === 'chart') bubble.appendChild(renderChart(block));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
       else if (block.type === 'workflow') bubble.appendChild(renderWorkflow(block));
@@ -1031,9 +1224,15 @@
   function applyResult(data) {
     if (root.classList.contains('sg-create-dispatch')) {
       // Keep only the current assistant response, not the conversation log.
-      var latest = (data.messages || []).filter(function (message) {
+      var assistantMessages = (data.messages || []).filter(function (message) {
         return message.role === 'assistant';
-      }).pop();
+      });
+      var latest = assistantMessages[assistantMessages.length - 1];
+      if (latest && (latest.intent === 'edit_card' || latest.intent === 'edit_form')) {
+        latest = assistantMessages.find(function (message) {
+          return (message.blocks || []).some(function (block) { return block.type === 'confirm' || block.type === 'tool_form'; });
+        }) || latest;
+      }
       if (latest) {
         Array.from(feed.children).forEach(function (child) {
           if (!child.classList.contains('dp-typing')) child.remove();

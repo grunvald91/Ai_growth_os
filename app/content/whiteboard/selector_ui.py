@@ -15,7 +15,7 @@ def topic_picker_html(product_id) -> str:
   <div id="wb-topic-quote" aria-live="polite" style="padding:12px 0"></div>
   <label style="display:flex;gap:10px;align-items:flex-start">
     <input id="wb-paid-consent" type="checkbox" disabled>
-    <span id="wb-paid-caption">Разрешаю платную генерацию выбранной темы в пределах указанного лимита API-вызовов.</span>
+    <span id="wb-paid-caption">Подтверждаю создание видео на выбранную тему в пределах указанного лимита API-вызовов.</span>
   </label>
   <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px">
     <button class="btn secondary" type="button" id="wb-topic-cancel">Отмена</button>
@@ -81,7 +81,7 @@ def topic_picker_html(product_id) -> str:
         (data.science_review ? "Перед созданием рисунков будет проведена проверка научных утверждений." :
           "Стандартное видео без отдельной научной проверки.") +
         " Точная денежная стоимость не известна.";
-      caption.textContent = "Разрешаю платную генерацию выбранной темы: до " + data.limit + " API-вызовов." + recovery;
+      caption.textContent = "Подтверждаю создание видео на выбранную тему: до " + data.limit + " API-вызовов." + recovery;
       quoteReady = true; consent.disabled = false;
     } catch (_) {
       if (version !== quoteVersion || chosen !== selected || !dialog.open) return;

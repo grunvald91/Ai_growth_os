@@ -208,9 +208,9 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-audience"' in page.text
     assert 'id="sg-create-brief"' in page.text
     assert 'id="sg-create-form"' not in page.text
-    assert '/studio/assets/create-studio.js?v=dynamic-clarification-20261125' in page.text
+    assert '/studio/assets/create-studio.js?v=analytics-trends-20261125' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=dynamic-clarification-20261125' in page.text
+    assert '/studio/assets/dispatcher.js?v=analytics-trends-20261125' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
@@ -288,7 +288,7 @@ def test_create_v4_layout_follows_visible_task_flow(live):
     assert 'id="sg-create-vk-image-slot"' in html
     assert 'id="sg-create-format-help"' in html
     assert 'data-sg-description="' in html
-    assert 'dynamic-clarification-20261125' in html
+    assert 'analytics-trends-20261125' in html
     assert 'growth-live.css?v=31-create-video-controls' in html
     assert "vkImageSlot.appendChild(vkReviewTip)" in js
     assert "vkImageRow" not in js

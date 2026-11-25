@@ -419,7 +419,8 @@ async def test_simple_video_selected_in_create_uses_paid_approval_without_llm(db
     assert answer["intent"] == "execute"
     card = next(block for block in answer["blocks"] if block["type"] == "confirm")
     assert card["paid"] is True
-    assert any("платная" in line.lower() for line in card["details"])
+    assert any("Создание начнётся после подтверждения" in line for line in card["details"])
+    assert not any("платн" in line.lower() for line in card["details"])
     assert tasks(db, "content_factory") == []
     assert tasks(db, "content_creative") == []
     videos = tasks(db, "whiteboard_renderer")
@@ -942,7 +943,9 @@ async def test_video_is_prepared_free_and_started_only_after_confirmation(db, pr
     job = tasks(db, "whiteboard_renderer")[0]
     assert job.status == TaskStatus.WAITING_APPROVAL
     card = [b for b in result["messages"][1]["blocks"] if b["type"] == "confirm"][0]
-    assert card["paid"] is True and any("платная" in line for line in card["details"])
+    assert card["paid"] is True
+    assert any("Создание начнётся после подтверждения" in line for line in card["details"])
+    assert not any("платн" in line.lower() for line in card["details"])
     started = []
 
     async def fake_approve(db_, product_id, task_id, body, actor, settings_):
@@ -1596,3 +1599,184 @@ def test_clarification_rejects_actions_and_malformed_optional_choices():
     assert clean_blocks([{"type": "clarification", "options": ["A", "B"],
                           "capability": "create_post"}]) == []
     assert clean_blocks([{"type": "clarification", "options": ["A"]}]) == []
+
+
+@pytest.mark.asyncio
+async def test_conversational_edit_updates_same_pending_card_and_replays(db, product):
+    initial = await send(db, product, chip={
+        "label": "Четыре Stories", "capability": "create_creative",
+        "params": {"topic": "Уход за волосами", "format": "story", "frame_count": 4,
+                   "platform": "telegram", "audience": "Новые клиенты"}})
+    original = next(b for b in initial["messages"][1]["blocks"] if b["type"] == "confirm")
+    model, _ = llm({"intent": "edit_card", "confidence": 0.95, "params": {
+        "confirmation_id": original["confirmation_id"], "revision": 0, "frame_count": 6}})
+    result = await service.handle_message(db, context(db, product), model, text="Нет, сделай шесть экранов",
+                                          client_key="edit-six", mode="voice")
+    assert result["messages"][1]["id"] == initial["messages"][1]["id"]
+    card = next(b for b in result["messages"][1]["blocks"] if b["type"] == "confirm")
+    assert card["revision"] == 1 and card["editable"]["frame_count"] == 6
+    assert card["editable"]["topic"] == "Уход за волосами"
+    assert card["editable"]["audience"] == "Новые клиенты"
+    assert card["state"] == "pending"
+    assert not tasks(db, "content_creative")
+    replay = await service.handle_message(db, context(db, product), model, text="Нет, сделай шесть экранов",
+                                          client_key="edit-six", mode="voice")
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == result["messages"][1]["blocks"]
+    with pytest.raises(PermissionError):
+        await service.confirm(db, context(db, product), original["confirmation_id"], accept=True, revision=0)
+    assert not tasks(db, "content_creative")
+    await service.confirm(db, context(db, product), original["confirmation_id"], accept=True, revision=1)
+    assert len(tasks(db, "content_creative")) == 1
+
+
+@pytest.mark.asyncio
+async def test_conversational_edit_rejects_stale_foreign_and_unknown_fields(db, product):
+    initial = await send(db, product, chip=post_chip())
+    card = next(b for b in initial["messages"][1]["blocks"] if b["type"] == "confirm")
+    for index, (account, params) in enumerate([
+        ("owner", {"revision": 5, "topic": "Другая тема"}),
+        ("other-owner", {"revision": 0, "topic": "Чужая тема"}),
+        ("owner", {"revision": 0, "format": "package"}),
+        ("owner", {"revision": 0, "topic": "x"}),
+    ]):
+        model, _ = llm({"intent": "edit_card", "confidence": 1, "params": {
+            "confirmation_id": card["confirmation_id"], **params}})
+        result = await send(db, product, text="Измени параметры", key=f"invalid-edit-{index}",
+                            model=model, account=account)
+        assert result["messages"][-1]["intent"] == "clarify"
+    conversation = service.open_conversation(db, product.id, "owner")
+    saved = next(m for m in service.messages(db, conversation) if m.confirmation_id == card["confirmation_id"])
+    assert next(b for b in saved.blocks if b["type"] == "confirm") == card
+    assert not list(db.scalars(select(Task)))
+
+
+def test_schema_tool_forms_allow_only_audited_capabilities():
+    from app.dispatcher.forms import FORM_CAPABILITIES, form_for
+    for capability in FORM_CAPABILITIES:
+        block = form_for(capability, {})
+        assert clean_blocks([block])[0]["type"] == "tool_form"
+        assert {f["name"] for f in block["fields"]} == set(CAPABILITIES[capability].params.model_fields)
+    for capability in ["create_creative", "set_insights_depth", "schedule_post", "unknown"]:
+        with pytest.raises(ValueError):
+            form_for(capability, {})
+    with pytest.raises(ValueError):
+        form_for("list_tasks", {"tab": "invented"})
+    with pytest.raises(ValueError):
+        form_for("show_insights", {"days": 366})
+    fields = {f["name"]: f for f in form_for("show_insights", {"days": "30"})["fields"]}
+    assert fields["days"]["minimum"] == 7 and fields["days"]["maximum"] == 365
+    assert fields["days"]["value"] == "30"
+    assert {x["value"] for x in fields["topic"]["options"]} == set(
+        CAPABILITIES["show_insights"].params.model_json_schema()["properties"]["topic"]["enum"])
+
+
+@pytest.mark.asyncio
+async def test_model_form_is_persisted_without_execution_then_regular_chip_reads(db, product):
+    model, _ = llm({"intent": "form", "capability": "list_tasks", "confidence": 0.95,
+                    "params": {"kind": "video", "tab": "problems"}})
+    result = await send(db, product, text="Хочу выбрать фильтры для списка заданий", model=model)
+    answer = result["messages"][-1]
+    block = next(b for b in answer["blocks"] if b["type"] == "tool_form")
+    assert answer["intent"] == "form"
+    assert {f["name"]: f["value"] for f in block["fields"]}["kind"] == "video"
+    assert not list(db.scalars(select(Task)))
+    replay = await send(db, product, text="Хочу выбрать фильтры для списка заданий", model=model)
+    assert replay["replayed"] and replay["messages"][-1]["blocks"] == answer["blocks"]
+    from app.api.dispatcher import FormSubmissionIn
+    response = await service.handle_message(db, context(db, product), None, text="", client_key="read-form",
+        form_submission=FormSubmissionIn(message_id=answer["id"], params={"kind": "video", "tab": "all"}))
+    assert response["messages"][-1]["intent"] == "execute"
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_model_cannot_make_mutating_tool_form(db, product):
+    model, _ = llm({"intent": "form", "capability": "set_insights_depth", "confidence": 1,
+                    "params": {"days": 90}})
+    result = await send(db, product, text="Настрой мне форму для просмотра", model=model)
+    assert result["messages"][-1]["intent"] == "clarify"
+    assert not any(b["type"] == "tool_form" for b in result["messages"][-1]["blocks"])
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_saved_prepare_form_requires_confirmation_and_is_single_use(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    from app.dispatcher.forms import form_for
+    from uuid import UUID
+    model, _ = llm({"intent": "form", "capability": "create_post", "confidence": 0.95, "params": {}})
+    initial = await send(db, product, text="Дай форму, где я сам укажу тему поста", model=model)
+    answer = initial["messages"][-1]
+    block = next(b for b in answer["blocks"] if b["type"] == "tool_form")
+    assert block["submit_label"] == "Подготовить подтверждение"
+    topic = next(f for f in block["fields"] if f["name"] == "topic")
+    assert topic["required"] and topic["value"] == ""
+    assert not list(db.scalars(select(Task)))
+    with pytest.raises(ValueError):
+        form_for("create_post", {}, partial=False)
+    with pytest.raises(ValueError):
+        form_for("create_post", {"topic": "Тема", "channel": "telegram", "image_model": "openai"}, partial=False)
+    request = FormSubmissionIn(message_id=answer["id"], params={"topic": "Как снизить неявки", "channel": "vk"})
+    with pytest.raises(LookupError):
+        await service.handle_message(db, context(db, product, "other-owner"), None, text="",
+                                     client_key="foreign", form_submission=request)
+    with pytest.raises(ValueError):
+        await service.handle_message(db, context(db, product), None, text="", client_key="tamper",
+            form_submission=FormSubmissionIn(message_id=answer["id"], params={"topic": "Тема", "capability": "whiteboard_video"}))
+    prepared = await service.handle_message(db, context(db, product), None, text="",
+                                             client_key="first", form_submission=request)
+    card = next(b for b in prepared["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["state"] == "pending" and card["editable"]["topic"] == "Как снизить неявки"
+    assert not list(db.scalars(select(Task)))
+    # Interleaved task result must not be mistaken for the original response.
+    saved = db.get(DispatcherMessage, UUID(prepared["messages"][-1]["id"]))
+    old_seq = saved.seq
+    saved.seq += 1
+    db.flush()
+    db.add(DispatcherMessage(conversation_id=saved.conversation_id, product_id=product.id,
+                             seq=old_seq, role="assistant", text="Другой результат", capability="task_result"))
+    db.commit()
+    duplicate = await service.handle_message(db, context(db, product), None, text="",
+                                              client_key="second-tab", form_submission=request)
+    assert duplicate["replayed"]
+    assert duplicate["messages"][-1]["id"] == prepared["messages"][-1]["id"]
+    await service.confirm(db, context(db, product), card["confirmation_id"], accept=True, revision=0)
+    assert len(tasks(db, "content_factory")) == 1
+    after = await service.handle_message(db, context(db, product), None, text="",
+                                          client_key="third-tab", form_submission=request)
+    assert after["replayed"] and len(tasks(db, "content_factory")) == 1
+
+
+@pytest.mark.asyncio
+async def test_video_form_edit_same_revision_and_no_task_before_submit(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    from app.dispatcher.forms import form_for
+    initial_model, _ = llm({"intent": "form", "capability": "whiteboard_video", "confidence": 0.95,
+                            "params": {"topic": "Как устроена онлайн-запись", "length": "30"}})
+    initial = await send(db, product, text="Дай настройки видео", model=initial_model)
+    original = initial["messages"][-1]
+    block = next(b for b in original["blocks"] if b["type"] == "tool_form")
+    assert block["revision"] == 0 and len(block["fields"]) == 12
+    assert not list(db.scalars(select(Task)))
+    edit_model, _ = llm({"intent": "edit_form", "confidence": 0.95, "params": {
+        "message_id": original["id"], "revision": 0, "length": "60",
+        "image_model": "gpt-image-2.5-sunburst"}})
+    result = await service.handle_message(db, context(db, product), edit_model, text="Минуту, с GPT Image",
+                                          client_key="edit-video-form", mode="voice")
+    assert result["messages"][1]["id"] == original["id"]
+    revised = next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")
+    fields = {f["name"]: f["value"] for f in revised["fields"]}
+    assert revised["revision"] == 1 and fields["length"] == "60"
+    assert fields["image_model"] == "gpt-image-2.5-sunburst"
+    assert fields["topic"] == "Как устроена онлайн-запись" and fields["max_api_calls"] == ""
+    assert not list(db.scalars(select(Task)))
+    with pytest.raises(ValueError):
+        await service.handle_message(db, context(db, product), None, text="", client_key="stale-video",
+            form_submission=FormSubmissionIn(message_id=original["id"], revision=0,
+                                              params={"topic": fields["topic"]}))
+    with pytest.raises(ValueError):
+        form_for("whiteboard_video", {"topic": fields["topic"], "length": "45"}, partial=False)
+    replay = await service.handle_message(db, context(db, product), edit_model, text="Минуту, с GPT Image",
+                                          client_key="edit-video-form", mode="voice")
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == result["messages"][1]["blocks"]
+    assert not list(db.scalars(select(Task)))

@@ -226,14 +226,29 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     if params.topic in ("all", "clients"):
         chips.append({"label": "Кого пригласить повторно", "capability": "show_return_candidates", "params": {}})
     chips.append({"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}})
-    if insights.depth_days < 90:
-        chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights",
-                      "params": {"days": "90", **({"topic": params.topic} if params.topic != "all" else {})}})
+    periods = [{"label": f"За {days} дней", "capability": "show_insights",
+                "params": {"days": str(days), "topic": params.topic, "presentation": params.presentation}}
+               for days in (7, 30, 90) if days != insights.depth_days]
+    if params.topic == "all":
+        chips.append({"label": "Динамика записей", "capability": "show_insights",
+                      "params": {"topic": "trend", "days": str(insights.depth_days),
+                                 "presentation": params.presentation}})
     note = ""
     if params.days and params.days != depth_for(ctx.db, ctx.product.id):
         note = f"\n(Срок {params.days} дн. — только для этого просмотра. Сохранить как обычный: «смотри за {params.days} дней».)"
+    from app.insights.charts import chart_for, metrics_for, trend_points
+    chart = chart_for(insights, params.topic) if params.presentation != "table" else None
+    summary = metrics_for(insights) if params.topic == "all" and params.presentation != "table" else None
+    if params.topic == "trend":
+        points, unit, explanation = trend_points(insights)
+        lines.append(explanation)
+        if chart is None:
+            rows = [*rows, *[[p["label"], f'{p["value"]:g} {unit}'] for p in points]]
     return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
-                   [{"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
+                   [*([summary] if summary else []),
+                    {"type": "chips", "items": periods},
+                    *([chart] if chart else []),
+                    {"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
                     {"type": "chips", "items": chips}, _links(ctx, "schedule")])
 
 
@@ -532,7 +547,7 @@ async def describe_create_creative(ctx: Context, params: CreativeParams) -> Conf
     if params.format == "short_video":
         details.append("Это видеосценарий, не готовый MP4.")
     else:
-        details.append("После раскадровки будут созданы готовые PNG. Платные вызовы модели начинаются только после подтверждения.")
+        details.append("После раскадровки будут созданы готовые PNG. Создание изображений начнётся после подтверждения.")
     details.append("Без отдельного согласования ничего не публикуется.")
     return Confirmation(title=f"Подготовить {item}?", details=details,
                         params=params.model_dump(exclude_none=True), confirm_label="Создать")
@@ -711,12 +726,12 @@ async def whiteboard_video(ctx: Context, params: VideoParams) -> Outcome:
                  f"Рисунки: {state['models']['image']}.",
                  f"Озвучка: {state['models']['speech']} · {state['request']['voice']}.",
                  f"Проверка рисунков: {'да' if state['visual_review_enabled'] else 'нет'}.",
-                 f"Это платная генерация: до {state['max_api_calls']} обращений к ИИ.",
-                 "Пока вы не подтвердите, ничего не списывается."],
+                 f"Лимит: до {state['max_api_calls']} обращений к ИИ.",
+                 "Создание начнётся после подтверждения."],
         params={"task_id": str(task.id), "request_digest": state["request_digest"]},
         paid=True, confirm_label="Запустить")
-    return Outcome("Подготовил задание на видео. Оно платное, поэтому нужно ваше подтверждение.",
-                   f"Подготовил задание на видео «{params.topic}». Это платная генерация. Запускаем?",
+    return Outcome("Подготовил задание. Подтвердите создание видео.",
+                   f"Подготовил задание на видео «{params.topic}». Запускаем создание?",
                    [_task_block(ctx, task, f"Видео: {params.topic}", href)], task_id=task.id,
                    confirmation=confirmation)
 
@@ -766,10 +781,10 @@ async def repair_video_images(ctx: Context, params) -> Outcome:
     confirmation = Confirmation(
         title="Перерисовать видео без новой озвучки?",
         details=["Исходный сценарий и аудио сохраняются.", f"Рисунки: {state['models']['image']}.",
-                 f"До {state['max_api_calls']} обращений к ИИ. Платный запуск только после подтверждения."],
+                 f"До {state['max_api_calls']} обращений к ИИ. Создание начнётся после подтверждения."],
         params={"task_id": str(task.id), "request_digest": state["request_digest"]},
         paid=True, confirm_label="Запустить")
-    return Outcome("Подготовил перерисовку. Подтвердите платный запуск.", blocks=blocks,
+    return Outcome("Подготовил перерисовку. Подтвердите перерисовку.", blocks=blocks,
                    task_id=task.id, confirmation=confirmation)
 
 

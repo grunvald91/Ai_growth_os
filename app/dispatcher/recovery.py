@@ -46,7 +46,7 @@ async def describe_retry_content_task(ctx: Context, params):
         return Outcome("Повторить можно только остановленное задание.", ok=False)
     from app.api.content_studio_activity import task_title
     return Confirmation("Повторить остановленное задание?",
-                        [task_title(task), "Возможны новые платные обращения к ИИ. Существующие ограничения и проверки сохраняются."],
+                        [task_title(task), "Существующие лимиты обращений к ИИ и проверки сохраняются."],
                         {"task_id": str(task.id), "updated_at": task.updated_at.isoformat()},
                         paid=True, confirm_label="Повторить")
 
@@ -94,7 +94,7 @@ async def describe_resume_video(ctx: Context, params):
         return Confirmation("Продолжить создание видео?",
             [payload.request.topic, "Готовые этапы будут использованы повторно.",
              f"Начато обращений: {started_attempts(value)}. Общий лимит после подтверждения: {call_limit(proposed, payload)}.",
-             f"Дополнительных обращений к лимиту: {extra}. Возможны платные вызовы."],
+             f"Дополнительных обращений к лимиту: {extra}."],
             {"task_id": str(task.id), "state_digest": digest(state.content),
              "request_digest": digest(source.content), "extra_calls": extra},
             paid=True, confirm_label="Продолжить")
@@ -144,7 +144,7 @@ async def describe_redraw_post_image(ctx: Context, params):
                            ok=False, blocks=[links_block(ctx, "review")])
         return Confirmation("Перегенерировать картинку поста?",
             [row.title[:120], "Текст поста не изменится.", f"Модель: {value['image_model']}.",
-             "Одна новая генерация изображения и одна проверка критиком — возможны платные вызовы."]
+             "Одна новая генерация изображения и одна проверка критиком."]
              + ([f"Пожелание: {params.feedback}"] if params.feedback else []),
             {"material_id": str(row.id), "source_version": row.version,
              "source_digest": source_fingerprint(row), "feedback": params.feedback},

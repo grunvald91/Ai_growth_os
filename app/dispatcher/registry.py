@@ -10,7 +10,7 @@ from datetime import date
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.dispatcher.policy import Cost
 from app.tools import ToolOperation
@@ -124,6 +124,13 @@ class VideoSettings(_Params):
     visual_review: bool = False
     science_mode: Literal["general", "auto", "scientific"] = "auto"
     max_api_calls: Literal[19, 25, 34, 45] | None = None
+    @field_validator("max_api_calls", mode="before")
+    @classmethod
+    def parse_call_limit(cls, value):
+        if isinstance(value, str) and value in {"19", "25", "34", "45"}:
+            return int(value)
+        return value
+
     recovery_budget: bool = False
     source_script: str = Field(default="", max_length=12000)
     background_notes: str = Field(default="", max_length=6000)
@@ -177,12 +184,13 @@ INSIGHT_TOPICS = ("all", "cancellations", "money", "clients", "weekdays", "dayti
 
 
 class InsightsParams(_Params):
-    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming"] = Field(
+    presentation: Literal["auto", "table", "chart"] = Field(default="auto", description="Авто: подходящий график для сравнимых показателей; table: только таблица; chart: график, если есть сопоставимые факты.")
+    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming", "trend"] = Field(
         default="all",
         description="О чём спросил владелец: cancellations — отмены; money — расчётная стоимость записей, не выручка, фактические оплаты неизвестны; "
                     "clients — клиенты, возвраты, постоянные; weekdays — по каким дням недели больше или меньше записей, "
                     "пустые дни; daytime — утро, день, вечер и за сколько дней записываются; services — какие услуги и "
-                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; all — общий вопрос про "
+                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; trend — динамика записей по датам; all — общий вопрос про "
                     "дела бизнеса или почему мало клиентов.")
     days: int | None = Field(
         default=None, ge=7, le=365,
@@ -338,7 +346,7 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("resume_video", "Продолжить остановленное видео",
                "Возобновить именно существующее неудачное рисованное видео с сохранённых этапов. "
                "task_id из recent_tasks; extra_calls по умолчанию 0, больше только если владелец явно назвал число "
-               "дополнительных обращений. Платное подтверждение обязательно; не создавать новое видео.",
+               "дополнительных обращений. Подтверждение продолжения обязательно; не создавать новое видео.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID, ResumeVideoParams),
     Capability("retry_content_task", "Повторить остановленное задание",
                "Повторить неудачную или отменённую генерацию поста, статьи, креатива или редактуру. "
@@ -348,7 +356,7 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("redraw_post_image", "Перегенерировать картинку поста ВКонтакте",
                "Переделать только картинку существующего поста VK до утверждения, не менять текст. "
                "material_id из recent_materials или выбранной карточки; feedback — пожелание к картинке. "
-               "Использует модель исходного поста, платный запуск после подтверждения.",
+               "Использует модель исходного поста, создание после подтверждения.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID, RedrawPostImageParams),
     Capability("show_task", "Проверить конкретное задание",
                "Показать статус, этап и известную причину остановки конкретного задания. task_id только из recent_tasks "
@@ -357,7 +365,7 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
     Capability("repair_video_images", "Перерисовать видео без новой озвучки",
                "Подготовить визуальную перегенерацию завершённого исходного рисованного видео с сохранением аудио и сценария. "
                "task_id только из recent_tasks или явно выбранного задания. Если исходник неясен, найди видео через list_tasks; "
-               "image_model необязательна, по умолчанию модель исходника. Платный запуск отдельно подтверждается.",
+               "image_model необязательна, по умолчанию модель исходника. Перерисовка подтверждается отдельно.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, RepairVideoParams),
     Capability("show_work", "Что в работе",
                "Показать, какие задания сейчас выполняются, ждут решения или завершились.",
@@ -502,7 +510,7 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "Подходит для обычных просьб создать видео, включая «минутное видео на тему…», даже без слова рисованное. "
                "Если нужен иной несовместимый вид видео, предложить рисованный вариант и уточнить согласие. "
                "Не использовать для сценария, просмотра, отмены или изменения существующего видео. "
-               "Платная генерация начнётся только после подтверждения.",
+               "Создание видео начнётся только после подтверждения.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, VideoParams),
     Capability("cancel_video", "Отменить рисованное видео",
                "Отменить задание на рисованное видео, которое ещё не завершено. Без task_id — самое последнее.",

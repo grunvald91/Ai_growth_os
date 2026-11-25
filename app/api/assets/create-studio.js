@@ -191,7 +191,7 @@
     // Format and platform already appear immediately above the editor;
     // repeat only special information that changes the decision to proceed.
     context.textContent=key==='whiteboard'
-      ? 'Готовое видео MP4. Платный запуск — только после подтверждения.'
+      ? 'Готовое видео MP4. Создание — после подтверждения.'
       : '';
     if(advanced) advanced.hidden=key==='whiteboard';
 
