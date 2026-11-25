@@ -1516,3 +1516,43 @@ async def test_dispatcher_vk_redraw_preserves_text_and_shows_job(db, product):
     job = tasks(db, "content_image_regen")[0]
     assert job.status == TaskStatus.QUEUED
     assert any(row["id"] == str(job.id) for row in work_page(db, product.id, kind="edit")["items"])
+
+
+@pytest.mark.asyncio
+async def test_failed_confirmation_is_consumed_even_when_handler_rolls_back(db, product, monkeypatch):
+    task = Task(product_id=product.id, title="POST: rollback", assigned_agent="content_factory",
+                status=TaskStatus.FAILED)
+    db.add(task)
+    db.commit()
+    answer = await send(db, product, chip={"label": "Повторить", "capability": "retry_content_task",
+                        "params": {"task_id": str(task.id)}})
+    card = next(b for b in answer["messages"][1]["blocks"] if b["type"] == "confirm")
+    attempts = []
+    async def failed(ctx, stored, via):
+        from app.dispatcher.outcome import Outcome
+        attempts.append(1)
+        ctx.db.rollback()
+        return Outcome("Задание изменилось", ok=False)
+    monkeypatch.setitem(executors.CONFIRMERS, "retry_content_task", failed)
+    first = await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert "изменилось" in first["messages"][-1]["text"]
+    second = await service.confirm(db, context(db, product), card["confirmation_id"], accept=True)
+    assert second["replayed"] and attempts == [1]
+
+
+@pytest.mark.asyncio
+async def test_redraw_missing_title_is_explained_without_confirmation(db, product):
+    task = Task(product_id=product.id, title="POST: bad", assigned_agent="content_factory",
+                status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    from app.models.domain import ArtifactStatus
+    post = Artifact(product_id=product.id, task_id=task.id, kind="channel_text", title="VK",
+                    status=ArtifactStatus.AWAITING_APPROVAL,
+                    content=json.dumps({"channel": "vk", "body": "Text", "image_model": "gemini"}))
+    db.add(post)
+    db.commit()
+    outcome, confirmation, _ = await service.act(context(db, product), "redraw_post_image",
+                                                {"material_id": str(post.id)})
+    assert not outcome.ok and confirmation is None and "заголовок" in outcome.text
+    assert not tasks(db, "content_image_regen")
