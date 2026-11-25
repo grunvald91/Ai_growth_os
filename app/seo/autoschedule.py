@@ -19,13 +19,30 @@ def _utc(value: datetime) -> datetime:
 
 
 def _queue_locked_if_due(db: Session, product_id, *, now: datetime, interval_days: int,
-                         focus: str | None = None, horizon_days: int = 7) -> bool:
+                         focus: str | None = None, horizon_days: int = 7,
+                         reserve_enabled: bool = False, timezone_name: str = 'Europe/Moscow',
+                         publications_per_day: int = 3) -> bool:
     """Call only while holding this company's Product row lock."""
     if not is_enabled(db, product_id):
         return False
     latest = db.scalar(select(Task.created_at).where(
         Task.product_id == product_id, Task.assigned_agent == AGENT,
     ).order_by(Task.created_at.desc()).limit(1))
+    if reserve_enabled:
+        from app.seo.publishing import public_blog_ready
+        from app.seo.reserve import coverage
+        from app.seo.failure_guard import paused_products
+        # Do not spend on another plan while the pipeline already has coverage,
+        # the blog is unavailable or technical failures have tripped the breaker.
+        if (not public_blog_ready(db, product_id) or product_id in paused_products(db, now)):
+            return False
+        reserve = coverage(db, product_id, now=now, timezone_name=timezone_name,
+                           daily_limit=publications_per_day)
+        if not reserve.missing_pipeline_days:
+            return False
+        # At most one new plan in 24h even when the stock is empty; avoid a
+        # perpetual replanning loop when search suggestions yield too few topics.
+        interval_days = min(interval_days, 1)
     if latest is not None and _utc(latest) > now - timedelta(days=interval_days):
         return False
     active = db.scalar(select(Task.id).where(
@@ -56,6 +73,8 @@ def enqueue_servgo_if_due(db: Session, settings, *, now: datetime | None = None)
     return _queue_locked_if_due(
         db, product, now=now, interval_days=prefs.autorun_interval_days,
         horizon_days=prefs.autorun_horizon_days,
+        reserve_enabled=settings.seo_reserve_enabled, timezone_name=prefs.timezone_name,
+        publications_per_day=prefs.publications_per_day,
         focus=("Органический трафик для продаж ServGo: вопросы владельцев сервисных "
                "организаций об онлайн-записи, расписании, автоматизации, предоплате, "
                "маркетинге и сравнении решений, без неподтверждённых обещаний."),
@@ -89,6 +108,8 @@ def enqueue_enabled_if_due(db: Session, settings, *, now: datetime | None = None
         if _queue_locked_if_due(
             db, locked, now=now, interval_days=prefs.autorun_interval_days,
             horizon_days=prefs.autorun_horizon_days,
+            reserve_enabled=settings.seo_reserve_enabled, timezone_name=prefs.timezone_name,
+            publications_per_day=prefs.publications_per_day,
         ):
             return True
     return False
