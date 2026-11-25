@@ -15,9 +15,9 @@ Scope: static audit of the mounted Studio routers in app/main.py and the dispatc
 | Area / source router | Direct through dispatcher | Existing UI/API not yet directly connected |
 |---|---|---|
 | Content creation — content_studio, whiteboard | create_post, create_creative (story, image, script), create_package, whiteboard_video | standalone article, other editor/render actions |
-| Tasks — content_studio, content_studio_activity | show_work, list_tasks, show_task, show_review | retry of stopped content job, mark notifications read, download images |
-| Video — whiteboard | whiteboard_video, show_recent_videos, cancel_video, repair_video_images | resume checkpoint and budget top-up; video files via UI |
-| Materials — content_studio | show_material, approve_material, revise_material | arbitrary material editing, VK image-only regeneration, download |
+| Tasks — content_studio, content_studio_activity | show_work, list_tasks, show_task, show_review, retry_content_task | mark notifications read, download images |
+| Video — whiteboard | whiteboard_video, show_recent_videos, cancel_video, repair_video_images, resume_video (explicit approved top-up only) | video files via UI |
+| Materials — content_studio | show_material, approve_material, revise_material, redraw_post_image (VK) | arbitrary material editing, download |
 | Calendar/plan — content_studio | show_plan, make_plan, approve_plan, edit_plan_package, move_plan_slot | pause plan, queue specific package |
 | Publishing — content_studio, vk_publishing | schedule_post (Telegram only) | VK schedule, publication cancel/reconcile, channel connection |
 | SEO — growth_live | seo_factory; list_tasks/show_task for owner-visible jobs | activation/preferences, queue, retry/cancel individual articles, inspect/search metrics |
@@ -36,7 +36,7 @@ Scope: static audit of the mounted Studio routers in app/main.py and the dispatc
 
 ## Next implementation order
 
-1. Safe task resume/retry and material image regeneration: reuse current services, bind source version/digest and exact task ID; separate paid approval.
+1. Implemented in branch: task resume/retry and VK image regeneration, with paid confirmation, pinned state/version/digest and existing service checks. CI still required.
 2. Publication status, VK scheduling/cancellation and plan pause: typed parameters, exact resource IDs, confirmation and authorization.
 3. SEO read-only status/metrics plus explicit action wrappers for individual articles.
 4. Market research read/search (quota-aware), then campaign and comments tools; brand tools.
@@ -51,3 +51,5 @@ New tools must not be listed as executable until server handlers and tests exist
 - Read-only status is based on existing scoped work views and sanitized errors; paid approval remains before calls.
 - Repair uses existing checkpoint/approval service and selected model, not new speech generation; canceled dispatcher card leaves unpaid repair draft.
 - Verify regression suite and CI before merge/deploy. Static source review is not production verification.
+
+Recovery review: task retry reuses the original Studio gate; video resume uses the original checkpoint/ledger service and never auto-adds calls; VK redraw uses the existing immutable image workflow. Redraw jobs are visible in the work list. The automatic provider polling/fallback policy is not changed here. New tests cover role and tenant boundaries, stale confirmations, no action before confirmation, and visibility. Runtime verification remains pending.
