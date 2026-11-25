@@ -86,7 +86,8 @@ def recover_stale_factory(db):
     for task in db.scalars(select(Task).where(Task.assigned_agent == AGENT,
             Task.status == TaskStatus.RUNNING, Task.updated_at < cutoff)):
         attempts = list(db.scalars(select(Artifact.id).where(
-            Artifact.task_id == task.id, Artifact.kind == ATTEMPT_KIND)))
+            Artifact.task_id == task.id, Artifact.kind == ATTEMPT_KIND,
+            Artifact.content != '{"model_deferred":true}')))
         task.status = TaskStatus.QUEUED if len(attempts) < 3 else TaskStatus.FAILED
     db.commit()
 
@@ -117,6 +118,7 @@ def queue_factory(db: Session, product_id: UUID, focus: str | None = None, *,
 
 
 async def run_factory_once(session_factory, settings, *, provider=None, client: httpx.AsyncClient | None = None) -> int:
+    from app.llm.seo_availability import ModelDeferred, defer_task, ready_filter
     with session_factory() as db:
         recover_stale_factory(db)
         enabled = enabled_product_ids(db)
@@ -124,7 +126,7 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
             return 0
         task = db.scalar(select(Task).where(
             Task.assigned_agent == AGENT, Task.status == TaskStatus.QUEUED,
-            Task.product_id.in_(enabled),
+            Task.product_id.in_(enabled), ready_filter(),
         ).order_by(Task.priority.desc(), Task.created_at, Task.id).limit(1))
         if task is None:
             return 0
@@ -134,8 +136,9 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
         if claimed.rowcount != 1:
             db.rollback()
             return 0
-        ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=ATTEMPT_KIND,
+        attempt = ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=ATTEMPT_KIND,
                                    title="SEO attempt", content="{}")
+        attempt_id = attempt.id
         db.commit()
         request = db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == REQUEST_KIND))
         try:
@@ -146,6 +149,12 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
                 raise ValueError("Invalid SEO planning horizon")
             async with asyncio.timeout(1200):
                 await _execute(db, settings, task_id, product_id, focus, provider, client, horizon_days)
+        except ModelDeferred as exc:
+            db.rollback()
+            db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+            db.get(Artifact, attempt_id).content = '{"model_deferred":true}'
+            defer_task(db, task=db.get(Task, task_id), deferred=exc)
+            db.commit()
         except Exception as exc:
             db.rollback()
             stage_rows = list(db.scalars(select(Artifact).where(
@@ -164,7 +173,8 @@ async def run_factory_once(session_factory, settings, *, provider=None, client: 
             details = failure_details(exc)
             from app.seo.planner import PLAN_KIND
             attempts = list(db.scalars(select(Artifact.id).where(
-                Artifact.task_id == task_id, Artifact.kind == ATTEMPT_KIND)))
+                Artifact.task_id == task_id, Artifact.kind == ATTEMPT_KIND,
+                Artifact.content != '{"model_deferred":true}')))
             resumable = db.scalar(select(Artifact.id).where(
                 Artifact.task_id == task_id, Artifact.kind == PLAN_KIND,
             )) is not None
