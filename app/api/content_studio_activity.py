@@ -22,7 +22,7 @@ from app.api.studio_resource_widgets import resource_widget
 
 # Only explicitly mapped, owner-visible jobs. Do not expose every internal Task.
 WORK_AGENTS = ("content_factory", "content_creative", "content_editor", "content_renderer",
-               "editorial_planner", "whiteboard_renderer", "seo_factory", "business_insights")
+               "editorial_planner", "whiteboard_renderer", "seo_factory", "business_insights", "content_image_regen")
 # These are read-only job reports; do not apply material approval semantics to them.
 JOB_REPORT_KINDS = {"seo_factory_report", "business_review"}
 SEO_PHASE_NAMES = {
@@ -144,6 +144,8 @@ def task_title(task: Task, request: Artifact | None = None) -> str:
         return "Создание видеофайлов"
     if task.assigned_agent == "content_editor":
         return "Исправление материала"
+    if task.assigned_agent == "content_image_regen":
+        return "Перегенерация картинки ВКонтакте"
     if task.assigned_agent == "content_creative":
         labels = {"short_video": "Сценарий видео", "story": "Stories", "static_image": "Бриф изображения"}
         return labels.get(data.get("format"), "Визуальный материал") + (f": {topic}" if topic else "")
@@ -216,6 +218,8 @@ def task_public_description(task: Task) -> str:
     """Show truthful Russian owner copy without rewriting historical task keys."""
     if task.assigned_agent == "company_intake":
         return "Сведения о компании проверяются в разделе «Профиль компании»."
+    if task.assigned_agent == "content_image_regen":
+        return "Перегенерация изображения поста ВКонтакте без изменения текста."
     if task.assigned_agent == "seo_factory":
         return "SEO-завод собирает поисковые запросы, план и ставит статьи в очередь. Это не подтверждение публикации."
     if task.assigned_agent == "business_insights":
@@ -355,7 +359,7 @@ def _work_items_for_tasks(db: Session, product_id: UUID, tasks: list[Task]) -> l
         stage_name = STAGE_NAMES.get(active_run.agent_name, "Работа ИИ-команды") if active_run else None
         kind_name = {
             "content_factory": "Материал", "content_creative": "Креатив",
-            "content_editor": "Редактирование", "content_renderer": "Видео",
+            "content_editor": "Редактирование", "content_image_regen": "Перерисовка", "content_renderer": "Видео",
             "editorial_planner": "Контент-план",
             "whiteboard_renderer": "Видео", "seo_factory": "SEO-завод",
             "business_insights": "Бизнес-анализ",
@@ -482,7 +486,7 @@ def work_page(db: Session, product_id: UUID, *, tab: str = "all",
             "creative": ("content_creative",),
             "video": ("content_renderer", "whiteboard_renderer"),
             "plan": ("editorial_planner",),
-            "edit": ("content_editor",),
+            "edit": ("content_editor", "content_image_regen"),
             "seo": ("seo_factory",),
             "business": ("business_insights",),
         }
