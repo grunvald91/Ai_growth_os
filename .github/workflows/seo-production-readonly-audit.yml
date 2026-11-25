@@ -83,6 +83,10 @@ jobs:
                   count = sum(t.status == status for t in tasks)
                   if count:
                       print("seo_tasks_", status.value, "=", count, sep="")
+              # Read-only detail from the deployed release, no raw exception text.
+              from app.seo.failure_report import failure_report
+              print("seo_failure_evidence=", json.dumps(
+                  failure_report(db, p.id), ensure_ascii=False))
               # Include saved drafts and held articles too: those are not
               # repaired by a deploy and cannot be inferred from the public feed.
               all_articles = list(db.scalars(select(Artifact).where(
