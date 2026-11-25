@@ -68,11 +68,6 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
     # Only the known required topic may be initially blank. Validate everything
     # else using the original cross-field validators, not a second schema.
     validation_params = dict(params)
-    # Literal integer fields do not coerce HTML string values in Pydantic.
-    if capability_id == "whiteboard_video" and isinstance(validation_params.get("max_api_calls"), str):
-        value = validation_params["max_api_calls"]
-        if value in {"19", "25", "34", "45"}:
-            validation_params["max_api_calls"] = int(value)
     if partial and is_prepare and missing == {"topic"}:
         validation_params["topic"] = "Временная тема"
     initial = cap.params.model_validate(validation_params).model_dump(mode="json")
@@ -113,6 +108,11 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
         else:
             raise ValueError("Не поддерживается форма параметра.")
         fields.append(field)
+    if capability_id == "whiteboard_video":
+        order = ("topic", "length", "image_model", "call_to_action", "profile", "science_mode",
+                 "visual_review", "source_script", "background_notes", "reference_materials",
+                 "max_api_calls", "recovery_budget")
+        fields.sort(key=lambda field: order.index(field["name"]))
     if not fields:
         raise ValueError("У этого действия нет параметров для выбора.")
     return {"type": "tool_form", "capability": cap.id, "title": cap.title,
