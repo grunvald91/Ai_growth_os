@@ -167,7 +167,7 @@ def approve_material(db: Session, products_root: Path, product_id: UUID, artifac
     return row
 
 
-def schedule_owner_post(db: Session, product_id: UUID, post_id: UUID, connection_id: UUID, when):
+def schedule_owner_post(db: Session, product_id: UUID, post_id: UUID, connection_id: UUID, when, *, commit=True):
     """Schedule an approved Telegram post. If it belongs to a slot of the active plan at exactly this time,
     the slot is linked to the publication, as on the channels page. Raises ValueError / LookupError with a
     message the owner can read."""
@@ -185,4 +185,4 @@ def schedule_owner_post(db: Session, product_id: UUID, post_id: UUID, connection
                    and parse_dt(slot.get("publish_at")) == when]
         if len(matches) == 1:
             plan_id, slot_id = plan_row.id, str(matches[0]["slot_id"])
-    return schedule_post(db, post_id, connection_id, when, plan_id=plan_id, slot_id=slot_id)
+    return schedule_post(db, post_id, connection_id, when, plan_id=plan_id, slot_id=slot_id, commit=commit)

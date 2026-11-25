@@ -130,13 +130,16 @@ def record_llm_cost(db: Session, product_id: UUID, response, provider: str, *, l
 
 
 async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, history: list[DispatcherMessage],
-                    text: str) -> tuple[DispatcherDecision | None, str | None]:
+                    text: str, *, recovery: bool = False) -> tuple[DispatcherDecision | None, str | None]:
     """(decision, model name). A model failure or unreadable answer gives (None, ...)."""
     turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text][-HISTORY_FOR_MODEL:]
     while turns and turns[0].role != "user":
         turns.pop(0)  # Start the shortened thread with the owner's message, as models expect.
     request = LLMRequest(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT + ("\nПовторная проверка: первый ответ не нашёл действие или назвал неизвестное действие. "
+            "Заново сопоставь исходную цель со всем каталогом. Выбери точное действие с реальными параметрами, "
+            "либо предложи ближайшее доступное действие с пояснением, либо задай один предметный вопрос. "
+            "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
         messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
         model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
         max_tokens=900,
@@ -153,7 +156,7 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
                         latency_ms=elapsed_ms)
 
     try:
-        reply = await asyncio.wait_for(llm.generate(request, on_observed=observed), timeout=DECISION_TIMEOUT_SECONDS)
+        reply = await asyncio.wait_for(llm.generate(request, on_observed=observed), timeout=12 if recovery else DECISION_TIMEOUT_SECONDS)
         data = json.loads(reply.content)
         if isinstance(data, str):
             data = json.loads(data)
@@ -185,7 +188,9 @@ def _valid_chips(raw: list) -> list[dict]:
 
 
 def _missing(error: ValidationError) -> str:
-    names = {"topic": "тему", "channel": "площадку", "target": "раздел", "kind": "что именно",
+    names = {"task_id": "какое именно задание", "material_id": "какой именно материал", "publication_id": "какую именно публикацию", "post_id": "какой именно пост",
+             "extra_calls": "число дополнительных обращений (от 0 до 10)",
+             "topic": "тему", "channel": "площадку", "target": "раздел", "kind": "что именно",
              "feedback": "что поправить (хотя бы несколько слов)", "when": "дату и время",
              "length": "длину видео: 30 секунд или минута", "days": "срок в днях (от 7 до 365)", "call_to_action": "призыв в конце (от 6 символов)"}
     fields = []
@@ -237,7 +242,7 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
         return Outcome(f"{described.title} Подтвердите кнопкой.", described.title), described, capability_id
     outcome = await executors.EXECUTORS[capability_id](ctx, params)
     if capability.operation != ToolOperation.ANALYTICS:  # reads leave no ToolCall
-        _record_tool_call(ctx.db, ctx, capability_id, params.model_dump(exclude_none=True), outcome)
+        _record_tool_call(ctx.db, ctx, capability_id, params.model_dump(mode="json", exclude_none=True), outcome)
     return outcome, outcome.confirmation, capability_id
 
 
@@ -476,6 +481,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                                           params=video_params, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
+            if decision is not None and (decision.intent == "unsupported" or (
+                    decision.intent == "execute" and decision.capability not in CAPABILITIES)):
+                # No tools have run yet. One bounded semantic recovery pass, not a second execution.
+                recovered, recovered_model = await ask_model(
+                    db, llm, ctx.settings, ctx, history, text, recovery=True)
+                if recovered is not None and recovered.intent != "unsupported" and (
+                        recovered.intent != "execute" or recovered.capability in CAPABILITIES):
+                    decision, model_name = recovered, recovered_model or model_name
 
 
     if decision is not None:
@@ -533,9 +546,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         spoken = decision.spoken or decision.reply_text or spoken
         if decision.intent == "execute":
             if decision.capability not in CAPABILITIES:
-                intent = "unsupported"
-                reply_text = "Этого я пока не умею. Я записал такую просьбу, чтобы добавить."
+                intent = "clarify"
+                reply_text = "Не удалось подобрать точное действие. Какой результат вы хотите получить?"
                 spoken = reply_text
+                chips = chips or [item.model_dump() for item in _fallback_chips()]
             elif decision.confidence < CONFIDENCE_TO_ACT:
                 intent = "clarify"
                 reply_text = decision.reply_text or "Уточните, пожалуйста, что именно сделать?"
@@ -544,7 +558,9 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 outcome, confirmation, capability_id = await act(ctx, decision.capability, decision.params)
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
                 blocks = outcome.blocks
-                chips = [] if confirmation else FOLLOW_UP
+                # Keep validated alternatives when the chosen action cannot run.
+                # They are opt-in chips, not additional executed operations.
+                chips = [] if confirmation else (chips or FOLLOW_UP)
         elif decision.intent == "plan":
             if decision.confidence < CONFIDENCE_TO_ACT:
                 intent = "clarify"
@@ -576,7 +592,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                     intent = "clarify" if not blocks else "plan"
                 chips = FOLLOW_UP if blocks else []
         elif decision.intent == "unsupported":
-            reply_text = decision.reply_text or "Этого я пока не умею."
+            if not chips and chip is None:
+                intent = "clarify"
+                reply_text = "Не удалось подобрать подходящее действие. Какой результат вы хотите получить?"
+                spoken = reply_text
+                chips = [item.model_dump() for item in _fallback_chips()]
+            else:
+                reply_text = decision.reply_text or "Прямого действия для этой просьбы нет. Вот доступные варианты."
+                spoken = reply_text
     blocks = [{"type": "text", "text": reply_text}, *blocks]
     confirmation_id = None
     if confirmation is not None:
@@ -614,7 +637,7 @@ async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
     card = db.scalar(select(DispatcherMessage).where(
         DispatcherMessage.conversation_id == conversation.id,
         DispatcherMessage.confirmation_id == edit.confirmation_id,
-        DispatcherMessage.role == "assistant").with_for_update())
+        DispatcherMessage.role == "assistant").with_for_update().execution_options(populate_existing=True))
     if card is None:
         raise LookupError("Карточка не найдена")
     if card.confirmation_state != "pending":
@@ -682,6 +705,9 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
     card.confirmation_state = "confirmed" if accept else "declined"
     card.decided_at = datetime.now(timezone.utc)
     card.blocks = [({**b, "state": card.confirmation_state} if b.get("type") == "confirm" else b) for b in card.blocks]
+    # Consume the user decision durably before any handler that may commit or roll back.
+    # A failed or interrupted operation needs a fresh card, never a replay of this approval.
+    db.commit()
     if accept:
         outcome = await executors.CONFIRMERS[capability_id](ctx, stored, via)
         _record_tool_call(db, ctx, capability_id, stored, outcome)
@@ -697,6 +723,8 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
 
 
 async def _decline(ctx: Context, capability_id: str, stored: dict) -> Outcome:
+    if capability_id == "repair_video_images":
+        return Outcome("Перерисовку не запускаю. Черновик остаётся без платного запуска.")
     if capability_id == "whiteboard_video":
         from app.content.whiteboard.jobs import cancel_job
         try:

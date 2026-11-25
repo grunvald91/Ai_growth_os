@@ -99,7 +99,7 @@ def connected_channels(db, product_id: UUID) -> list[Artifact]:
 
 
 def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now=None,
-                  plan_id: UUID | None = None, slot_id: str | None = None) -> Publication:
+                  plan_id: UUID | None = None, slot_id: str | None = None, commit=True) -> Publication:
     """Explicit owner scheduling; multiple channels may be targeted independently."""
     now = now or datetime.now(timezone.utc)
     if when.tzinfo is None or when.utcoffset() is None:
@@ -202,11 +202,14 @@ def schedule_post(db, post_id: UUID, connection_id: UUID, when: datetime, *, now
         plan_slot["telegram_connection_id"] = str(connection.id)
         plan_slot["state"] = "scheduled"
         plan_row.content = json.dumps(plan, ensure_ascii=False)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return publication
 
 
-def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
+def cancel_scheduled_post(db, publication_id: UUID, *, commit=True) -> Publication:
     pub = db.get(Publication, publication_id)
     if pub is None:
         raise LookupError("Публикация не найдена")
@@ -242,7 +245,10 @@ def cancel_scheduled_post(db, publication_id: UUID) -> Publication:
                     plan.content = json.dumps(plan_data, ensure_ascii=False)
         except (ValueError, TypeError, KeyError):
             pass
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return pub
 
 
@@ -366,9 +372,10 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
                 Artifact.title == "Telegram schedule " + str(pub.id),
             ))
             if intent is None or intent.status != ArtifactStatus.APPROVED:
-                pub.status = "failed_before_send"
+                changed = db.execute(update(Publication).where(Publication.id == pub.id,
+                    Publication.status == "scheduled").values(status="failed_before_send"))
                 db.commit()
-                return 1
+                return int(changed.rowcount == 1)
             try:
                 data = json.loads(intent.content)
                 when = datetime.fromisoformat(data["scheduled_at"])
@@ -380,14 +387,17 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
                 # never flood channels with a backlog of stale announcements.
                 lateness = max(1, min(1440, settings.content_telegram_max_lateness_minutes))
                 if now - when > timedelta(minutes=lateness):
-                    pub.status = "missed"
-                    update_plan_delivery(db, data, "missed")
+                    changed = db.execute(update(Publication).where(Publication.id == pub.id,
+                        Publication.status == "scheduled").values(status="missed"))
+                    if changed.rowcount == 1:
+                        update_plan_delivery(db, data, "missed")
                     db.commit()
-                    return 1
+                    return int(changed.rowcount == 1)
             except (ValueError, TypeError, KeyError):
-                pub.status = "failed_before_send"
+                changed = db.execute(update(Publication).where(Publication.id == pub.id,
+                    Publication.status == "scheduled").values(status="failed_before_send"))
                 db.commit()
-                return 1
+                return int(changed.rowcount == 1)
             selected = (intent.id, data, pub.id)
             break
         if selected is None:
@@ -413,12 +423,13 @@ async def run_due_telegram_post_once(session_factory, settings, *, api=None, now
             text = str(json.loads(source.content).get("body") or "")
             valid = bool(text) and _utf16_units(text) <= 4096
         if not valid:
-            db.execute(update(Publication).where(
+            changed = db.execute(update(Publication).where(
                 Publication.id == pub_id, Publication.status == "scheduled"
             ).values(status="failed_before_send"))
-            update_plan_delivery(db, data, "failed")
+            if changed.rowcount == 1:
+                update_plan_delivery(db, data, "failed")
             db.commit()
-            return 1
+            return int(changed.rowcount == 1)
         # Serialize with campaign stop before the durable send lease is
         # established. A later stop sees status=sending and cannot claim the
         # network call has ended. An earlier stop blocks this publication.

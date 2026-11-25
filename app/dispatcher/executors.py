@@ -26,6 +26,50 @@ _links = links_block
 
 # ---- reading -----------------------------------------------------------------------------
 
+def _task_rows_outcome(ctx: Context, rows: list[dict], total: int) -> Outcome:
+    from app.api.content_studio_activity import ANIMATOR_PHASES, work_url
+    if not rows:
+        return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")])
+    table = {"type": "table", "columns": ["Задание", "Статус", "Этап / причина"],
+             "rows": [[str(row["title"]), str(row["label"]),
+                       str(row.get("display_summary") or ANIMATOR_PHASES.get(row.get("animator_stage")) or row.get("current_stage") or row.get("description") or "Не указано")]
+                      for row in rows]}
+    links = {"type": "links", "items": [{"label": str(row["title"])[:80] or "Открыть задание",
+                                       "href": work_url(ctx.product.id, row)} for row in rows]}
+    text = f"Найдено заданий: {total}." + (f" Показаны первые {len(rows)}." if total > len(rows) else "")
+    return Outcome(text, blocks=[table, links, _links(ctx, "work")])
+
+
+async def list_tasks(ctx: Context, params) -> Outcome:
+    from app.api.content_studio_activity import work_page
+    result = work_page(ctx.db, ctx.product.id, tab=params.tab, kind=params.kind,
+                       query=params.query, page_size=8)
+    return _task_rows_outcome(ctx, result["items"], result["total"])
+
+
+async def show_task(ctx: Context, params) -> Outcome:
+    from sqlalchemy import select
+    from app.api.content_studio_activity import WORK_AGENTS, _work_items_for_tasks
+    task = ctx.db.scalar(select(Task).where(Task.id == params.task_id,
+                         Task.product_id == ctx.product.id, Task.assigned_agent.in_(WORK_AGENTS)))
+    if task is None:
+        return Outcome("Не нашёл такое задание в выбранной компании.", ok=False,
+                       blocks=[_links(ctx, "work")])
+    rows = _work_items_for_tasks(ctx.db, ctx.product.id, [task])
+    outcome = _task_rows_outcome(ctx, rows, len(rows))
+    if ctx.studio_role in (None, "owner", "co_owner"):
+        capability = None
+        label = ""
+        if task.assigned_agent == "whiteboard_renderer" and task.status.value == "failed":
+            capability, label = "resume_video", "Продолжить видео"
+        elif task.assigned_agent in {"content_factory", "content_creative", "content_editor"} and task.status.value in {"failed", "cancelled"}:
+            capability, label = "retry_content_task", "Повторить задание"
+        if capability:
+            outcome.blocks.append({"type": "chips", "items": [{"label": label, "capability": capability,
+                                                               "params": {"task_id": str(task.id)}}]})
+    return outcome
+
+
 async def show_work(ctx: Context, params) -> Outcome:
     from app.api.content_studio_activity import work_url
     rows = work_rows(ctx.db, ctx.product.id)
@@ -103,8 +147,10 @@ async def show_plan(ctx: Context, params) -> Outcome:
 
 
 async def go_to(ctx: Context, params: GoToParams) -> Outcome:
+    from app.dispatcher.registry import PLATFORM_GUIDE
     label = page_label(params.target)
-    return Outcome(f"{label} — вот здесь.", f"{label} — на экране кнопка.",
+    guide = PLATFORM_GUIDE.get(params.target, label)
+    return Outcome(guide + " Откройте раздел по кнопке.", f"{label} — на экране кнопка.",
                    [{"type": "links", "items": [{"label": label, "href": page_href(params.target, ctx.product.id)}]}])
 
 
@@ -692,6 +738,51 @@ async def confirm_whiteboard_video(ctx: Context, stored: dict, via: str) -> Outc
                    task_id=task_id)
 
 
+async def repair_video_images(ctx: Context, params) -> Outcome:
+    from app.api.whiteboard import job_state
+    from app.content.whiteboard.repair import queue_visual_repair
+    from app.content.whiteboard.runtime import ReadinessError
+    from app.content.whiteboard.checkpoints import CheckpointError
+    if ctx.studio_role not in (None, "owner", "co_owner"):
+        return Outcome("Перерисовка видео доступна владельцу компании.", ok=False)
+    source = ctx.db.get(Task, params.task_id)
+    if source is None or source.product_id != ctx.product.id or source.assigned_agent != "whiteboard_renderer":
+        return Outcome("Не нашёл исходное рисованное видео в выбранной компании.", ok=False)
+    try:
+        task = queue_visual_repair(ctx.db, ctx.settings, ctx.product.id, source.id,
+                                   image_model=params.image_model)
+        state = job_state(ctx.db, ctx.product.id, task.id)
+    except (ReadinessError, CheckpointError, ValueError, LookupError, HTTPException):
+        ctx.db.rollback()
+        return Outcome("Не удалось подготовить перерисовку: исходник, сохранённые кадры или модель недоступны. "
+                       "Проверьте состояние исходного видео.", ok=False,
+                       blocks=[_task_block(ctx, source, "Исходное видео",
+                                          f"/studio/products/{ctx.product.id}/whiteboard/{source.id}")])
+    href = f"/studio/products/{ctx.product.id}/whiteboard/{task.id}"
+    blocks = [_task_block(ctx, task, "Перерисовка видео", href)]
+    if state["status"] != "waiting_approval":
+        return Outcome("Такая перерисовка уже существует. Проверьте её состояние.", blocks=blocks,
+                       task_id=task.id)
+    confirmation = Confirmation(
+        title="Перерисовать видео без новой озвучки?",
+        details=["Исходный сценарий и аудио сохраняются.", f"Рисунки: {state['models']['image']}.",
+                 f"До {state['max_api_calls']} обращений к ИИ. Платный запуск только после подтверждения."],
+        params={"task_id": str(task.id), "request_digest": state["request_digest"]},
+        paid=True, confirm_label="Запустить")
+    return Outcome("Подготовил перерисовку. Подтвердите платный запуск.", blocks=blocks,
+                   task_id=task.id, confirmation=confirmation)
+
+
+async def confirm_repair_video_images(ctx: Context, stored: dict, via: str) -> Outcome:
+    if ctx.studio_role not in (None, "owner", "co_owner"):
+        return Outcome("Перерисовка видео доступна владельцу компании.", ok=False)
+    outcome = await confirm_whiteboard_video(ctx, stored, via)
+    if outcome.ok:
+        outcome.text = "Запустил перерисовку видео без повторной озвучки."
+        outcome.spoken = outcome.text
+    return outcome
+
+
 async def cancel_video(ctx: Context, params: CancelVideoParams) -> Outcome:
     from app.content.whiteboard.jobs import cancel_job
     if params.task_id:
@@ -727,6 +818,7 @@ async def restricted_action(ctx: Context, params) -> Outcome:
 
 
 EXECUTORS = {
+    "list_tasks": list_tasks, "show_task": show_task, "repair_video_images": repair_video_images,
     "show_work": show_work, "show_review": show_review, "show_plan": show_plan, "go_to": go_to,
     "show_schedule": show_schedule, "show_insights": show_insights, "show_return_candidates": show_return_candidates,
     "fill_open_slots": fill_open_slots, "prepare_slot_offer": prepare_slot_offer,
@@ -739,6 +831,7 @@ DESCRIBERS = {"approve_plan": describe_approve_plan, "seo_factory": describe_seo
               "create_creative": describe_create_creative,
               "create_package": describe_create_package}
 CONFIRMERS = {"approve_plan": confirm_approve_plan, "whiteboard_video": confirm_whiteboard_video,
+              "repair_video_images": confirm_repair_video_images,
               "create_post": lambda ctx, stored, via: create_post(ctx, PostParams.model_validate(stored)),
               "create_creative": confirm_create_creative,
               "create_package": confirm_create_package,
@@ -760,3 +853,16 @@ from app.dispatcher import plan_changes  # noqa: E402
 
 DESCRIBERS.update(plan_changes.DESCRIBERS)
 CONFIRMERS.update(plan_changes.CONFIRMERS)
+
+
+from app.dispatcher import recovery  # noqa: E402
+
+DESCRIBERS.update(recovery.DESCRIBERS)
+CONFIRMERS.update(recovery.CONFIRMERS)
+
+
+from app.dispatcher import publications  # noqa: E402
+
+EXECUTORS.update(publications.EXECUTORS)
+DESCRIBERS.update(publications.DESCRIBERS)
+CONFIRMERS.update(publications.CONFIRMERS)

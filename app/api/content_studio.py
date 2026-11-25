@@ -3012,15 +3012,17 @@ def studio_creative_images_zip(product_id: UUID, task_id: UUID,
         background=BackgroundTask(output.close))
 
 
-@router.post("/studio/products/{product_id}/tasks/{task_id}/retry")
-def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
-                      confirm_retry: str = Form(default=""),
-                      db: Session = Depends(get_db)):
+def retry_stopped_content_task(db, product_id: UUID, task_id: UUID, *, confirmed: bool,
+                               studio_role: str | None, actor: str, expected_updated_at: str | None = None):
+    """Shared Studio/dispatcher retry gate; locks, duplicate and material checks stay in one place."""
+    confirm_retry = "yes" if confirmed else ""
     _owner_product(db, product_id)
     db.scalar(select(Product).where(Product.id == product_id).with_for_update())
     task = db.scalar(select(Task).where(Task.id == task_id, Task.product_id == product_id).with_for_update().execution_options(populate_existing=True))
     if task is None:
         raise HTTPException(404, "Задание не найдено")
+    if expected_updated_at is not None and task.updated_at.isoformat() != expected_updated_at:
+        raise HTTPException(409, "Задание изменилось. Проверьте его ещё раз перед повтором")
     if task.assigned_agent not in {"content_factory", "content_creative", "content_editor"}:
         raise HTTPException(409, "Это задание нельзя повторить из страницы создания")
     if task.assigned_agent == "content_factory":
@@ -3035,7 +3037,7 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
         except (TypeError, ValueError):
             body = {}
         if task.title.startswith(SEO_TASK_PREFIX) or body.get("seo_brief") is not None:
-            if getattr(request.state, "studio_sso_role", None) not in (None, "owner", "co_owner"):
+            if studio_role not in (None, "owner", "co_owner"):
                 raise HTTPException(403, "Повторять SEO-статьи может только владелец компании")
             # A manual retry can requeue paid AI work. Require an explicit
             # owner acknowledgement even for SEO requests; background SEO
@@ -3046,14 +3048,14 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
             try:
                 retry_failed_article(
                     db, product_id=product_id, task_id=task_id,
-                    actor=getattr(request.state, "studio_login", "studio_owner"))
+                    actor=actor)
             except LookupError:
                 db.rollback()
                 raise HTTPException(404, "SEO-статья не найдена") from None
             except ValueError as exc:
                 db.rollback()
                 raise HTTPException(409, str(exc)) from None
-            return RedirectResponse(f"/studio/products/{product_id}/seo", status_code=303)
+            return task, f"/studio/products/{product_id}/seo"
     if task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
         raise HTTPException(409, "Повторить можно только остановленное задание")
     duplicate = db.scalar(select(Task.id).where(Task.product_id == product_id,
@@ -3074,7 +3076,18 @@ def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
     # validates the stored request before invoking any paid provider calls.
     task.status = TaskStatus.QUEUED
     db.commit()
-    return RedirectResponse(f"/studio/products/{product_id}/tasks/{task_id}", status_code=303)
+    return task, f"/studio/products/{product_id}/tasks/{task_id}"
+
+
+@router.post("/studio/products/{product_id}/tasks/{task_id}/retry")
+def studio_retry_task(product_id: UUID, task_id: UUID, request: Request,
+                      confirm_retry: str = Form(default=""),
+                      db: Session = Depends(get_db)):
+    _, href = retry_stopped_content_task(
+        db, product_id, task_id, confirmed=confirm_retry == "yes",
+        studio_role=getattr(request.state, "studio_sso_role", None),
+        actor=getattr(request.state, "studio_login", "studio_owner"))
+    return RedirectResponse(href, status_code=303)
 
 
 @router.get("/studio/products/{product_id}/review", response_class=HTMLResponse)

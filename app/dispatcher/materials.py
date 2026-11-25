@@ -14,11 +14,11 @@ from sqlalchemy import select
 
 from app.content.review import (REVIEW_KINDS, ReviewError, approve_material, material_data, needs_fact_check,
                                 schedule_owner_post)
-from app.content.revisions import queue_post_edit
+from app.content.revisions import queue_post_edit, source_fingerprint
 from app.content.telegram_publishing import connected_channels
 from app.dispatcher.outcome import Confirmation, Context, Outcome, links_block, task_block
 from app.dispatcher.registry import MaterialParams, ReviseParams, SchedulePostParams
-from app.models.domain import Approval, Artifact, ArtifactStatus, Publication
+from app.models.domain import Approval, Artifact, ArtifactStatus, Product, Publication
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 KIND_LABELS = {"channel_text": "Пост", "article": "Статья", "creative_brief": "Креатив",
@@ -113,6 +113,11 @@ async def show_material(ctx: Context, params: MaterialParams) -> Outcome:
         if not blocks[0].get("truncated"):
             blocks.append({"type": "chips", "items": [
                 {"label": "Утвердить", "capability": "approve_material", "params": {"material_id": str(row.id)}}]})
+        if row.kind == "channel_text" and ctx.studio_role in (None, "owner", "co_owner"):
+            data = material_data(row)
+            if row.task_id is not None and data.get("channel") == "vk" and data.get("image_model", "none") != "none":
+                blocks.append({"type": "chips", "items": [{"label": "Перегенерировать картинку",
+                    "capability": "redraw_post_image", "params": {"material_id": str(row.id)}}]})
         hint = " Чтобы доработать пост, напишите, что поправить." if row.kind == "channel_text" else ""
         text = f"{kind} «{row.title[:80]}» ждёт вашего решения.{hint}"
     else:
@@ -260,6 +265,8 @@ def _channel_title(row: Artifact) -> str:
 
 
 async def describe_schedule_post(ctx: Context, params: SchedulePostParams) -> Outcome | Confirmation:
+    if ctx.studio_role not in (None, "owner", "co_owner"):
+        return Outcome("Управлять публикациями может владелец компании.", ok=False)
     when = _moscow(params.when)
     if when is None:
         return Outcome("Не разобрал дату и время. Скажите, например: «завтра в 12:00».", "Не разобрал время.", ok=False)
@@ -300,31 +307,39 @@ async def describe_schedule_post(ctx: Context, params: SchedulePostParams) -> Ou
     else:
         details.append("Пост уйдёт в канал сам в это время. До отправки назначение можно отменить на странице публикаций.")
     return Confirmation(title="Запланировать публикацию?", details=details,
-                        params={"post_id": str(post.id), "version": post.version, "connection_id": str(channel.id),
+                        params={"post_id": str(post.id), "version": post.version, "source_digest": source_fingerprint(post),
+                                "connection_digest": source_fingerprint(channel), "connection_id": str(channel.id),
                                 "when": when.astimezone(timezone.utc).isoformat()},
                         confirm_label="Запланировать")
 
 
 async def confirm_schedule_post(ctx: Context, stored: dict, via: str) -> Outcome:
+    if ctx.studio_role not in (None, "owner", "co_owner"):
+        return Outcome("Управлять публикациями может владелец компании.", ok=False)
     post_id, connection_id = _uuid(stored.get("post_id")), _uuid(stored.get("connection_id"))
     try:
         when = datetime.fromisoformat(str(stored.get("when")))
     except ValueError:
         when = None
-    post = ctx.db.get(Artifact, post_id) if post_id else None
-    if post is None or post.product_id != ctx.product.id or connection_id is None or when is None:
+    ctx.db.scalar(select(Product).where(Product.id == ctx.product.id).with_for_update())
+    post = ctx.db.scalar(select(Artifact).where(Artifact.id == post_id, Artifact.product_id == ctx.product.id)
+                         .with_for_update().execution_options(populate_existing=True)) if post_id else None
+    connection = ctx.db.scalar(select(Artifact).where(Artifact.id == connection_id, Artifact.product_id == ctx.product.id,
+        Artifact.kind == "telegram_channel_connection", Artifact.status == ArtifactStatus.APPROVED)
+        .with_for_update().execution_options(populate_existing=True)) if connection_id else None
+    if post is None or connection is None or when is None:
         return Outcome("Не нашёл пост или время для публикации.", ok=False)
-    if post.version != stored.get("version"):
-        return Outcome("Пост изменился, пока вы думали. Откройте его и проверьте новую версию.",
+    if (post.version != stored.get("version") or source_fingerprint(post) != stored.get("source_digest")
+            or source_fingerprint(connection) != stored.get("connection_digest")):
+        return Outcome("Пост или канал изменился, пока вы думали. Откройте его и проверьте новую версию.",
                        "Пост изменился. Проверьте его.", [card(ctx, post)], ok=False)
     try:
-        publication = schedule_owner_post(ctx.db, ctx.product.id, post_id, connection_id, when)
+        publication = schedule_owner_post(ctx.db, ctx.product.id, post_id, connection_id, when, commit=False)
     except (ValueError, LookupError) as exc:
         ctx.db.rollback()
         return Outcome(str(exc), str(exc), ok=False)
-    approval = _record_approval(ctx, post, "dispatcher:schedule_post", via)
-    publication.approval_id = approval.id  # the publication points at the owner's yes
-    ctx.db.commit()
+    from app.dispatcher.publications import _audit
+    _audit(ctx, post, "schedule_post", via, publication)
     local = when.astimezone(MOSCOW).strftime("%d.%m %H:%M")
     suffix = "" if ctx.settings.content_telegram_autopost_enabled else " Автоотправка выключена, поэтому сам пост не уйдёт."
     return Outcome(f"Запланировал на {local} (Москва).{suffix}", f"Запланировал на {local}.",

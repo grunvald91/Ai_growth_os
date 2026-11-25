@@ -43,6 +43,8 @@ def queue_vk_image_redraw(
     if post.status != ArtifactStatus.AWAITING_APPROVAL or post.task_id is None:
         raise ValueError("Перегенерация доступна только для готового поста до утверждения")
     value = json.loads(post.content)
+    if not isinstance(value, dict) or not isinstance(value.get("title"), str) or not value["title"].strip() or not isinstance(value.get("body"), str) or not value["body"].strip():
+        raise ValueError("В исходном посте отсутствует заголовок или текст")
     if value.get("channel") != "vk" or value.get("image_model", "none") == "none":
         raise ValueError("У этого поста нет генерации картинки ВКонтакте")
     if source_version != post.version or source_digest != source_fingerprint(post):

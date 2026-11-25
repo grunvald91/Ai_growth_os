@@ -34,9 +34,22 @@ PAGES = {
     "team": ("/studio/team", "ИИ-команда"),
     "schedule": ("https://servgo.ru/admin/schedule", "Расписание записи в ServGo"),
     "admin": ("https://servgo.ru/admin", "Админка ServGo"),
+    "seo": ("/studio/products/{p}/seo", "SEO-завод"),
+    "seo_queue": ("/studio/products/{p}/seo/queue", "Очередь SEO-статей"),
+    "seo_metrics": ("/studio/products/{p}/seo/search-metrics", "Поисковые показатели"),
+    "campaigns": ("/studio/products/{p}/campaigns", "Кампании"),
+    "market_research": ("/studio/products/{p}/market-research", "Поиск организаций и конкурентов"),
+    "brand_kit": ("/studio/products/{p}/brand-kit", "Бренд-кит"),
+    "brand_library": ("/studio/products/{p}/brand-kit/library", "Библиотека дизайна"),
+    "vk": ("/studio/products/{p}/vk", "Публикации ВКонтакте"),
+    "vk_settings": ("/studio/products/{p}/vk/settings", "Настройки ВКонтакте"),
+    "ai_chat": ("/studio/chat", "ИИ-чат"),
+    "accounts": ("/studio/products/{p}/accounts", "Доступы компании"),
 }
 PageKey = Literal["create", "work", "review", "plan", "calendar", "materials", "channels", "whiteboard",
-                  "analytics", "comments", "profile", "team", "schedule", "admin"]
+                  "analytics", "comments", "profile", "team", "schedule", "admin", "seo", "seo_queue",
+                  "seo_metrics", "campaigns", "market_research", "brand_kit", "brand_library", "vk",
+                  "vk_settings", "ai_chat", "accounts"]
 
 
 def page_href(key: str, product_id: UUID | str) -> str:
@@ -125,6 +138,31 @@ class GoToParams(_Params):
     target: PageKey
 
 
+class TaskListParams(_Params):
+    tab: Literal["all", "active", "approval", "ready", "problems"] = "all"
+    kind: Literal["all", "post", "article", "creative", "video", "plan", "edit", "seo", "business"] = "all"
+    query: str = Field(default="", max_length=120)
+
+
+class TaskDetailParams(_Params):
+    task_id: UUID
+
+
+class ResumeVideoParams(_Params):
+    task_id: UUID
+    extra_calls: int = Field(default=0, ge=0, le=10)
+
+
+class RedrawPostImageParams(_Params):
+    material_id: UUID
+    feedback: str = Field(default="", max_length=700)
+
+
+class RepairVideoParams(_Params):
+    task_id: UUID
+    image_model: Literal["gemini-3.1-flash-image", "gpt-image-2.5-sunburst"] | None = None
+
+
 class CancelVideoParams(_Params):
     task_id: str | None = Field(default=None, max_length=64)
 
@@ -196,6 +234,24 @@ class SchedulePostParams(_Params):
     # Московское время: «ГГГГ-ММ-ДД ЧЧ:ММ».
     when: str = Field(min_length=10, max_length=25)
     channel_id: str | None = Field(default=None, max_length=64)
+
+
+class VkScheduleParams(_Params):
+    post_id: UUID
+    when: str = Field(min_length=10, max_length=25)
+
+
+class PublicationListParams(_Params):
+    channel: Literal["all", "telegram", "vk"] = "all"
+    status: Literal["all", "scheduled", "sending", "published", "problems", "cancelled"] = "all"
+
+
+class PublicationParams(_Params):
+    publication_id: UUID
+
+
+class MovePublicationParams(PublicationParams):
+    when: str = Field(min_length=10, max_length=25)
 
 
 class SeoFactoryParams(_Params):
@@ -273,6 +329,36 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                "«покажи последние видео», «какие видео готовы», «где недавно созданные ролики». "
                "Это просмотр результата, не запуск нового видео.",
                ToolOperation.ANALYTICS, Cost.NONE, NoParams),
+    Capability("list_tasks", "Найти задания",
+               "Показать задания выбранной компании по статусу и типу: ошибки/отмены problems, выполняемые active, "
+               "на проверке approval, завершённые ready, все all; kind=video для видео, seo для SEO, article для статей. "
+               "query — явно указанная тема или часть названия. Для «почему видео не готово», «что сломалось», "
+               "«найди задание»; показывает реальные причины, если известны, и кнопки открытия.",
+               ToolOperation.ANALYTICS, Cost.NONE, TaskListParams),
+    Capability("resume_video", "Продолжить остановленное видео",
+               "Возобновить именно существующее неудачное рисованное видео с сохранённых этапов. "
+               "task_id из recent_tasks; extra_calls по умолчанию 0, больше только если владелец явно назвал число "
+               "дополнительных обращений. Платное подтверждение обязательно; не создавать новое видео.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, ResumeVideoParams),
+    Capability("retry_content_task", "Повторить остановленное задание",
+               "Повторить неудачную или отменённую генерацию поста, статьи, креатива или редактуру. "
+               "task_id из recent_tasks. Для рисованного видео использовать resume_video, не этот инструмент. "
+               "Повтор может потребовать платных вызовов; сначала подтверждение.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, TaskDetailParams),
+    Capability("redraw_post_image", "Перегенерировать картинку поста ВКонтакте",
+               "Переделать только картинку существующего поста VK до утверждения, не менять текст. "
+               "material_id из recent_materials или выбранной карточки; feedback — пожелание к картинке. "
+               "Использует модель исходного поста, платный запуск после подтверждения.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID, RedrawPostImageParams),
+    Capability("show_task", "Проверить конкретное задание",
+               "Показать статус, этап и известную причину остановки конкретного задания. task_id только из recent_tasks "
+               "или явно выбранного задания; если не знаешь ID, сначала list_tasks.",
+               ToolOperation.ANALYTICS, Cost.NONE, TaskDetailParams),
+    Capability("repair_video_images", "Перерисовать видео без новой озвучки",
+               "Подготовить визуальную перегенерацию завершённого исходного рисованного видео с сохранением аудио и сценария. "
+               "task_id только из recent_tasks или явно выбранного задания. Если исходник неясен, найди видео через list_tasks; "
+               "image_model необязательна, по умолчанию модель исходника. Платный запуск отдельно подтверждается.",
+               ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, RepairVideoParams),
     Capability("show_work", "Что в работе",
                "Показать, какие задания сейчас выполняются, ждут решения или завершились.",
                ToolOperation.ANALYTICS, Cost.NONE, NoParams),
@@ -284,7 +370,8 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                ToolOperation.ANALYTICS, Cost.NONE, NoParams),
     Capability("go_to", "Где это находится",
                "Подсказать, где на платформе нужная страница, и дать кнопку-ссылку. "
-               "target — один из: " + ", ".join(PAGES) + ".",
+               "Используй карту разделов platform_guide: для неподключённого действия объясни шаги, "
+               "не утверждай, что оно выполнено. target — один из: " + ", ".join(PAGES) + ".",
                ToolOperation.ANALYTICS, Cost.NONE, GoToParams),
     Capability("show_schedule", "Расписание записей",
                "Записи клиентов онлайн-записи, свободные окна, загрузка мастеров, кто следующий клиент. "
@@ -388,13 +475,33 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
                ToolOperation.GENERATE_DRAFT, Cost.CHEAP, ReviseParams,
                consequence="Команда перепишет пост по вашей правке. Новая версия снова придёт вам на проверку.",
                always_confirm=True),
-    Capability("schedule_post", "Запланировать публикацию",
+    Capability("list_publications", "Проверить публикации",
+               "Реальные статусы публикаций Telegram и VK: запланированы, отправляются, опубликованы, отменены, проблемы. "
+               "При вопросе «что опубликовано», «почему не вышел пост», «что запланировано» выбери фильтры.",
+               ToolOperation.ANALYTICS, Cost.NONE, PublicationListParams),
+    Capability("schedule_vk_post", "Запланировать пост ВКонтакте",
+               "Назначить утверждённый пост VK в подключённое сообщество. post_id из recent_materials; when — московское время "
+               "ГГГГ-ММ-ДД ЧЧ:ММ. Только после подтверждения, с действующими проверками изображения и критика.",
+               ToolOperation.PUBLISH, Cost.NONE, VkScheduleParams),
+    Capability("cancel_publication", "Отменить назначенную публикацию",
+               "Отменить ещё не отправленную публикацию Telegram или VK. publication_id из recent_publications или карточки. "
+               "Не удаляет уже опубликованный пост. Требуется подтверждение.",
+               ToolOperation.PUBLISH, Cost.NONE, PublicationParams),
+    Capability("move_publication", "Перенести назначенную публикацию",
+               "Перенести ещё не отправленную самостоятельную публикацию Telegram или VK. "
+               "publication_id из recent_publications, when — московское время ГГГГ-ММ-ДД ЧЧ:ММ. "
+               "Для не назначенного слота контент-плана использовать move_plan_slot. Требуется подтверждение.",
+               ToolOperation.PUBLISH, Cost.NONE, MovePublicationParams),
+    Capability("schedule_post", "Запланировать публикацию в Telegram",
                "Запланировать утверждённый пост в подключённый Telegram-канал. when — московское время "
                "«ГГГГ-ММ-ДД ЧЧ:ММ» (сегодняшняя дата есть в контексте). Без post_id — последний утверждённый пост.",
                ToolOperation.PUBLISH, Cost.NONE, SchedulePostParams,
                consequence="Пост уйдёт в канал в назначенное время."),
     Capability("whiteboard_video", "Рисованное видео",
-               "Подготовить задание на рисованное видео по теме: около 30 секунд или около минуты, с призывом в конце. "
+               "Создать итоговый рисованный/объясняющий видеоролик по теме: около 30 секунд или около минуты. "
+               "Подходит для обычных просьб создать видео, включая «минутное видео на тему…», даже без слова рисованное. "
+               "Если нужен иной несовместимый вид видео, предложить рисованный вариант и уточнить согласие. "
+               "Не использовать для сценария, просмотра, отмены или изменения существующего видео. "
                "Платная генерация начнётся только после подтверждения.",
                ToolOperation.GENERATE_DRAFT, Cost.PAID_LATER, VideoParams),
     Capability("cancel_video", "Отменить рисованное видео",
@@ -410,5 +517,37 @@ CAPABILITIES: dict[str, Capability] = {c.id: c for c in (
 def catalog_for_model() -> list[dict]:
     """The list sent to the model: ids, meaning and parameter shapes. No policy details."""
     return [{"id": c.id, "title": c.title, "description": c.description,
-             "params": c.params.model_json_schema().get("properties", {})}
+             "params": c.params.model_json_schema().get("properties", {}),
+             "required": c.params.model_json_schema().get("required", [])}
             for c in CAPABILITIES.values()]
+
+
+# Navigation-only guidance; these are NOT callable actions. All targets are
+# fixed company-scoped pages (except the authenticated AI chat / team pages).
+PLATFORM_GUIDE = {
+    "create": "Создание статьи, поста, Stories, картинки, видеосценария и пакета; для одиночной статьи выберите формат и тему.",
+    "work": "Найти задание, открыть его статус, повторить остановленную генерацию при наличии кнопки.",
+    "review": "Проверка материалов, утверждение, доработка и перегенерация изображения поста.",
+    "whiteboard": "Видео: открыть конкретное задание, продолжить с сохранённых этапов, подтвердить доступный лимит.",
+    "plan": "Контент-план: редактирование пакетов, утверждение, приостановка и постановка пакета в работу.",
+    "calendar": "Календарь публикаций: посмотреть слоты и изменить время.",
+    "materials": "Архив материалов, открыть и отредактировать конкретный материал.",
+    "channels": "Подключённые каналы, запланированные публикации, отмена или сверка публикации.",
+    "vk": "Публикации ВКонтакте, планирование и отмена.",
+    "vk_settings": "Настроить интеграцию ВКонтакте; секреты вводятся только в защищённой форме.",
+    "seo": "SEO-завод: состояние, активация, настройки и управление статьями.",
+    "seo_queue": "Очередь SEO: посмотреть задания, повторить или отменить доступные операции.",
+    "seo_metrics": "Поисковые показатели и проверка подключённых источников.",
+    "campaigns": "Маркетинговые эксперименты: создать, настроить, запустить, остановить, измерить результат.",
+    "market_research": "Поиск организаций через Яндекс Карты: указать нишу и город, выбрать и сохранить источники исследования. Не обещать найденные email или рассылку.",
+    "brand_kit": "Фирменный стиль: версии, утверждение и оформление.",
+    "brand_library": "Библиотека фонов и готовых дизайнов.",
+    "comments": "Комментарии: подключить канал, настроить режим, открыть и проверить ответ.",
+    "analytics": "Результаты маркетинга и аналитика компании.",
+    "profile": "Профиль компании и сведения о бизнесе.",
+    "accounts": "Управление аккаунтами и доступами через защищённую форму; не запрашивать секреты в чате.",
+    "team": "ИИ-команда; настройка ролей и моделей доступна при соответствующих полномочиях.",
+    "ai_chat": "Отдельный ИИ-чат и специалисты; выбор модели, диалоги и файлы.",
+    "schedule": "Онлайн-запись: расписание клиентов и мастеров.",
+    "admin": "Админка онлайн-записи; возможности зависят от роли пользователя.",
+}
