@@ -60,7 +60,8 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
         original = ArticleProductionInput.model_validate_json(request.content)
     except (ValueError, TypeError):
         raise ValueError("Исходные данные статьи не прошли проверку") from None
-    if (original.product_id != product_id or original.seo_brief is None
+    if (original.product_id != product_id or original.task_id not in (None, task.id)
+            or original.seo_brief is None
             or original.seo_brief.plan_item_id != parts[2]
             or original.channel != "own_site" or not original.light
             or original.produce_ready_assets):
@@ -73,13 +74,18 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
     if article is not None:
         raise ValueError("Для этого задания уже существует статья; проверьте её статус")
     if automatic:
-        from app.seo.failure_guard import automatic_generation_paused
+        from app.seo.failure_guard import paused_products
         from app.seo.failure_report import safe_error
         from app.seo.schedule import db_time
         now = datetime.now(timezone.utc)
         cutoff = db_time(db, now - timedelta(minutes=30))
-        if automatic_generation_paused(db, product_id=product_id, task_id=task.id):
+        if product_id in paused_products(db, now):
             raise ValueError("Automatic recovery paused")
+        if db.scalar(select(exists().where(
+            Artifact.product_id == product_id, Artifact.task_id == task.id,
+            Artifact.kind == "seo_article_manual_retry",
+        ))):
+            raise ValueError("Owner already retried this task")
         if db.scalar(select(exists().where(
             Artifact.product_id == product_id, Artifact.kind == AUTO_RECOVERY,
             (Artifact.task_id == task.id) | (Artifact.created_at >= cutoff),
