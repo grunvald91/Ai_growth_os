@@ -113,7 +113,7 @@ def queue_visual_repair(db, settings, product_id, source_id, *, image_model=None
         models=original.models.model_copy(update={'image': chosen,
                                                'regions': CLAUDEHUB_VISION_MODEL}),
         max_api_calls=repair_limit, visual_review=True, visual_repair_from=UUID(str(source_id)),
-        image_provider='claudehub', repair_regenerate_images=True,
+        image_provider='claudehub', repair_regenerate_images=True, image_recovery=True,
         repair_source_digest=digest(source.content),
         repair_manifest_sha256=hashlib.sha256((store.directory / 'manifest.json').read_bytes()).hexdigest(),
         inherited_calls=value['calls'])
