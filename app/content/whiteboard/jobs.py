@@ -16,6 +16,7 @@ from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
 from .science import requires_science_review
 from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels, regions_on_claudehub, CLAUDEHUB_IMAGE_MODELS
+from .image_recovery import IMAGE_RECOVERY_RESERVE, image_recovery_enabled, schedule_image_recovery, effective_image_model
 from pydantic import Field, model_validator
 
 AGENT = 'whiteboard_renderer'
@@ -41,18 +42,21 @@ class JobRequest(Contract):
     models: WhiteboardModels
     max_api_calls: int = Field(default=25, ge=13, le=MAX_API_CALLS)
     visual_review: bool = False
+    image_recovery: bool = False  # Explicitly included in newly approved ClaudeHub requests.
     image_provider: Literal['openrouter', 'claudehub'] = 'openrouter'
     visual_repair_from: UUID | None = None
     repair_source_digest: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     repair_manifest_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
     # Historical usage is audit-only for a repair. The source may include up to
     # TOP_UP_TOTAL owner-approved extra calls beyond the initial MAX_API_CALLS.
-    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS + TOP_UP_TOTAL)
+    inherited_calls: int = Field(default=0, ge=0, le=MAX_API_CALLS + TOP_UP_TOTAL + IMAGE_RECOVERY_RESERVE)
     # New repairs receive their own separately approved budget; the original calls are audit-only.
     repair_regenerate_images: bool = False
 
     @model_validator(mode='after')
     def review_budget(self):
+        if self.image_recovery and self.image_provider != 'claudehub':
+            raise ValueError('Image recovery requires ClaudeHub')
         if self.visual_review and self.max_api_calls < 18 and not self.repair_regenerate_images:
             raise ValueError('One visual review and up to three redraws require at least 18 calls')
         if (self.request.scenes > 3 and not self.repair_regenerate_images
@@ -117,11 +121,12 @@ def queue_job(db, request: WhiteboardRequest, models: WhiteboardModels, *, max_a
     if product is None:
         raise LookupError('Product not found')
     payload = JobRequest(request=request.model_copy(update={'request_generation': True}),
-                         models=models, max_api_calls=max_api_calls, visual_review=visual_review, image_provider=image_provider)
+                         models=models, max_api_calls=max_api_calls, visual_review=visual_review, image_provider=image_provider,
+                          image_recovery=image_provider == 'claudehub')
     # Preserve the exact legacy serialization when this feature is not selected.
     content = payload.model_dump_json(exclude={'visual_repair_from', 'repair_source_digest',
         'repair_manifest_sha256', 'inherited_calls', 'repair_regenerate_images'} | ({'visual_review'} if not visual_review else set())
-        | ({'image_provider'} if image_provider == 'openrouter' else set()))
+        | ({'image_provider', 'image_recovery'} if image_provider == 'openrouter' else set()))
     title = 'WHITEBOARD-JOB: ' + digest(content)[:24]
     existing = db.scalar(select(Task).where(Task.product_id == product.id, Task.assigned_agent == AGENT,
                                            Task.title == title, Task.status.in_([
@@ -206,7 +211,8 @@ TOP_UP_STEP = 10       # extra calls one owner confirmation may add
 
 def call_limit(value, payload) -> int:
     """Approved limit plus owner-confirmed top-ups; never anything automatic."""
-    return payload.max_api_calls + int(value.get('extra_calls', 0))
+    credits = min(IMAGE_RECOVERY_RESERVE, max(0, int(value.get('image_recovery_failures', 0)))) if image_recovery_enabled(payload) else 0
+    return payload.max_api_calls + int(value.get('extra_calls', 0)) + credits
 
 
 def started_attempts(value) -> int:
@@ -217,7 +223,7 @@ def started_attempts(value) -> int:
         return counted
     if type(raw) is not int or raw < 0:
         # Corrupted counters must not silently authorize paid calls.
-        return MAX_API_CALLS + TOP_UP_TOTAL + 1
+        return MAX_API_CALLS + TOP_UP_TOTAL + IMAGE_RECOVERY_RESERVE + 1
     return max(counted, raw)
 
 
@@ -271,6 +277,21 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
     already confirmed, completed stages are reused, and every automatic attempt
     is recorded as its own policy Approval row.
     """
+    if image_recovery_enabled(payload):
+        decision = schedule_image_recovery(value, payload, code, now=now)
+        if decision is not None:
+            if not (started_attempts(value) < call_limit(value, payload) or decision.preflight_only):
+                return False
+            now = now or datetime.now(timezone.utc)
+            db.add(Approval(product_id=task.product_id, artifact_id=source.id, action_type=AUTO_RESUME_ACTION,
+                            risk_level='YELLOW', status='approved', requested_by='policy', decided_by='policy:image_recovery',
+                            decided_at=now, reason=f'image recovery: {code}; model {effective_image_model(value, payload)}; next {decision.at.isoformat()}'))
+            value.update(stage='retry_wait', error=None, last_error=code, resume_requested=True,
+                         retry_at=decision.at.isoformat())
+            task.status = TaskStatus.QUEUED
+            return True
+    if not attempts:
+        return False
     used = int(value.get('auto_resumes', 0))
     limit = attempts
     # Preflight only checks connectivity/catalogues. No paid call has begun on this
@@ -412,7 +433,7 @@ class CallLedger:
                              else 'claudehub' if regions_on_claudehub(payload.models) else 'openrouter')
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
                            provider=provider_name,
-                           model=getattr(payload.models, model_stage), status='running',
+                           model=effective_image_model(value, payload) if model_stage == 'image' else getattr(payload.models, model_stage), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
             db.add(run); db.flush()
             if 'attempts_started' in value:
@@ -426,6 +447,13 @@ class CallLedger:
     def finish(self, run_id, *, error=None):
         with self.session_factory() as db:
             run = db.get(AgentRun, run_id)
+            if not error and run.agent_name in {'whiteboard_image', 'whiteboard_image_revision'}:
+                task = owner_task(db, self.product_id, self.task_id, lock=True)
+                _, state, _, payload = records(db, task, lock=True)
+                value = json.loads(state.content)
+                if image_recovery_enabled(payload) and run.model == payload.models.image:
+                    value.pop('image_outage_since', None)
+                    state.content = json.dumps(value)
             run.status = 'failed' if error else 'completed'
             run.error = error
             run.finished_at = datetime.now(timezone.utc)
