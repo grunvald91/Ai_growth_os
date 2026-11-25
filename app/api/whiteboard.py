@@ -305,13 +305,13 @@ def job_html(state, product_id, *, error=None):
         provider_wait = (state.get('last_error') in {'openrouter_unavailable', 'claudehub_unavailable'}
                          and state.get('auto_resumes', 0) > state.get('auto_resume_limit', 0))
         if provider_wait:
-            body += (f'<p class="sg-warning" role="status">Ожидаем восстановления доступа к моделям. '
+            body += (f'<p class="sg-warning" role="status"><strong>Ожидаем восстановления доступа к моделям.</strong><br>'
                      f'Следующая автоматическая проверка не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
                      'Проверка не выполняет платных вызовов; готовые этапы сохранены.</p>')
         else:
-            body += (f'<p class="sg-warning" role="status">Автоматическое продолжение {state.get("auto_resumes", 1)} '
-                     f'из {state.get("auto_resume_limit", state.get("auto_resumes", 1))}. Причина остановки: {esc(reason)} '
-                     f'Запуск не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+            body += (f'<p class="sg-warning" role="status"><strong>Автоматическое продолжение {state.get("auto_resumes", 1)} '
+                     f'из {state.get("auto_resume_limit", state.get("auto_resumes", 1))}.</strong><br>Причина остановки: {esc(reason)} '
+                     f'Запуск не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC.<br>'
                      'Готовые этапы повторно не оплачиваются; вызовы расходуются только из подтверждённого лимита.</p>')
     elif state['status'] == 'failed' and state.get('auto_resumes') and not state.get('top_up'):
         body += (f'<p>Автоматических продолжений было: {state["auto_resumes"]}. '
@@ -397,7 +397,7 @@ def job_html(state, product_id, *, error=None):
     region_audit = (review.get('region_layout') or []) if isinstance(review, dict) else (state.get('region_layout') or [])
     if any(isinstance(item, dict) and item.get('operation') == 'offline_fallback_region_split'
            for item in region_audit):
-        body += ('<p class="sg-warning" role="status">Часть рисунков была размечена локально '
+        body += ('<p class="sg-warning" role="status"><strong>Требуется проверка рисунков.</strong><br>Часть рисунков была размечена локально '
                  'после ошибки или некорректного ответа провайдера. '
                  'Проверьте порядок появления элементов перед публикацией.</p>')
     if state['status'] == 'waiting_approval':
