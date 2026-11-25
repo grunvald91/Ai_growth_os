@@ -6,6 +6,7 @@ output wins if the critique or revision fails.
 from __future__ import annotations
 
 import asyncio
+from app.llm.seo_availability import ModelDeferred
 import json
 import logging
 import re
@@ -482,6 +483,9 @@ async def second_opinion(*, request: LLMRequest, original: LLMResponse,
                 logging.exception("Failed to persist cancelled critic revision audit")
         raise
     except ReviewAuditPersistenceError:
+        raise
+    except ModelDeferred:
+        # SEO availability waits must reach the durable task scheduler.
         raise
     except Exception as exc:
         # Preserve already obtained findings even if the author's correction
