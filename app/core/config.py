@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     seo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
     seo_servgo_autorun_enabled: bool = False
     seo_servgo_autorun_interval_days: int = Field(default=7, ge=1, le=90)
+    seo_schema_recovery_enabled: bool = False
     # Critic bounds. The reviewer sees the complete task, so oversized contexts
     # are skipped rather than compacted; raise these together with the model.
     agent_critic_max_context_chars: int = Field(default=24000, ge=1000, le=2_000_000)
