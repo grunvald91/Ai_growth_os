@@ -18,6 +18,7 @@ from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, refund_unanswered,
                    retry_due, schedule_auto_resume)
 from .pipeline import WhiteboardPipeline
+from .image_recovery import effective_image_model, image_recovery_enabled
 from .render import MarkerSweepRenderer
 from .review import ClaudeHubVisualCritic, LLMVisualAuthor, OpenRouterVisualCritic
 from .science import FactReviewer, requires_science_review
@@ -105,7 +106,7 @@ def _failure(session_factory, product_id, task_id, code, *, exception=None, dire
             refund_unanswered(value)
             value.update(stage='failed', error=code)
             retried = False
-            if code != 'cancelled' and auto_resume_attempts:
+            if code != 'cancelled':
                 try:
                     source, _, approval, payload = records(db, task, lock=True)
                 except ReadinessError:
@@ -190,12 +191,15 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 state.content = json.dumps(value); db.commit()
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
-            job_settings = scoped_settings(settings, payload.models, payload.request.voice)
+            active_model = effective_image_model(value, payload)
+            execution_models = payload.models.model_copy(update={'image': active_model})
+            execution_payload = payload.model_copy(update={'models': execution_models})
+            job_settings = scoped_settings(settings, execution_models, payload.request.voice)
             if readiness is None:
-                await preflight(job_settings, payload.models, payload.request.voice,
+                await preflight(job_settings, execution_models, payload.request.voice,
                                 skip_speech=payload.repair_regenerate_images)
             else:
-                await readiness(job_settings, payload.models, payload.request.voice)
+                await readiness(job_settings, execution_models, payload.request.voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
                                     visual_review=payload.visual_review,
                                     image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
@@ -208,7 +212,7 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     await prime_visual_repair(session_factory, job_settings, product_id, payload, store)
                 except (CheckpointError, ValueError):
                     raise ReadinessError('repair_source_invalid') from None
-            pipeline = (factory or build_pipeline)(job_settings, payload, store)
+            pipeline = (factory or build_pipeline)(job_settings, execution_payload, store)
             pipeline.cached_audio_only = payload.visual_repair_from is not None
             def progress(update):
                 with session_factory() as db:
@@ -270,6 +274,7 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     content=json.dumps({'task_id': str(task_id), 'duration_seconds': output.duration_seconds,
                         'scene_count': output.scene_count, 'storyboard': output.storyboard.model_dump(),
                         'cost_usd': None, 'cost_known': False, 'human_review_required': True,
+                         'primary_image_model': payload.models.image, 'final_image_model': active_model,
                         'visual_review': output.visual_review,
                         'science_review': output.science_review}, ensure_ascii=False))
                 db.add(result); db.flush()
