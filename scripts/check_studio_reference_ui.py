@@ -364,12 +364,14 @@ def main():
                 page.route('**/organizations.json', lambda route: route.fulfill(json={
                     'items':[{'id':str(product.id),'name':product.name}], 'can_add':False,
                     'unified_user_id':7,'linked_business_ids':[12], 'current_business_ids':[12],
-                    'current_product_id':str(product.id), 'platform_product':None}))
+                    'current_product_id':str(product.id), 'platform_product':None,
+                    'business_product_ids':{'12':str(product.id)}}))
                 page.route('**/api/studio/businesses', lambda route: route.fulfill(json=[
                     {'id':12,'name':'Авто точка'},{'id':13,'name':'Новая организация'}]))
                 page.evaluate("localStorage.setItem('token','fixture.'+btoa(JSON.stringify({sub:7}))+'.fixture')")
                 page.locator('#bizBtn').click()
                 expect(page.locator('#sgOrgMenu button')).to_have_count(2)
+                expect(page.locator('#sgOrgMenu .sg-org-option')).to_have_count(2)
                 expect(page.locator('#sgOrgMenu [aria-current="true"]')).to_have_text('Авто точка')
                 assert page.locator('#sgOrgMenu .sg-company-choice').count()==0
                 assert page.locator('#sgOrgMenu').bounding_box()['height']<230
