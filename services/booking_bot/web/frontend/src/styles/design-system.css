@@ -554,12 +554,11 @@ textarea.ds-input { resize: vertical; min-height: 70px; }
 /* ServGo notice standard — paragraph feedback, not cards, dialogs or chips.
    Opt in with ds-notice, or inherit it for existing paragraph alerts. */
 :is(p[role="alert"]:not(:empty),.ds-notice,.ds-error):not([hidden]) {
-  --ds-notice-accent: var(--s-accent);
   box-sizing: border-box;
   min-width: 0;
   max-width: 100%;
   border: 1px solid var(--s-line-2);
-  border-inline-start: 3px solid var(--ds-notice-accent);
+  border-inline-start: 3px solid var(--ds-notice-accent,var(--s-accent));
   border-radius: 10px;
   background: var(--s-surface-2);
   color: var(--s-text) !important;
