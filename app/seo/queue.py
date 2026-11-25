@@ -1,6 +1,6 @@
 """Turns approved plan items into article tasks for the existing content worker."""
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -56,7 +56,7 @@ def queue_plan_item(db: Session, product_id: UUID, plan_artifact_id: UUID, item:
 def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *,
                only: set[str] | None = None, per_day: int | None = None,
                now: datetime | None = None, timezone_name: str | None = None,
-               spread_days: int | None = None) -> list[Task]:
+               spread_days: int | None = None, reserve_enabled: bool = False) -> list[Task]:
     require_enabled(db, plan_artifact.product_id)
     # Same Product lock is shared by all SEO plan publishers and article releases.
     # One transaction covers the entire schedule to avoid duplicate days in concurrent plans.
@@ -73,8 +73,13 @@ def queue_plan(db: Session, plan_artifact: Artifact, clusters_by_id: dict, *,
         Task.product_id == plan_artifact.product_id,
         Task.assigned_agent == "content_factory", Task.title.in_(titles)))}
     new_count = sum(f"{SEO_TASK_PREFIX}{plan_artifact.id}:{item.id}" not in existing for item in selected)
+    preferred = ()
+    if reserve_enabled:
+        from app.seo.reserve import coverage
+        stock = coverage(db, plan_artifact.product_id, now=now, timezone_name=tz.key, daily_limit=per_day)
+        preferred = tuple(date.fromisoformat(value) for value in stock.missing_pipeline_days)
     calendar = iter(available_slots(db, plan_artifact.product_id, new_count, limit=per_day,
-                                    now=now, tz=tz, spread_days=spread_days))
+                                    now=now, tz=tz, spread_days=spread_days, preferred_days=preferred))
     tasks = []
     for item in selected:
         title = f"{SEO_TASK_PREFIX}{plan_artifact.id}:{item.id}"
