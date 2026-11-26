@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # Format-only recovery, never a second content author or publication approver.
     llm_schema_repair_model: str = "deepseek-v4.1-flash"
     openrouter_api_key: str | None = None
+    fish_api_key: str | None = None
+    fish_voice_id: str = ''
     # Direct OpenAI Images API, separate from LLM provider routing.
     openai_api_key: str | None = None
     # Optional: company registry lookup by ИНН/ОГРН during company intake.
