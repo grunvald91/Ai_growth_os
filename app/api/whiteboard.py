@@ -46,7 +46,7 @@ class CreateJob(Contract):
     max_api_calls: int | None = Field(default=None, ge=13, le=MAX_API_CALLS)
     # An optional extra five calls are included in the *upfront* approval, never added later.
     recovery_budget: bool = False
-    profile: Literal['configured', 'gemini_ru'] = 'gemini_ru'
+    profile: Literal['configured', 'gemini_ru', 'fish', 'grok'] = 'gemini_ru'
     image_model: Literal['gemini-3.1-flash-image', 'gpt-image-2.5-sunburst'] = 'gemini-3.1-flash-image'
     visual_review: bool = False
     source_script: str = Field(default='', max_length=12000)
@@ -493,7 +493,7 @@ def creation_form(product_id, *, fields=None, error=None, durations=None):
     image_options = image_model_options(fields.get('image_model', DEFAULT_IMAGE_MODEL))
     profile_options = ''.join(
         f'<option value="{value}"' + (' selected' if profile == value else '') + f'>{label}</option>'
-        for value, label in [('gemini_ru', 'Grok Voice TTS — озвучка'),
+        for value, label in [('gemini_ru', 'Автоматический выбор озвучки'), ('fish', 'Fish Audio S2.1 Pro Free'), ('grok', 'Grok Voice TTS — Eve'),
                              ('configured', 'Озвучка из настроек сервера')]
     )
     review_options = ''.join(
@@ -762,7 +762,7 @@ async def studio_index(product_id: UUID, db: Session = Depends(get_db), settings
     error = None
     try:
         generation_profile(settings, 'gemini_ru')
-        if not settings.openrouter_api_key or not settings.xai_api_key:
+        if not (settings.fish_api_key or settings.openrouter_api_key) or not settings.xai_api_key:
             error = MESSAGES['configuration_missing']
     except ValueError:
         error = MESSAGES['configuration_missing']
