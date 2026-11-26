@@ -13,7 +13,7 @@ from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStat
 from app.llm.service import LLMService
 from app.privacy import PrivacyGateway
 from .adapters import (ClaudeHubGeminiImageProvider, ClaudeHubRegionProvider, LLMStoryboardProvider,
-                       OpenRouterRegionProvider, OpenRouterSpeechProvider)
+                       OpenRouterRegionProvider, OpenRouterSpeechProvider, FishSpeechProvider)
 from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, refund_unanswered,
                    retry_due, schedule_auto_resume)
@@ -22,7 +22,7 @@ from .image_recovery import effective_image_model, image_recovery_enabled
 from .render import MarkerSweepRenderer
 from .review import ClaudeHubVisualCritic, LLMVisualAuthor, OpenRouterVisualCritic
 from .science import FactReviewer, requires_science_review
-from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, safe_error, scoped_settings, CLAUDEHUB_IMAGE_MODELS
+from .runtime import ReadinessError, SingleCallStoryboardLLM, preflight, regions_on_claudehub, speech_on_fish, safe_error, scoped_settings, CLAUDEHUB_IMAGE_MODELS
 
 
 class CachedAudioOnlySpeech:
@@ -56,6 +56,8 @@ def build_pipeline(settings, payload, store):
         storyboard=LLMStoryboardProvider(service, model=payload.models.storyboard),
         images=ClaudeHubGeminiImageProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.image),
         speech=(CachedAudioOnlySpeech() if payload.repair_regenerate_images else
+                FishSpeechProvider(api_key=settings.fish_api_key, model=payload.models.speech)
+                if speech_on_fish(payload.models) else
                 OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech,
                                          proxy_url=settings.whiteboard_proxy_url)),
         regions=regions,
