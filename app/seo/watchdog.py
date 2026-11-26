@@ -9,14 +9,13 @@ import json
 import logging
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, exists
-from sqlalchemy.orm import aliased
+from sqlalchemy import select
 
 from app.models.domain import Artifact, ArtifactStatus, Product, Publication, Task, TaskStatus
 from app.seo.activation import SeoFactoryActivation, editorial_preferences, is_enabled
 from app.seo.diagnostics import audit_seo
 from app.seo.publishing import public_blog_ready
-from app.seo.reserve import coverage
+from app.seo.reserve import coverage, seo_publication_receipts
 from app.seo.schedule import db_time, day_bounds, utc
 
 KIND = "seo_watchdog_state"
@@ -59,20 +58,9 @@ def _previous_day_published(db, product_id, now, timezone_name):
     start, stop = day_bounds(start_today - timedelta(seconds=1), tz=tz)
     # Require a matching SEO task and article status. Distinct receipts are
     # counted only as evidence of publication, not public URL reachability.
-    conflict = aliased(Publication)
-    found = db.scalar(select(Publication.id).join(Artifact, Publication.artifact_id == Artifact.id)
-        .join(Task, Artifact.task_id == Task.id).where(
-            Publication.product_id == product_id, Artifact.product_id == product_id,
-            Task.product_id == product_id, Task.assigned_agent == "content_factory",
-            Task.title.like("SEO-ARTICLE:%"), Artifact.kind == "article",
-            Artifact.status == ArtifactStatus.PUBLISHED,
-            Publication.channel == "own_site", Publication.status == "published",
-            Publication.published_at >= db_time(db, start),
-            Publication.published_at < db_time(db, stop),
-            ~exists(select(conflict.id).where(conflict.product_id == product_id,
-                conflict.artifact_id == Artifact.id, conflict.channel == "own_site",
-                conflict.status != "published")),
-        ).limit(1))
+    found = db.scalar(seo_publication_receipts(product_id).where(
+        Publication.published_at >= db_time(db, start),
+        Publication.published_at < db_time(db, stop)).limit(1))
     return start, found is not None
 
 
