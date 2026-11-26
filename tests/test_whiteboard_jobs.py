@@ -692,15 +692,13 @@ async def test_catalogue_outage_is_checked_unattended_after_retry_window(environ
         assert await run_whiteboard_once(factory, settings, factory=fake_factory, readiness=down) == 1
         status, state = _state(factory, product_id, task_id)
         assert status == TaskStatus.QUEUED
-        assert state['auto_resumes'] == attempt + 1
+        assert state.get('auto_resumes', 0) == 0
         assert state['calls'] == 0
         assert state['retry_at']
         assert state['stage'] == 'retry_wait'
-        if attempt >= 2:
-            assert state['auto_resume_limit'] == 2
-            due = datetime.fromisoformat(state['retry_at'])
-            logged = datetime.fromisoformat(state['errors'][-1]['at'])
-            assert (due - logged).total_seconds() >= 1799
+        due = datetime.fromisoformat(state['retry_at'])
+        logged = datetime.fromisoformat(state['errors'][-1]['at'])
+        assert 299 <= (due - logged).total_seconds() <= 301
         _expire_pause(factory, product_id, task_id)
     with client() as browser:
         html = browser.get(f'/studio/products/{product_id}/whiteboard/{task_id}').text
@@ -784,3 +782,35 @@ async def test_due_job_after_twenty_delayed_jobs_is_not_starved(environment):
         delayed_status, delayed_state = _state(factory, product_id, delayed_id)
         assert delayed_status == TaskStatus.QUEUED
         assert delayed_state['stage'] == 'retry_wait'
+
+
+@pytest.mark.asyncio
+async def test_model_wait_does_not_claim_or_bill_a_call_before_due(tmp_path):
+    from app.content.whiteboard.jobs import GuardedStage
+    from app.llm.seo_availability import AvailabilityPolicy, ModelDeferred
+    now = [1800000000.0]
+    class Ledger:
+        begun = 0
+        finished = 0
+        def begin(self, stage):
+            self.begun += 1
+            return self.begun
+        def finish(self, run_id, *, error=None):
+            self.finished += 1
+    class Speech:
+        async def synthesize(self):
+            if now[0] < 1800000300:
+                raise TimeoutError("provider down")
+            return b"ready"
+    ledger = Ledger()
+    policy = AvailabilityPolicy(tmp_path, "test-media", clock=lambda: now[0])
+    stage = GuardedStage(Speech(), "speech", ledger, availability=policy, model="voice")
+    with pytest.raises(ModelDeferred) as first:
+        await stage.synthesize()
+    assert first.value.retry_at == now[0] + 300
+    with pytest.raises(ModelDeferred):
+        await stage.synthesize()
+    assert ledger.begun == ledger.finished == 1
+    now[0] += 300
+    assert await stage.synthesize() == b"ready"
+    assert ledger.begun == ledger.finished == 2
