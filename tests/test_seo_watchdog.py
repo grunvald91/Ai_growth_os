@@ -93,3 +93,33 @@ def test_transient_shortage_has_day_grace_and_recovers_without_alert(env, monkey
         set_enabled(db, company, enabled=False, actor="test-owner")
         assert inspect_and_claim(db, company, settings, now=NOW + timedelta(hours=50),
                                  can_notify=True) is None
+
+
+def test_overdue_model_check_is_not_reported_as_provider_outage(env):
+    from app.models.domain import AgentRun, Product
+    factory, defaults, company = env
+    settings = enabled_settings(defaults)
+    with factory() as db:
+        product = db.get(Product, company)
+        activation = db.get(SeoFactoryActivation, company)
+        task = Task(product_id=company, title="SEO-ARTICLE:example:a001",
+                    assigned_agent="content_factory", status=TaskStatus.QUEUED)
+        db.add(task)
+        db.flush()
+        old = NOW - timedelta(hours=1)
+        db.add(Artifact(product_id=company, task_id=task.id, kind="seo_model_wait",
+                        title=old.isoformat(), content="{}"))
+        db.commit()
+        issues = observe(db, product, activation, settings, NOW)
+        assert issues["model_check_overdue"] == 1
+        assert "model_wait" not in issues
+        db.add(AgentRun(task_id=task.id, agent_name="article_writer",
+                        status="failed", started_at=old + timedelta(minutes=5)))
+        db.commit()
+        assert "model_check_overdue" not in observe(db, product, activation, settings, NOW)
+        db.add(Artifact(product_id=company, task_id=task.id, kind="seo_model_wait",
+                        title=(NOW + timedelta(minutes=5)).isoformat(), content="{}"))
+        db.commit()
+        issues = observe(db, product, activation, settings, NOW)
+        assert issues["model_wait"] == 1
+        assert "model_check_overdue" not in issues
