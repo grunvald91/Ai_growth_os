@@ -397,14 +397,16 @@ class ClaudeHubChat(OpenRouterBase):
 class FishSpeechProvider:
     """Fish Audio REST TTS, one explicit free-model POST per beat."""
 
-    def __init__(self, *, api_key, model, client=None):
+    def __init__(self, *, api_key, model, client=None, voice_override=None):
         if model != 'fish/s2.1-pro-free':
             raise ValueError('Unsupported Fish Audio model')
         self.api_key, self.client = api_key, client
+        self.voice_override = voice_override
 
     async def synthesize(self, text: str, *, language: str, voice: str) -> bytes:
         if language != 'ru' or not 0 < len(text) <= 320:
             raise ValueError('Invalid Russian speech segment')
+        voice = self.voice_override or voice
         payload = {'text': text, 'format': 'mp3'}
         if voice != 'default':
             if not re.fullmatch(r'[0-9a-fA-F]{32}', voice):
