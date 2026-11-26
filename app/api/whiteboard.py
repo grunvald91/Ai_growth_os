@@ -315,11 +315,18 @@ def job_html(state, product_id, *, error=None):
         body += f'<p class="sg-warning" role="alert">{esc(warning)}</p>'
     if state['status'] == 'queued' and state.get('retry_at'):
         reason = MESSAGES.get(state.get('last_error'), 'временный сбой')
-        provider_wait = (state.get('last_error') in {'openrouter_unavailable', 'claudehub_unavailable'}
-                         and state.get('auto_resumes', 0) > state.get('auto_resume_limit', 0))
-        if state.get('image_outage_since'):
+        provider_wait = (state.get('failed_stage') == 'preflight'
+                         and state.get('last_error') in {'openrouter_unavailable', 'claudehub_unavailable',
+                             'model_unavailable', 'claudehub_image_unavailable', 'claudehub_vision_unavailable'})
+        image_since = (state.get('backup_image_outage_since') or state.get('backup_image_catalog_outage_since')
+                       or state.get('image_outage_since') or state.get('image_catalog_outage_since'))
+        if state.get('last_error') == 'provider_model_wait':
             body += (f'<p class="sg-warning" role="status"><strong>Ожидаем восстановления модели.</strong><br>'
-                     f'Начало сбоя: {esc(state["image_outage_since"][:16].replace("T", " "))} UTC. '
+                     f'Следующая проверка не раньше {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
+                     'Готовые этапы сохранены; повторный запрос только в пределах подтверждённого лимита.</p>')
+        elif image_since and not (provider_wait and state.get('last_error') != 'claudehub_image_unavailable'):
+            body += (f'<p class="sg-warning" role="status"><strong>Ожидаем восстановления модели.</strong><br>'
+                     f'Начало сбоя: {esc(image_since[:16].replace("T", " "))} UTC. '
                      f'Следующая проверка: {esc(state["retry_at"][:16].replace("T", " "))} UTC. '
                      f'Модель: {esc(state.get("active_image_model", state["models"]["image"]))}. '
                      'Готовые этапы сохранены; резервная модель только после 24 часов.</p>')
