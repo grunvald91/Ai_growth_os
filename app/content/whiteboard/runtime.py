@@ -75,8 +75,8 @@ def storyboard_model(settings) -> str:
 def generation_profile(settings, profile: str, image_model: str = DEFAULT_IMAGE_MODEL):
     if image_model not in CLAUDEHUB_IMAGE_MODELS:
         raise ValueError('Unknown ClaudeHub image model')
-    if profile == 'gemini_ru':
-        fish = bool(settings.fish_api_key)
+    if profile in ('gemini_ru', 'fish', 'grok'):
+        fish = profile == 'fish' or (profile == 'gemini_ru' and bool(settings.fish_api_key))
         return WhiteboardModels(storyboard=storyboard_model(settings),
             image=image_model, speech=FISH_SPEECH_MODEL if fish else 'x-ai/grok-voice-tts-1.0',
             regions=CLAUDEHUB_VISION_MODEL), (settings.fish_voice_id or 'default') if fish else 'eve'
