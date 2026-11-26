@@ -119,7 +119,7 @@ class VideoSettings(_Params):
         description="Призыв в конце видео, только если владелец сам его назвал, его словами. "
                     "Не назвал — не указывай: видео позовёт подписаться на канал и поставить лайк.")
 
-    profile: Literal["configured", "gemini_ru"] = "gemini_ru"
+    profile: Literal["configured", "gemini_ru", "fish", "grok"] = "gemini_ru"
     image_model: Literal["gemini-3.1-flash-image", "gpt-image-2.5-sunburst"] = "gemini-3.1-flash-image"
     visual_review: bool = False
     science_mode: Literal["general", "auto", "scientific"] = "auto"
