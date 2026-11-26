@@ -59,6 +59,13 @@ jobs:
                   "seo_watchdog_enabled", "llm_availability_enabled")
           print("worker_release_sha=", os.environ.get("RELEASE_SHA", "unknown"))
           print("worker_seo_flags=", json.dumps({key: getattr(settings, key, None) for key in keys}))
+          required = ("seo_servgo_autorun_enabled", "seo_schema_recovery_enabled",
+                      "seo_held_repair_enabled", "seo_model_availability_enabled",
+                      "seo_reserve_enabled", "seo_watchdog_enabled")
+          missing = [key for key in required if not getattr(settings, key, False)]
+          print("seo_servgo_runtime_missing_flags=", json.dumps(missing))
+          print("seo_servgo_runtime_configured=", not missing)
+
           print("worker_telegram_notifications_configured=", bool(settings.telegram_bot_token and settings.telegram_owner_chat_id is not None))
           WORKER
           echo "== Database / article inspection (read-only)"
@@ -100,6 +107,39 @@ jobs:
                   state = json.loads(marker.content)
                   print("seo_watchdog=", json.dumps({key: state.get(key) for key in ("observed_at", "issues", "since", "last_sent")}))
 
+              from app.seo.factory import AGENT
+              from app.seo.article_retry import AUTO_RECOVERY
+              from app.seo.held_repair import ATTEMPT
+              from app.seo.publishing import public_blog_ready
+              from app.seo.reserve import seo_publication_receipts
+              from app.seo.schedule import day_bounds, db_time
+              from zoneinfo import ZoneInfo
+              print("seo_public_blog_bound=", public_blog_ready(db, p.id))
+              planning = db.scalar(select(Task).where(
+                  Task.product_id == p.id, Task.assigned_agent == AGENT
+              ).order_by(Task.created_at.desc(), Task.id.desc()).limit(1))
+              print("seo_latest_planning=", json.dumps({
+                  "status": planning.status.value, "created_at": planning.created_at.isoformat()
+              } if planning else None))
+              recovery = list(db.scalars(select(Artifact).where(
+                  Artifact.product_id == p.id, Artifact.kind == AUTO_RECOVERY)))
+              print("seo_auto_recovery_markers=", len(recovery))
+              from collections import Counter
+              repairs = Counter()
+              for attempt in db.scalars(select(Artifact).where(
+                      Artifact.product_id == p.id, Artifact.kind == ATTEMPT)):
+                  try:
+                      repairs[json.loads(attempt.content).get("state", "unknown")] += 1
+                  except (ValueError, TypeError, AttributeError):
+                      repairs["unknown"] += 1
+              print("seo_held_repair_states=", json.dumps(dict(repairs)))
+              now = datetime.now(timezone.utc)
+              start, stop = day_bounds(now, tz=ZoneInfo(prefs.timezone_name))
+              print("seo_confirmed_today=", len(list(db.scalars(
+                  seo_publication_receipts(p.id).where(
+                      Publication.published_at >= db_time(db, start),
+                      Publication.published_at < db_time(db, stop),
+                      Publication.published_at <= db_time(db, now))))))
               tasks = list(db.scalars(select(Task).where(
                   Task.product_id == p.id, Task.title.like("SEO-ARTICLE:%"))))
               for status in TaskStatus:

@@ -38,6 +38,29 @@ class Coverage:
     missing_pipeline_days: tuple[str, ...]
 
 
+def seo_publication_receipts(product_id):
+    """Only consistent public SEO articles satisfy the daily SEO obligation.
+
+    Keep the general publication quota separate: non-SEO publications may
+    consume capacity, but they do not count as a daily SEO article.
+    """
+    from sqlalchemy import exists
+    from sqlalchemy.orm import aliased
+    conflict = aliased(Publication)
+    return (select(Publication.published_at)
+        .join(Artifact, Publication.artifact_id == Artifact.id)
+        .join(Task, Artifact.task_id == Task.id)
+        .where(Publication.product_id == product_id,
+               Artifact.product_id == product_id, Task.product_id == product_id,
+               Publication.channel == "own_site", Publication.status == "published",
+               Artifact.kind == "article", Artifact.status == ArtifactStatus.PUBLISHED,
+               Task.assigned_agent == "content_factory", Task.title.like("SEO-ARTICLE:%"),
+               Task.status == TaskStatus.COMPLETED,
+               ~exists(select(conflict.id).where(
+                   conflict.product_id == product_id, conflict.artifact_id == Artifact.id,
+                   conflict.channel == "own_site", conflict.status != "published"))))
+
+
 def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_limit=3,
              exclude_article_id=None):
     now = utc(now or datetime.now(timezone.utc))
@@ -62,8 +85,11 @@ def coverage(db, product_id, *, now=None, timezone_name="Europe/Moscow", daily_l
         if timestamp is not None:
             date = day(timestamp, tz=tz)
             consumed[date] += 1
-            if status == 'published':
-                actual[date] += 1
+    for timestamp in db.scalars(seo_publication_receipts(product_id).where(
+            Publication.published_at >= db_time(db, start),
+            Publication.published_at <= db_time(db, now))):
+        if timestamp is not None:
+            actual[day(timestamp, tz=tz)] += 1
 
     tasks = list(db.scalars(select(Task).where(
         Task.product_id == product_id, Task.assigned_agent == "content_factory",
@@ -201,10 +227,10 @@ def permits_extra_release(db, row, *, now, timezone_name, daily_limit):
     from app.seo.schedule import day_bounds
     tz = ZoneInfo(timezone_name)
     start, stop = day_bounds(now, tz=tz)
-    already_live = db.scalar(select(Publication.id).where(
-        Publication.product_id == row.product_id, Publication.channel == "own_site",
-        Publication.status == "published", Publication.published_at >= db_time(db, start),
-        Publication.published_at < db_time(db, stop)).limit(1))
+    already_live = db.scalar(seo_publication_receipts(row.product_id).where(
+        Publication.published_at >= db_time(db, start),
+        Publication.published_at < db_time(db, stop),
+        Publication.published_at <= db_time(db, now)).limit(1))
     if already_live is None:
         return True
     stock = coverage(db, row.product_id, now=now, timezone_name=timezone_name,
