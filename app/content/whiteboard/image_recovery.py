@@ -50,15 +50,22 @@ def schedule_image_recovery(value, payload, code, *, now=None):
         code == 'provider_server_error' or diagnostic.get('http_status') in TRANSIENT_STATUSES
         or diagnostic.get('exception_type') in NETWORK_FAILURES)
     if not (preflight or image_failure):
+        if stage in {'image', 'image_revision'}:
+            # A model answered but produced invalid content: not an outage.
+            for key in ('image_outage_since', 'backup_image_outage_since'):
+                value.pop(key, None)
+        elif stage == 'preflight':
+            value.pop('image_catalog_outage_since', None)
         return None
     if image_failure:
         value['image_recovery_failures'] = min(IMAGE_RECOVERY_RESERVE,
                                                int(value.get('image_recovery_failures', 0)) + 1)
-    since = datetime.fromisoformat(value.setdefault('image_outage_since', now.isoformat()))
+    backup = effective_image_model(value, payload) != payload.models.image
+    key = ('backup_image_catalog_outage_since' if backup else 'image_catalog_outage_since') if preflight else (
+        'backup_image_outage_since' if backup else 'image_outage_since')
+    since = datetime.fromisoformat(value.setdefault(key, now.isoformat()))
     deadline = since + timedelta(hours=24)
-    if effective_image_model(value, payload) != payload.models.image:
-        return RecoveryDecision(now + timedelta(minutes=15), preflight)
-    if now >= deadline:
+    if not backup and now >= deadline:
         value['active_image_model'] = GPT_IMAGE_MODEL if payload.models.image == DEFAULT_IMAGE_MODEL else DEFAULT_IMAGE_MODEL
         value['image_fallback_at'] = now.isoformat()
         return RecoveryDecision(now, preflight)
