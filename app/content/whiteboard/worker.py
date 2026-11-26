@@ -11,6 +11,7 @@ from sqlalchemy import and_, select, update
 
 from app.models.domain import AgentRun, Artifact, ArtifactStatus, Task, TaskStatus
 from app.llm.service import LLMService
+from app.llm.seo_availability import AvailabilityPolicy, ModelDeferred
 from app.privacy import PrivacyGateway
 from .adapters import (ClaudeHubGeminiImageProvider, ClaudeHubRegionProvider, LLMStoryboardProvider,
                        OpenRouterRegionProvider, OpenRouterSpeechProvider)
@@ -113,7 +114,8 @@ def _failure(session_factory, product_id, task_id, code, *, exception=None, dire
                     approval = None
                 if approval is not None and approval.status == 'approved':
                     retried = schedule_auto_resume(db, task, source, value, payload, code,
-                                                   attempts=auto_resume_attempts)
+                                                   attempts=auto_resume_attempts,
+                                                   model_retry_at=exception.retry_at if isinstance(exception, ModelDeferred) else None)
             entry['auto_resume'] = value.get('retry_at') if retried else None
             logging.getLogger(__name__).warning('whiteboard_failed %s', json.dumps({
                 'task_id': str(task_id), **entry}))
@@ -200,6 +202,15 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                                 skip_speech=payload.repair_regenerate_images)
             else:
                 await readiness(job_settings, execution_models, payload.request.voice)
+            # A successful free preflight ends only the catalogue outage.
+            with session_factory() as db:
+                current = owner_task(db, product_id, task_id, lock=True)
+                _, saved, _, _ = records(db, current, lock=True)
+                latest = json.loads(saved.content)
+                for key in ('preflight_outage', 'image_catalog_outage_since', 'backup_image_catalog_outage_since'):
+                    latest.pop(key, None)
+                saved.content = json.dumps(latest)
+                db.commit()
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
                                     visual_review=payload.visual_review,
                                     image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
@@ -247,18 +258,37 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     db.commit()
             pipeline.progress = progress
             ledger = CallLedger(session_factory, product_id, task_id)
+            def guarded(provider, stage):
+                model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard',
+                               'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
+                model = getattr(execution_models, model_stage)
+                # The separately authorized image recovery budget retains its
+                # existing durable model switch. All other stages use the shared
+                # waiting algorithm, without inventing a reserve model or calls.
+                if (not settings.llm_availability_enabled
+                        or (model_stage == 'image' and image_recovery_enabled(payload))):
+                    return GuardedStage(provider, stage, ledger)
+                endpoint = (job_settings.xai_base_url if model_stage == 'storyboard'
+                            or stage == 'science_review'
+                            or (model_stage == 'regions' and regions_on_claudehub(execution_models))
+                            or (model_stage == 'image' and payload.image_provider == 'claudehub')
+                            else 'https://openrouter.ai/api/v1')
+                policy = AvailabilityPolicy(settings.products_root,
+                    'whiteboard:' + str(task_id) + ':' + endpoint.rstrip('/'))
+                return GuardedStage(provider, stage, ledger, availability=policy, model=model)
+
             for attribute, stage in (('storyboard', 'storyboard'), ('images', 'image'), ('speech', 'speech'), ('regions', 'regions')):
-                setattr(pipeline, attribute, GuardedStage(getattr(pipeline, attribute), stage, ledger))
+                setattr(pipeline, attribute, guarded(getattr(pipeline, attribute), stage))
             if requires_science_review(payload.request):
                 if pipeline.science_reviewer is None:
                     raise ReadinessError('science_reviewer_missing')
-                pipeline.science_reviewer = GuardedStage(pipeline.science_reviewer, 'science_review', ledger)
+                pipeline.science_reviewer = guarded(pipeline.science_reviewer, 'science_review')
             if payload.visual_review:
                 if not pipeline.visual_review:
                     raise ReadinessError('approval_invalid')
-                pipeline.revision_images = GuardedStage(pipeline.images.provider, 'image_revision', ledger)
-                pipeline.critic = GuardedStage(pipeline.critic, 'visual_review', ledger)
-                pipeline.visual_author = GuardedStage(pipeline.visual_author, 'visual_decision', ledger)
+                pipeline.revision_images = guarded(pipeline.images.provider, 'image_revision')
+                pipeline.critic = guarded(pipeline.critic, 'visual_review')
+                pipeline.visual_author = guarded(pipeline.visual_author, 'visual_decision')
             output_dir = directory / 'output'
             output_dir.mkdir(exist_ok=True, mode=0o700)
             # Up to ~19 sequential provider calls of several minutes each (twice as many for the one-minute video).
@@ -296,6 +326,6 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     exc.response, name='provider-error')
             except Exception:
                 logging.getLogger(__name__).warning('whiteboard_diagnostic_capture_failed task_id=%s', task_id)
-        _failure(session_factory, product_id, task_id, safe_error(exc), exception=exc, directory=directory,
+        _failure(session_factory, product_id, task_id, 'provider_model_wait' if isinstance(exc, ModelDeferred) else safe_error(exc), exception=exc, directory=directory,
                  auto_resume_attempts=settings.whiteboard_auto_resume_attempts)
     return 1

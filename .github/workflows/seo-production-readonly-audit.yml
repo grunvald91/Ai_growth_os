@@ -124,6 +124,46 @@ jobs:
               recovery = list(db.scalars(select(Artifact).where(
                   Artifact.product_id == p.id, Artifact.kind == AUTO_RECOVERY)))
               print("seo_auto_recovery_markers=", len(recovery))
+              if hasattr(__import__("app.seo.article_retry", fromlist=["automatic_recovery_reason"]), "automatic_recovery_reason"):
+                  from app.seo.article_retry import automatic_recovery_reason
+                  for failed in db.scalars(select(Task).where(
+                          Task.product_id == p.id, Task.assigned_agent == "content_factory",
+                          Task.title.like("SEO-ARTICLE:%"), Task.status == TaskStatus.FAILED
+                      ).order_by(Task.updated_at, Task.id).limit(50)):
+                      print("seo_recovery_blocker=", json.dumps({
+                          "task_id": str(failed.id),
+                          "reason": automatic_recovery_reason(db, product_id=p.id, task_id=failed.id)
+                      }))
+              if planning:
+                  from app.seo.factory import STAGE_KIND, REPORT_KIND
+                  stages = []
+                  for stage_row in db.scalars(select(Artifact).where(
+                          Artifact.product_id == p.id, Artifact.task_id == planning.id,
+                          Artifact.kind == STAGE_KIND)):
+                      try:
+                          stage = json.loads(stage_row.content)
+                          if stage.get("stage") in {"prepare_queries", "collect_suggestions",
+                              "landing_opportunities", "build_plan", "queue_articles", "completed"}:
+                              stages.append((stage.get("recorded_at", ""), stage["stage"]))
+                      except (ValueError, TypeError, AttributeError):
+                          pass
+                  print("seo_latest_planning_stage=", json.dumps(max(stages) if stages else None))
+                  report = db.scalar(select(Artifact).where(
+                      Artifact.product_id == p.id, Artifact.task_id == planning.id,
+                      Artifact.kind == REPORT_KIND
+                  ).order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+                  if report:
+                      try:
+                          data = json.loads(report.content)
+                          print("seo_latest_planning_report=", json.dumps({
+                              "error_code": data.get("error_code"),
+                              "stage": data.get("stage"),
+                              "http_status": data.get("http_status"),
+                              "articles_queued": data.get("articles_queued"),
+                          }))
+                      except (ValueError, TypeError, AttributeError):
+                          pass
+
               from collections import Counter
               repairs = Counter()
               for attempt in db.scalars(select(Artifact).where(

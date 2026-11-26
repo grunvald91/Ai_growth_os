@@ -1338,6 +1338,15 @@ class ArticleProduction:
                         task_type='article_production', provider=self.provider_name,
                     )
 
+                call_checkpoint = None
+                if (request.task_id and safe_request.seo_brief and safe_request.light
+                        and task.title.startswith('SEO-ARTICLE:')):
+                    from app.llm.deferred_checkpoint import DeferredCallCheckpoint
+                    call_checkpoint = DeferredCallCheckpoint(self.db,
+                        product_id=product_id, task_id=task_id, run_id=run_id,
+                        agent_name=name, scope=f'article:{name}',
+                        privacy=self.privacy, provider=self.provider_name)
+
                 def record_review_progress(snapshot):
                     persist_critic_audit(
                         self.db, product_id=product_id, task_id=task_id,
@@ -1415,6 +1424,7 @@ class ArticleProduction:
                                 if name == 'marketing_editor' and attempt == 0 else None,
                             on_observed=record_model_call,
                             on_review_progress=record_review_progress,
+                            **({'call_checkpoint': call_checkpoint} if call_checkpoint else {}),
                             review_enabled=(name == 'marketing_editor' and attempt == 0)),
                             timeout=CALL_WAIT_SECONDS + self.llm.extra_timeout_seconds)
                         persist_critic_audit(
@@ -1487,6 +1497,7 @@ class ArticleProduction:
                                           'task_type': 'article_production',
                                           'provider_timeout_seconds': STAGE_PROVIDER_TIMEOUT_SECONDS.get(name, 90)},
                             ), validate_revision=validate_stage_revision, on_observed=record_model_call,
+                            **({'call_checkpoint': call_checkpoint} if call_checkpoint else {}),
                             review_enabled=False), timeout=STAGE_TIMEOUT_SECONDS.get(name, 300))
                             if len(response.content) > 150000 or response.stop_reason not in (None, 'end_turn', 'stop_sequence'):
                                 raise rejected
@@ -1502,6 +1513,11 @@ class ArticleProduction:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    from app.llm.seo_availability import ModelDeferred
+                    # Availability is not invalid output. Do not synthesize a
+                    # derivative or mark a stage complete while its model waits.
+                    if isinstance(exc, ModelDeferred):
+                        raise
                     if (name == 'content_strategist' and safe_request.seo_brief is not None
                             and strategist_twice_invalid
                             and isinstance(exc, (ValueError, ValidationError))

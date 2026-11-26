@@ -15,7 +15,7 @@ from test_critic import finding
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["clean", "critical", "owner_veto", "disabled", "model_wait"])
+@pytest.mark.parametrize("case", ["clean", "critical", "owner_veto", "disabled", "model_wait", "critic_wait"])
 async def test_held_repair_is_bounded_and_preserves_original_on_failure(env, tmp_path, case):
     factory, settings, product_id = env
     from app.models.domain import Product
@@ -43,10 +43,13 @@ async def test_held_repair_is_bounded_and_preserves_original_on_failure(env, tmp
     response = original_article.reader_article.model_dump(mode="json")
     response["title"] = "Как организовать запись клиентов без потерь"
     provider = SequenceProvider([response, finding("critical") if case == "critical" else {"findings": []}])
-    if case == "model_wait":
+    if case in {"model_wait", "critic_wait"}:
         from datetime import datetime, timezone
         from app.llm.seo_availability import ModelDeferred
+        original_generate = provider.generate
         async def unavailable(request):
+            if case == "critic_wait" and not provider.requests:
+                return await original_generate(request)
             provider.requests.append(request)
             raise ModelDeferred(datetime.now(timezone.utc).timestamp() + 300)
         provider.generate = unavailable
@@ -72,17 +75,18 @@ async def test_held_repair_is_bounded_and_preserves_original_on_failure(env, tmp
         markers = list(db.scalars(select(Artifact).where(Artifact.kind == ATTEMPT)))
         assert len(markers) == (0 if case in {"owner_veto", "disabled"} else 1)
         if markers:
-            assert json.loads(markers[0].content)["state"] == ("repaired" if case == "clean" else "model_wait" if case == "model_wait" else "failed")
+            assert json.loads(markers[0].content)["state"] == ("repaired" if case == "clean" else "model_wait" if case in {"model_wait", "critic_wait"} else "failed")
     assert await run_held_repair_once(factory, settings, provider=provider) == 0
     assert len(provider.requests) == (0 if case in {"owner_veto", "disabled"} else 1 if case == "model_wait" else 2)
-    if case == "model_wait":
+    if case in {"model_wait", "critic_wait"}:
         with factory() as db:
             marker = db.scalar(select(Artifact).where(Artifact.kind == ATTEMPT))
             state = json.loads(marker.content)
             state["retry_at"] = "2020-01-01T00:00:00+00:00"
             marker.content = json.dumps(state)
             db.commit()
-        restored = SequenceProvider([response, {"findings": []}])
+        restored = SequenceProvider([{"findings": []}] if case == "critic_wait" else [response, {"findings": []}])
         assert await run_held_repair_once(factory, settings, provider=restored) == 1
+        assert len(restored.requests) == (1 if case == "critic_wait" else 2)
         with factory() as db:
             assert db.get(Artifact, article_id).status == ArtifactStatus.DRAFT

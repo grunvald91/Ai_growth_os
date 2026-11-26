@@ -184,7 +184,7 @@ def _recover_transient_failed_experiment_tasks(
             db.rollback()
     return recovered
 
-async def run_once() -> int:
+async def run_once(*, independent_seo: bool = False) -> int:
     settings = get_settings()
     # Reconcile pending stop/finish after a worker acknowledgement. This is
     # read-only for running campaigns and does not authorize any publication.
@@ -215,15 +215,16 @@ async def run_once() -> int:
         return 1
     # Publication runs independently in _seo_publication_loop, including
     # while a video or model request holds up this generation worker.
-    from app.seo.autoschedule import enqueue_enabled_if_due
-    with SessionLocal() as db:
-        enqueue_enabled_if_due(db, settings)
-    from app.seo.factory import run_factory_once
-    if await run_factory_once(SessionLocal, settings):
-        return 1
-    from app.seo.held_repair import run_held_repair_once
-    if await run_held_repair_once(SessionLocal, settings):
-        return 1
+    if not independent_seo:
+        from app.seo.autoschedule import enqueue_enabled_if_due
+        with SessionLocal() as db:
+            enqueue_enabled_if_due(db, settings)
+        from app.seo.factory import run_factory_once
+        if await run_factory_once(SessionLocal, settings):
+            return 1
+        from app.seo.held_repair import run_held_repair_once
+        if await run_held_repair_once(SessionLocal, settings):
+            return 1
     # Durable, opt-in IndexNow notices for committed ServGo public articles.
     # When no public verification key is configured, this does no network IO.
     if settings.geo_indexnow_key:
@@ -244,11 +245,13 @@ async def run_once() -> int:
         from app.social_vk import deliver_once as run_due_vk_post_once
         if await run_due_vk_post_once(SessionLocal, settings):
             return 1
-    from app.seo.article_retry import recover_failed_schema_once
-    with SessionLocal() as db:
-        recover_failed_schema_once(db, enabled=settings.seo_schema_recovery_enabled)
+    if not independent_seo:
+        from app.seo.article_retry import recover_failed_schema_once
+        with SessionLocal() as db:
+            recover_failed_schema_once(db, enabled=settings.seo_schema_recovery_enabled)
     from app.content.worker import run_content_once
-    content_count = await run_content_once(SessionLocal, settings)
+    content_count = (await run_content_once(SessionLocal, settings, seo_only=False)
+                     if independent_seo else await run_content_once(SessionLocal, settings))
     if content_count:
         return content_count
     with SessionLocal() as db:
@@ -322,6 +325,49 @@ async def _seo_publication_loop(settings):
         await asyncio.sleep(60)
 
 
+async def _seo_generation_once(settings, *, first=0):
+    """Round-robin SEO work independently of videos and the general queue.
+
+    One job per tick; rotate the starting phase so a backlog of held repairs,
+    factory plans or fresh articles cannot monopolize this lane.
+    """
+    from app.seo.factory import run_factory_once
+    from app.seo.held_repair import run_held_repair_once
+    from app.content.worker import run_content_once
+
+    async def articles():
+        return await run_content_once(SessionLocal, settings, seo_only=True)
+
+    async def planning():
+        from app.seo.autoschedule import enqueue_enabled_if_due
+        with SessionLocal() as db:
+            enqueue_enabled_if_due(db, settings)
+        return await run_factory_once(SessionLocal, settings)
+
+    async def repair():
+        return await run_held_repair_once(SessionLocal, settings)
+
+    phases = (articles, planning, repair)
+    for offset in range(len(phases)):
+        index = (first + offset) % len(phases)
+        try:
+            if await phases[index]():
+                return 1, (index + 1) % len(phases)
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "seo_generation_phase_failed phase=%s type=%s",
+                phases[index].__name__, type(exc).__name__)
+    return 0, (first + 1) % len(phases)
+
+
+async def _seo_generation_loop(settings):
+    first = 0
+    while True:
+        count, first = await _seo_generation_once(settings, first=first)
+        await asyncio.sleep(settings.team_worker_busy_poll_seconds if count
+                            else settings.team_worker_idle_poll_seconds)
+
+
 async def _seo_watchdog_loop(settings):
     from app.seo.watchdog import run_watchdog_once
     while True:
@@ -390,6 +436,7 @@ async def main() -> None:
     comment_tasks = []
     if settings.seo_watchdog_enabled:
         comment_tasks.append(asyncio.create_task(_seo_watchdog_loop(settings)))
+        comment_tasks.append(asyncio.create_task(_seo_generation_loop(settings)))
     if settings.comment_background_poll_enabled:
         comment_tasks.append(asyncio.create_task(_comment_poll_loop(settings)))
     if settings.comment_background_draft_enabled:
@@ -397,7 +444,7 @@ async def main() -> None:
     try:
         while True:
             try:
-                count = await run_once()
+                count = await run_once(independent_seo=True) if settings.seo_watchdog_enabled else await run_once()
             except Exception:
                 import logging
                 logging.getLogger(__name__).exception("team_worker_cycle_failed")

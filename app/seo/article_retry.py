@@ -25,16 +25,18 @@ AUTO_RECOVERY = "seo_article_auto_recovery"
 
 
 def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
-           automatic: bool) -> Task:
-    # The same company lock serializes this operator action with SEO opt-out.
-    if db.scalar(select(Product.id).where(Product.id == product_id).with_for_update()) is None:
+           automatic: bool, inspect_only: bool = False) -> Task:
+    # Read-only diagnosis uses the same checks without locking or mutating rows.
+    company_query = select(Product.id).where(Product.id == product_id)
+    if db.scalar(company_query if inspect_only else company_query.with_for_update()) is None:
         raise LookupError("Компания не найдена")
     require_enabled(db, product_id)
-    task = db.scalar(select(Task).where(
+    task_query = select(Task).where(
         Task.id == task_id, Task.product_id == product_id,
         Task.assigned_agent == "content_factory",
         Task.title.like(f"{SEO_TASK_PREFIX}%"),
-    ).with_for_update())
+    )
+    task = db.scalar(task_query if inspect_only else task_query.with_for_update())
     if task is None:
         raise LookupError("Задание SEO-статьи не найдено")
     if task.status != TaskStatus.FAILED:
@@ -113,6 +115,8 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
             AgentRun.task_id == task.id, AgentRun.status == "running"
         ))):
             raise ValueError("An agent is still running")
+    if inspect_only:
+        return task
     # Requeued tasks are subject to the usual per-company daily limits,
     # original article grounding, and final critic validation.
     task.status = TaskStatus.QUEUED
@@ -162,3 +166,31 @@ def recover_failed_schema_once(db: Session, *, enabled: bool) -> int:
         except (LookupError, ValueError):
             db.rollback()
     return 0
+
+
+def automatic_recovery_reason(db: Session, *, product_id: UUID, task_id: UUID) -> str:
+    """Read-only explanation; never requeue, call a model, or expose raw errors."""
+    try:
+        _retry(db, product_id=product_id, task_id=task_id, actor="diagnostic",
+               automatic=True, inspect_only=True)
+        return "eligible"
+    except (LookupError, ValueError) as exc:
+        # Match only the fixed validation messages above; unknown exceptions
+        # may contain private input and must not become audit log text.
+        reasons = {
+            "Компания не найдена": "company_missing",
+            "Задание SEO-статьи не найдено": "task_missing",
+            "Повторить можно только статью со статусом ошибки": "not_failed",
+            "Некорректная ссылка на SEO-план": "invalid_plan_reference",
+            "Не найден исходный SEO-план или задание статьи": "missing_plan_or_request",
+            "Исходные данные статьи не прошли проверку": "invalid_request",
+            "Задание не соответствует исходному SEO-плану": "request_plan_mismatch",
+            "Для этого задания уже существует статья; проверьте её статус": "article_exists",
+            "Automatic recovery paused": "circuit_breaker",
+            "Owner already retried this task": "owner_retried",
+            "Automatic recovery already attempted or cooling down": "attempted_or_cooldown",
+            "Recent failure; wait for cooldown": "recent_failure",
+            "Failure is not eligible for automatic schema recovery": "unsupported_failure",
+            "An agent is still running": "agent_running",
+        }
+        return reasons.get(str(exc), "validation_blocked")

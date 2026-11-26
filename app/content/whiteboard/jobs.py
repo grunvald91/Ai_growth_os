@@ -183,7 +183,8 @@ def approve_job(db, product_id, task_id, *, request_digest, confirmed, decided_b
 # A storyboard cut off at the (now generous) output ceiling is a runaway reply: repeating the
 # same request five times only bills the same failure again, so it is not resumed automatically.
 RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error',
-                              'openrouter_unavailable', 'claudehub_unavailable', 'storyboard_empty'})
+                              'openrouter_unavailable', 'claudehub_unavailable', 'storyboard_empty', 'provider_model_wait',
+                              'model_unavailable', 'claudehub_image_unavailable', 'claudehub_vision_unavailable'})
 RESUME_ACTION = 'whiteboard_resume'
 AUTO_RESUME_ACTION = 'whiteboard_auto_resume'
 # Pause before an automatic continuation, the same every time (it never grows):
@@ -270,13 +271,29 @@ def refund_unanswered(value) -> int:
     return refunded
 
 
-def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, now=None) -> bool:
+def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, now=None,
+                         model_retry_at=None) -> bool:
     """Requeue a transient failure after a short fixed pause, inside the approved call limit.
 
     No extra money is approved here: continuation spends only calls the owner
     already confirmed, completed stages are reused, and every automatic attempt
     is recorded as its own policy Approval row.
     """
+    now = now or datetime.now(timezone.utc)
+    # A shared model ledger has already determined the next actual check.
+    # Never treat a no-call deferral as a paid failure or grant more calls.
+    if model_retry_at is not None:
+        if started_attempts(value) >= call_limit(value, payload):
+            return False
+        at = datetime.fromtimestamp(model_retry_at, timezone.utc)
+        db.add(Approval(product_id=task.product_id, artifact_id=source.id,
+                        action_type=AUTO_RESUME_ACTION, risk_level='YELLOW',
+                        status='approved', requested_by='policy', decided_by='policy:model_wait',
+                        decided_at=now, reason=f'model wait; next {at.isoformat()}'))
+        value.update(stage='retry_wait', error=None, last_error=code,
+                     resume_requested=True, retry_at=at.isoformat())
+        task.status = TaskStatus.QUEUED
+        return True
     if image_recovery_enabled(payload):
         decision = schedule_image_recovery(value, payload, code, now=now)
         if decision is not None:
@@ -290,6 +307,25 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
                          retry_at=decision.at.isoformat())
             task.status = TaskStatus.QUEUED
             return True
+    # Catalogue/connectivity checks are free and do not prove an individual
+    # model has failed a paid request. Keep waiting without changing models.
+    if value.get('failed_stage') == 'preflight' and code in {
+            'openrouter_unavailable', 'claudehub_unavailable', 'model_unavailable',
+            'claudehub_image_unavailable', 'claudehub_vision_unavailable'}:
+        from .image_recovery import next_check
+        outage = value.get('preflight_outage') or {}
+        if outage.get('code') != code:
+            outage = {'code': code, 'since': now.isoformat()}
+        value['preflight_outage'] = outage
+        at = next_check(datetime.fromisoformat(outage['since']), now)
+        db.add(Approval(product_id=task.product_id, artifact_id=source.id,
+                        action_type=AUTO_RESUME_ACTION, risk_level='YELLOW',
+                        status='approved', requested_by='policy', decided_by='policy:preflight_wait',
+                        decided_at=now, reason=f'preflight {code}; next {at.isoformat()}'))
+        value.update(stage='retry_wait', error=None, last_error=code,
+                     resume_requested=True, retry_at=at.isoformat())
+        task.status = TaskStatus.QUEUED
+        return True
     if not attempts:
         return False
     used = int(value.get('auto_resumes', 0))
@@ -430,7 +466,7 @@ class CallLedger:
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
             provider_name = ('configured_text' if model_stage == 'storyboard' or stage == 'science_review'
                              else payload.image_provider if model_stage == 'image'
-                             else 'claudehub' if regions_on_claudehub(payload.models) else 'openrouter')
+                             else 'claudehub' if model_stage == 'regions' and regions_on_claudehub(payload.models) else 'openrouter')
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
                            provider=provider_name,
                            model=effective_image_model(value, payload) if model_stage == 'image' else getattr(payload.models, model_stage), status='running',
@@ -451,8 +487,9 @@ class CallLedger:
                 task = owner_task(db, self.product_id, self.task_id, lock=True)
                 _, state, _, payload = records(db, task, lock=True)
                 value = json.loads(state.content)
-                if image_recovery_enabled(payload) and run.model == payload.models.image:
-                    value.pop('image_outage_since', None)
+                if image_recovery_enabled(payload):
+                    key = 'image_outage_since' if run.model == payload.models.image else 'backup_image_outage_since'
+                    value.pop(key, None)
                     state.content = json.dumps(value)
             run.status = 'failed' if error else 'completed'
             run.error = error
@@ -461,19 +498,25 @@ class CallLedger:
 
 
 class GuardedStage:
-    def __init__(self, provider, stage, ledger):
+    def __init__(self, provider, stage, ledger, *, availability=None, model=None):
         self.provider, self.stage, self.ledger = provider, stage, ledger
+        self.availability, self.model = availability, model
 
     def __getattr__(self, name):
         method = getattr(self.provider, name)
         async def guarded(*args, **kwargs):
-            run_id = self.ledger.begin(self.stage)
-            try:
-                result = await method(*args, **kwargs)
-            except BaseException as exc:
-                # Keep the exception type so a timeout is distinguishable from a refusal.
-                self.ledger.finish(run_id, error=f'provider_call_failed_billing_unknown:{type(exc).__name__}')
-                raise
-            self.ledger.finish(run_id)
-            return result
+            async def invoke(_model):
+                run_id = self.ledger.begin(self.stage)
+                try:
+                    result = await method(*args, **kwargs)
+                except BaseException as exc:
+                    self.ledger.finish(run_id, error=f'provider_call_failed_billing_unknown:{type(exc).__name__}')
+                    raise
+                self.ledger.finish(run_id)
+                return result
+            if self.availability is not None:
+                # Check before claiming a billable call; only an actual provider
+                # invocation enters the existing owner-approved ledger.
+                return await self.availability.generate((self.model,), invoke)
+            return await invoke(self.model)
         return guarded

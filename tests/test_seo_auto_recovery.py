@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 
 from app.models.domain import AgentRun, Artifact, Task, TaskStatus
 from app.seo.activation import set_enabled
-from app.seo.article_retry import AUTO_RECOVERY, recover_failed_schema_once
+from app.seo.article_retry import AUTO_RECOVERY, recover_failed_schema_once, automatic_recovery_reason
 from app.workflows.article_contracts import ArticleProductionInput
 from test_seo_article import BRIEF
 from test_seo_factory import env  # noqa: F401
@@ -43,6 +43,14 @@ def test_auto_recovery_is_bounded_and_preserves_schedule(env, case):
             db.commit()
         if case == "disabled":
             set_enabled(db, company, enabled=False, actor="test")
+        reason = automatic_recovery_reason(db, product_id=company, task_id=task_id)
+        if case in {"schema", "grounding"}:
+            assert reason == "eligible"
+        else:
+            assert reason != "eligible"
+        assert db.get(Task, task_id).status == TaskStatus.FAILED
+        assert not db.scalar(select(Artifact).where(
+            Artifact.task_id == task_id, Artifact.kind == AUTO_RECOVERY))
         assert recover_failed_schema_once(db, enabled=False) == 0
         assert recover_failed_schema_once(db, enabled=True) == int(case in {"schema", "grounding"})
         task = db.get(Task, task_id)

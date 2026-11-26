@@ -35,7 +35,8 @@ class LLMService:
                        prepare_original: Callable[[str], dict] | None = None,
                        on_observed: Callable[[str, LLMResponse], None] | None = None,
                        on_review_progress: Callable[[LLMResponse], None] | None = None,
-                       review_enabled: bool | None = None) -> LLMResponse:
+                       review_enabled: bool | None = None,
+                       call_checkpoint=None) -> LLMResponse:
         sanitized_request = self._privacy_gateway.sanitize(request)
 
         def observe(stage: str, reply: LLMResponse) -> LLMResponse:
@@ -45,15 +46,24 @@ class LLMService:
                 on_observed(stage, reply)
             return reply
 
-        original = observe("author", await self._provider.generate(sanitized_request))
+        async def call(stage: str, safe_request: LLMRequest) -> LLMResponse:
+            if call_checkpoint is not None:
+                saved = call_checkpoint.load(stage, safe_request)
+                if saved is not None:
+                    return saved  # already observed/billed in the original run
+            reply = observe(stage, await self._provider.generate(safe_request))
+            if call_checkpoint is not None:
+                call_checkpoint.save(stage, safe_request, reply)
+            return reply
+
+        original = await call("author", sanitized_request)
         if not self._critic_enabled or review_enabled is False:
             return original
 
         async def review_generate(next_request: LLMRequest) -> LLMResponse:
             stage = ("critic" if next_request.metadata.get("task_type") == "quality_review"
                      else "revision")
-            response = await self._provider.generate(self._privacy_gateway.sanitize(next_request))
-            return observe(stage, response)
+            return await call(stage, self._privacy_gateway.sanitize(next_request))
 
         from app.llm.critic import second_opinion
         return await second_opinion(

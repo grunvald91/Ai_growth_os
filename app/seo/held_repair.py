@@ -232,8 +232,14 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
 
         # One author correction followed by independent critic. No further author
         # revision: another material issue is a terminal held result for this attempt.
-        reply = await asyncio.wait_for(service.generate(request, on_observed=observed),
-            timeout=300 + service.extra_timeout_seconds)
+        from app.llm.deferred_checkpoint import DeferredCallCheckpoint
+        with session_factory() as checkpoint_db:
+            checkpoint = DeferredCallCheckpoint(checkpoint_db,
+                product_id=product_id, task_id=task_id, run_id=run_id,
+                agent_name="seo_repair_editor", scope=f"held:{article_id}:{digest}:{version}",
+                privacy=privacy, provider=settings.llm_provider)
+            reply = await asyncio.wait_for(service.generate(request, on_observed=observed,
+                call_checkpoint=checkpoint), timeout=300 + service.extra_timeout_seconds)
         review = reply.quality_review or {}
         if review.get("status") != "no_material_issues":
             raise RepairBlocked("repair_critic_not_clean")
