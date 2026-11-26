@@ -26,7 +26,7 @@ jobs:
       - name: Validate provisioning scripts
         run: |
           python -m py_compile deploy/ops/provision_mail_exa.py services/booking_bot/scripts/release_yandex_mail.py
-          python -m pytest -q tests/test_mail_exa_provisioner.py
+          python -m pytest --noconftest -q tests/test_mail_exa_provisioner.py
       - name: Apply the reviewed provisioner and exercise the deployed application
         env:
           APPLY: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
