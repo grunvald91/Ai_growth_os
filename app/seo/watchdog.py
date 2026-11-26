@@ -36,6 +36,7 @@ MESSAGES = {
     "missing_article": "Завершённые задания без статьи",
     "public_blog_unavailable": "Не подтверждена привязка публичного блога",
     "model_wait": "Задания длительно ожидают доступности модели",
+    "model_check_overdue": "Пропущена запланированная проверка доступности модели",
 }
 
 
@@ -86,15 +87,30 @@ def observe(db, product, activation, settings, now):
     for code in ("publication_mismatch", "generation_failed", "running_long", "missing_article"):
         if audit.counts.get(code):
             issues[code] = audit.counts[code]
-    waiting = set()
+    # Consider only the latest scheduled check for each queued task. Old
+    # markers are audit history. A missed check is a worker issue, not proof
+    # that the provider is still unavailable.
+    from app.models.domain import AgentRun
+    waits = {}
     for task_id, retry_at in db.execute(select(Artifact.task_id, Artifact.title).join(Task, Task.id == Artifact.task_id).where(
             Artifact.product_id == product.id, Task.product_id == product.id,
             Task.status == TaskStatus.QUEUED, Artifact.kind == 'seo_model_wait')):
         next_check = _date(retry_at)
-        if next_check and next_check >= now - timedelta(minutes=30):
-            waiting.add(task_id)
+        if next_check and (task_id not in waits or next_check > waits[task_id]):
+            waits[task_id] = next_check
+    waiting = set()
+    overdue = set()
+    for task_id, next_check in waits.items():
+        # A subsequent real attempt may have superseded this wait marker.
+        later = db.scalar(select(AgentRun.id).where(AgentRun.task_id == task_id,
+            AgentRun.started_at >= db_time(db, next_check)).limit(1))
+        if later is not None and next_check < now:
+            continue
+        (overdue if next_check < now - timedelta(minutes=30) else waiting).add(task_id)
     if waiting:
         issues['model_wait'] = len(waiting)
+    if overdue:
+        issues['model_check_overdue'] = len(overdue)
     if not public_blog_ready(db, product.id):
         issues["public_blog_unavailable"] = 1
         return issues
@@ -185,12 +201,7 @@ def recover_once(session_factory, settings):
     """Use existing guarded recovery; never start paid inference in watchdog."""
     from app.seo.article_retry import recover_failed_schema_once
     from app.seo.autoschedule import enqueue_enabled_if_due
-    # Lease recovery already exists in the content worker. Import here so
-    # the watchdog also works while older branches are tested independently.
-    try:
-        from app.seo.interruption import recover_interrupted_articles
-    except ImportError:
-        recover_interrupted_articles = None
+    from app.seo.interruption import recover_interrupted_articles
     def schema():
         with session_factory() as db:
             recover_failed_schema_once(db, enabled=settings.seo_schema_recovery_enabled)
@@ -199,9 +210,7 @@ def recover_once(session_factory, settings):
         with session_factory() as db:
             enqueue_enabled_if_due(db, settings)
 
-    actions = [schema, plan]
-    if recover_interrupted_articles:
-        actions.insert(0, lambda: recover_interrupted_articles(session_factory, settings.products_root))
+    actions = [lambda: recover_interrupted_articles(session_factory, settings.products_root), schema, plan]
     for action in actions:
         try:
             action()
