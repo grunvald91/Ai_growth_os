@@ -264,7 +264,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 # The separately authorized image recovery budget retains its
                 # existing durable model switch. All other stages use the shared
                 # waiting algorithm, without inventing a reserve model or calls.
-                if model_stage == 'image' and image_recovery_enabled(payload):
+                if (not settings.llm_availability_enabled
+                        or (model_stage == 'image' and image_recovery_enabled(payload))):
                     return GuardedStage(provider, stage, ledger)
                 endpoint = (job_settings.xai_base_url if model_stage == 'storyboard'
                             or stage == 'science_review'
