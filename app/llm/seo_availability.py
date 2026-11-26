@@ -14,8 +14,6 @@ from pathlib import Path
 
 import httpx
 
-from app.llm.errors import ProviderEmptyResponseError, ProviderMalformedResponseError
-
 WAIT_KIND = "seo_model_wait"
 DAY = 24 * 60 * 60
 HOUR = 60 * 60
@@ -117,10 +115,10 @@ class AvailabilityPolicy:
                     result = await call(primary)
                 except Exception as exc:
                     if not transient(exc):
-                        # The gateway answered, but its reply was unusable. Do not
-                        # continue an availability outage through a response error.
-                        if isinstance(exc, (ProviderEmptyResponseError, ProviderMalformedResponseError)):
-                            self._save(path, None)
+                        # A response/configuration error is not evidence of
+                        # continuous model unavailability. Restart the outage
+                        # clock only on a subsequent genuine availability error.
+                        self._save(path, None)
                         raise
                     now = self.clock()
                     first = min(state["first"], now) if state else now
@@ -141,13 +139,13 @@ class AvailabilityPolicy:
             if state["last"] - state["first"] < DAY or not fallbacks:
                 raise ModelDeferred(state["next"])
             retry_at = state["next"]
-        for model in fallbacks:
-            try:
-                return await call(model)
-            except Exception as exc:
-                if not transient(exc):
-                    raise
-        raise ModelDeferred(max(retry_at, self.clock() + 60))
+        # The reserve is itself a model, subject to exactly the same outage
+        # cadence. Never jump straight from a newly unavailable reserve to
+        # the third model. Keep the primary's next check in the schedule too.
+        try:
+            return await self.generate(tuple(fallbacks), call)
+        except ModelDeferred as deferred:
+            raise ModelDeferred(min(retry_at, deferred.retry_at)) from None
 
 
 def policy_for(settings, *, seo=False, endpoint=None, provider=None):
