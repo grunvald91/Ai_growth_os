@@ -1595,3 +1595,22 @@ def test_task_preview_script_preserves_primary_links_and_mobile_layout():
     assert '.sg-has-task-peek .sg-work-item-foot' in CSS
     assert '@media(max-width:1080px)' in CSS
     assert '.sg-work-preview-detail[hidden]' in CSS
+
+
+def test_v4_owner_mail_nav_is_hidden_until_canonical_permission(live):
+    client, _, product = live
+    page = client.get(f'/studio/products/{product.id}?design=v4')
+    assert page.status_code == 200
+    nav = page.text.split('<nav class="mobile-nav"', 1)[1].split('</nav>', 1)[0]
+    assert 'data-sg-owner-mail hidden style="display:none"' in nav
+    assert 'href="/workspace/mail"' in nav
+    assert '<span>Почта</span>' in nav
+    assert page.text.count('href="/workspace/mail"') == 2
+    assert 'servgo-organisations.js?v=3' in page.text
+    script = client.get('/studio/assets/servgo-organisations.js')
+    assert script.status_code == 200
+    assert "window.location.origin !== 'https://servgo.ru'" in script.text
+    assert "fetch('/api/owner-mail/permission'" in script.text
+    assert '(await response.json()).allowed !== true' in script.text
+    assert "localStorage.getItem('token') !== token" in script.text
+    assert 'link.hidden = false' in script.text
