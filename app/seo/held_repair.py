@@ -112,9 +112,25 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
             if not _eligible(db, row):
                 db.rollback()
                 continue
-            if db.scalar(select(exists().where(
-                    Artifact.product_id == product_id, Artifact.task_id == row.task_id,
-                    Artifact.kind == ATTEMPT, Artifact.title == str(article_id)))):
+            # A model wait is not a consumed editorial attempt. Keep the
+            # durable marker, but permit a new claim only when its timer is due.
+            from app.llm.seo_availability import ModelDeferred, wait_until
+            from app.seo.schedule import utc
+            marker_rows = list(db.scalars(select(Artifact).where(
+                Artifact.product_id == product_id, Artifact.task_id == row.task_id,
+                Artifact.kind == ATTEMPT, Artifact.title == str(article_id))))
+            blocked = False
+            for old_marker in marker_rows:
+                try:
+                    state = json.loads(old_marker.content)
+                    if (state.get("state") != "model_wait"
+                            or utc(datetime.fromisoformat(state["retry_at"])) > datetime.now(timezone.utc)):
+                        blocked = True
+                        break
+                except (ValueError, TypeError, KeyError, AttributeError):
+                    blocked = True
+                    break
+            if blocked:
                 db.rollback()
                 continue
             try:
@@ -200,7 +216,7 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
 
     reply = None
     try:
-        service = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings),
+        service = LLMService(privacy_gateway=privacy, provider=provider or build_llm_provider(settings, seo_availability=True),
             critic_enabled=True, critic_limits={
                 "max_context_chars": max(150000, settings.agent_critic_max_context_chars),
                 "max_original_chars": 70000,
@@ -257,6 +273,16 @@ async def run_held_repair_once(session_factory, settings, *, provider=None) -> i
             row.status = ArtifactStatus.DRAFT  # existing publisher enforces date, quotas, veto and critic
             db.get(Artifact, marker_id).content = json.dumps({"state": "repaired", "sha256": digest,
                                                             "version": version})
+            db.commit()
+    except ModelDeferred as exc:
+        with session_factory() as db:
+            db.scalar(select(Product.id).where(Product.id == product_id).with_for_update())
+            run = db.get(AgentRun, run_id)
+            run.status, run.error = "failed", "seo_held_repair_model_wait"
+            run.finished_at = datetime.now(timezone.utc)
+            db.get(Artifact, marker_id).content = json.dumps({
+                "state": "model_wait", "sha256": digest, "version": version,
+                "retry_at": wait_until(exc)})
             db.commit()
     except (Exception, asyncio.CancelledError) as exc:
         with session_factory() as db:
