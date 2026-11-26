@@ -15,7 +15,7 @@ from app.models.domain import AgentRun, Approval, Artifact, ArtifactStatus, Prod
 from app.privacy import PrivacyGateway
 from .contracts import Contract, WhiteboardRequest
 from .science import requires_science_review
-from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels, regions_on_claudehub, CLAUDEHUB_IMAGE_MODELS
+from .runtime import TRANSIENT_STATUSES, ReadinessError, WhiteboardModels, regions_on_claudehub, CLAUDEHUB_IMAGE_MODELS, FISH_SPEECH_MODEL, speech_on_fish
 from .image_recovery import IMAGE_RECOVERY_RESERVE, image_recovery_enabled, schedule_image_recovery, effective_image_model
 from pydantic import Field, model_validator
 
@@ -360,6 +360,67 @@ def resume_job(db, product_id, task_id, *, confirmed, decided_by, extra_calls=0)
     return task
 
 
+FISH_RESUME_ACTION = 'whiteboard_resume_fish'
+
+
+def can_switch_to_fish(task_status, value, payload):
+    return (task_status in {TaskStatus.FAILED, TaskStatus.QUEUED}
+            and (task_status == TaskStatus.FAILED or value.get('stage') == 'retry_wait')
+            and not value.get('fish_resume')
+            and not speech_on_fish(payload.models)
+            and payload.visual_repair_from is None
+            and payload.image_provider == 'claudehub'
+            and payload.models.image in CLAUDEHUB_IMAGE_MODELS
+            and regions_on_claudehub(payload.models)
+            and started_attempts(value) < call_limit(value, payload))
+
+
+def effective_speech(db, task, source, value, payload):
+    grant_data = value.get('fish_resume')
+    if grant_data is None:
+        return payload.models.speech, payload.request.voice
+    try:
+        voice = grant_data['voice']
+        grant = db.get(Approval, UUID(grant_data['approval_id']))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise ReadinessError('approval_invalid') from None
+    if (not isinstance(voice, str) or len(voice) > 80 or not voice
+            or grant is None or grant.status != 'approved'
+            or grant.product_id != task.product_id or grant.artifact_id != source.id
+            or grant.action_type != FISH_RESUME_ACTION
+            or grant.reason != f'sha256:{digest(source.content)};fish:{voice}'
+            or payload.visual_repair_from is not None):
+        raise ReadinessError('approval_invalid')
+    return FISH_SPEECH_MODEL, voice
+
+
+def resume_with_fish(db, product_id, task_id, *, confirmed, request_digest, decided_by, settings):
+    if not confirmed or not settings.fish_api_key:
+        raise ReadinessError('approval_invalid')
+    db.scalar(select(Product).where(Product.id == product_id).with_for_update())
+    task = owner_task(db, product_id, task_id, lock=True)
+    source, state, approval, payload = records(db, task, lock=True)
+    value = json.loads(state.content)
+    if (approval.status != 'approved' or not secrets.compare_digest(digest(source.content), request_digest)
+            or not can_switch_to_fish(task.status, value, payload)):
+        raise ReadinessError('approval_invalid')
+    voice = settings.fish_voice_id or 'default'
+    import re
+    if voice != 'default' and not re.fullmatch(r'[0-9a-fA-F]{32}', voice):
+        raise ReadinessError('configuration_missing')
+    grant = Approval(product_id=product_id, artifact_id=source.id, action_type=FISH_RESUME_ACTION,
+                     risk_level='YELLOW', status='approved', requested_by='owner', decided_by=decided_by,
+                     decided_at=datetime.now(timezone.utc), reason=f'sha256:{digest(source.content)};fish:{voice}')
+    db.add(grant); db.flush()
+    value.update(fish_resume={'approval_id': str(grant.id), 'voice': voice}, stage='queued',
+                 error=None, failed_stage=None, diagnostic=None, retry_at=None,
+                 resume_requested=True, auto_resumes=0)
+    state.content = json.dumps(value)
+    task.status = TaskStatus.QUEUED
+    db.commit()
+    return task
+
+
 def cancel_job(db, product_id, task_id):
     task = owner_task(db, product_id, task_id, lock=True)
     if task.status not in {TaskStatus.WAITING_APPROVAL, TaskStatus.QUEUED, TaskStatus.RUNNING}:
@@ -428,12 +489,16 @@ class CallLedger:
                 if total_begun - attempt_cap['baseline_runs'] >= attempt_cap['max_additional']:
                     raise ReadinessError('call_limit')
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
-            provider_name = ('configured_text' if model_stage == 'storyboard' or stage == 'science_review'
+            speech_model, _ = effective_speech(db, task, source, value, payload)
+            provider_name = ('fish_audio' if model_stage == 'speech' and speech_model == FISH_SPEECH_MODEL
+                             else 'openrouter' if model_stage == 'speech'
+                             else 'configured_text' if model_stage == 'storyboard' or stage == 'science_review'
                              else payload.image_provider if model_stage == 'image'
                              else 'claudehub' if regions_on_claudehub(payload.models) else 'openrouter')
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
                            provider=provider_name,
-                           model=effective_image_model(value, payload) if model_stage == 'image' else getattr(payload.models, model_stage), status='running',
+                           model=(effective_image_model(value, payload) if model_stage == 'image' else
+                                  speech_model if model_stage == 'speech' else getattr(payload.models, model_stage)), status='running',
                            started_at=datetime.now(timezone.utc), input_references=[str(source.id)])
             db.add(run); db.flush()
             if 'attempts_started' in value:
