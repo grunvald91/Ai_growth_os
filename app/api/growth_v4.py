@@ -377,10 +377,15 @@ def render_v4(page, request, pid, switch):
                  ('chat','ИИ-чат','/studio/chat','message'),
                  ('team','ИИ-команда','/studio/team','user')]
 
+    # The Mail workspace is platform-owner-only, not a tenant permission.
+    # The canonical ServGo API verifies the browser's bearer before showing it.
+    links.append(('mail', 'Почта', '/workspace/mail', 'mail'))
+
     def link(row, mobile=False):
         key,label,href,glyph = row
         active = current == href.split('?')[0] and ('?' not in href or str(request.url.query) == href.split('?')[1])
-        return (f'<a class="{"active" if active else ""} {"" if mobile else "nav-btn"}" '
+        mail_gate = ' data-sg-owner-mail hidden style="display:none"' if key == 'mail' else ''
+        return (f'<a{mail_gate} class="{"active" if active else ""} {"" if mobile else "nav-btn"}" '
                 f'href="{html.escape(href,quote=True)}"'+(' aria-current="page"' if active else '')+
                 f'>{icon(glyph)}<span>{html.escape(label)}</span></a>')
 
@@ -540,7 +545,7 @@ def render_v4(page, request, pid, switch):
             nav += link(calendar, True)
     by_key = {r[0]: r for r in links}
     more_groups = [
-        ('Контент и продвижение', ('seo','plan','materials','channels','campaigns','comments')),
+        ('Контент и продвижение', ('seo','plan','materials','channels','campaigns','mail','comments')),
         ('Аналитика и исследования', ('analytics','intelligence')),
         ('ИИ-инструменты', ('chat','team','tune','speed')),
         ('Компания и управление', ('profile','accounts','servgo','logout')),
@@ -642,7 +647,7 @@ def render_v4(page, request, pid, switch):
             '<p class="sg-daily-hint">Нажмите вне панели, чтобы свернуть.</p></aside>'
         )
         template = template.replace('</body>', drawer+'</body>', 1)
-    extras += '<script src="/studio/assets/servgo-organisations.js?v=2"></script>'
+    extras += '<script src="/studio/assets/servgo-organisations.js?v=3"></script>'
     extras += '<script src="/studio/assets/growth-daily.js?v=4"></script>'
     template = template.replace('</head>', (
         '<link rel="stylesheet" href="/studio/assets/growth-live.css?v=31-create-video-controls">'

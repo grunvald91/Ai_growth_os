@@ -197,6 +197,29 @@ JS = r"""
     showMessage('Не удалось получить все организации ServGo. Ниже показаны только уже подключённые.', true);
   });
   }
+  // Mail is a platform-owner workspace. Keep links hidden unless the same
+  // server-side permission used in AdminShell explicitly authorizes access.
+  function revealOwnerMail() {
+    if (window.location.origin !== 'https://servgo.ru') return;
+    const links = document.querySelectorAll('[data-sg-owner-mail]');
+    if (!links.length) return;
+    let token;
+    try { token = localStorage.getItem('token'); } catch (_) { return; }
+    if (!token) return;
+    fetch('/api/owner-mail/permission', {
+      method: 'GET', credentials: 'same-origin', cache: 'no-store',
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(async response => {
+      if (!response.ok || (await response.json()).allowed !== true) return;
+      // A login change while the request was running must not reveal the link.
+      if (localStorage.getItem('token') !== token) return;
+      for (const link of links) {
+        link.hidden = false;
+        link.style.removeProperty('display');
+      }
+    }).catch(() => { /* Fail closed; the workspace also checks access. */ });
+  }
+  revealOwnerMail();
   window.ServGoOrganizations = init;
   init(document.getElementById('sg-servgo-organisations'));
 })();
