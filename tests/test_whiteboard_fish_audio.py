@@ -74,3 +74,65 @@ async def test_fish_preflight_does_not_contact_openrouter():
         with pytest.raises(ReadinessError, match='configuration_missing'):
             await preflight(s.model_copy(update={'fish_api_key': None}), models, voice,
                             client=o, claudehub_client=h, fish_client=f)
+
+
+from test_whiteboard_jobs import environment, client, approve
+
+
+def test_owner_switch_preserves_original_approval_and_routes_ledger(environment):
+    from uuid import UUID
+    from app.content.whiteboard.jobs import (
+        CallLedger, digest, records, owner_task, resume_with_fish, effective_speech,
+    )
+    from app.models.domain import AgentRun, TaskStatus
+    factory, original, product, other = environment
+    s = original.model_copy(update={'fish_api_key': 'test-key'})
+    with client() as browser:
+        response = browser.post(f'/products/{product}/whiteboard/jobs',
+                                json={'topic': 'Продолжение видео с новой озвучкой'})
+        assert response.status_code == 201
+        task_id = UUID(response.json()['task_id'])
+    approve(environment, task_id)
+    with factory() as db:
+        task = owner_task(db, product, task_id)
+        source, state, approval, payload = records(db, task)
+        old_content = source.content
+        old_approval = approval.reason
+        value = json.loads(state.content)
+        value.update(stage='failed', error='openrouter_forbidden', failed_stage='speech')
+        state.content = json.dumps(value)
+        task.status = TaskStatus.FAILED
+        db.commit()
+        with pytest.raises(ReadinessError):
+            resume_with_fish(db, product, task_id, confirmed=False, request_digest=digest(old_content),
+                             decided_by='owner', settings=s)
+        with pytest.raises(ReadinessError):
+            resume_with_fish(db, product, task_id, confirmed=True, request_digest='0'*64,
+                             decided_by='owner', settings=s)
+        resume_with_fish(db, product, task_id, confirmed=True, request_digest=digest(old_content),
+                         decided_by='owner', settings=s)
+        task = owner_task(db, product, task_id)
+        source, state, approval, payload = records(db, task)
+        value = json.loads(state.content)
+        assert source.content == old_content and approval.reason == old_approval
+        assert effective_speech(db, task, source, value, payload) == (FISH_SPEECH_MODEL, 'default')
+        assert value['resume_requested'] and task.status == TaskStatus.QUEUED
+        task.status = TaskStatus.RUNNING
+        db.commit()
+    run_id = CallLedger(factory, product, task_id).begin('speech')
+    with factory() as db:
+        run = db.get(AgentRun, run_id)
+        assert run.model == FISH_SPEECH_MODEL and run.provider == 'fish_audio'
+
+
+@pytest.mark.asyncio
+async def test_voice_override_preserves_checkpoint_request_voice():
+    seen = []
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, content=b'ID3' + b'x' * 200)
+    async with httpx.AsyncClient(base_url='https://api.fish.audio/', transport=httpx.MockTransport(handler)) as c:
+        provider = FishSpeechProvider(api_key='test', model=FISH_SPEECH_MODEL,
+                                      client=c, voice_override='default')
+        await provider.synthesize('Привет!', language='ru', voice='eve')
+    assert seen == [{'text': 'Привет!', 'format': 'mp3'}]
