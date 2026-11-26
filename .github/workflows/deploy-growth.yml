@@ -173,6 +173,7 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           SSHPASS: ${{ secrets.SERVER_SSH_PASSWORD }}
           API_YANDEX: ${{ secrets.API_YANDEX }}
+          FISH_API_KEY: ${{ secrets.FISH_API_KEY }}
           HOST: ${{ vars.DEPLOY_HOST || '155.212.162.47' }}
           # SHA256 fingerprint of the server host key, pinned like the booking_bot workflows.
           HOST_FP: uQJp3lT4golKb3lsDTCFozGWR1ihlu1w/Oa4cSzCdpU
@@ -186,18 +187,26 @@ jobs:
             # deployment, irrespective of which provider credentials exist.
             printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
             printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-            if [ -n "$API_YANDEX" ] && [ -n "$SSHPASS" ]; then
+            if { [ -n "$API_YANDEX" ] || [ -n "$FISH_API_KEY" ]; } && [ -n "$SSHPASS" ]; then
               # One-time server .env sync uses a separate authenticated channel.
               # The restricted key is intentionally unable to write secrets.
               sudo apt-get install -y -qq sshpass >/dev/null
               SSH_OPTS=(-o StrictHostKeyChecking=yes -o ConnectTimeout=20 -o ControlMaster=auto
                         -o ControlPath=/tmp/ssh-growth-secret-%C -o ControlPersist=60)
               sync_run() { sshpass -e ssh "${SSH_OPTS[@]}" "root@$HOST" "$@"; }
-              git show "$SHA:deploy/ops/sync_yandex_env.py" \
-                | sync_run 'umask 077; cat > /opt/ai_growth_os/deploy/sync_yandex_env.py'
-              printf '%s' "$API_YANDEX" \
-                | sync_run "python3 /opt/ai_growth_os/deploy/sync_yandex_env.py"
+              if [ -n "$API_YANDEX" ]; then
+                git show "$SHA:deploy/ops/sync_yandex_env.py" \
+                  | sync_run 'umask 077; cat > /opt/ai_growth_os/deploy/sync_yandex_env.py'
+                printf '%s' "$API_YANDEX" | sync_run "python3 /opt/ai_growth_os/deploy/sync_yandex_env.py"
+              fi
+              if [ -n "$FISH_API_KEY" ]; then
+                git show "$SHA:deploy/ops/sync_fish_env.py" \
+                  | sync_run 'umask 077; cat > /opt/ai_growth_os/deploy/sync_fish_env.py'
+                printf '%s' "$FISH_API_KEY" | sync_run "python3 /opt/ai_growth_os/deploy/sync_fish_env.py"
+              fi
               ssh -O exit -o ControlPath=/tmp/ssh-growth-secret-%C "root@$HOST" >/dev/null 2>&1 || true
+            elif [ -n "$FISH_API_KEY" ]; then
+              echo "::error::Fish Audio secret cannot be provisioned via restricted deployment key alone."; exit 1
             elif [ -n "$API_YANDEX" ]; then
               echo "::warning::GitHub API_YANDEX is configured but no password-based secret-provisioning channel is available. The restricted deploy key cannot update server .env; Yandex runtime availability is unverified."
             fi
@@ -263,8 +272,17 @@ jobs:
             printf '%s' "$API_YANDEX" \
               | run "python3 /opt/ai_growth_os/deploy/sync_yandex_env.py"
           fi
+          if [ -n "$FISH_API_KEY" ]; then
+            git show "$SHA:deploy/ops/sync_fish_env.py" \
+              | run 'umask 077; cat > /opt/ai_growth_os/deploy/sync_fish_env.py'
+            printf '%s' "$FISH_API_KEY" | run "python3 /opt/ai_growth_os/deploy/sync_fish_env.py"
+          fi
           git archive --format=tar.gz "$SHA" app alembic/versions pyproject.toml products \
             | run "python3 /opt/ai_growth_os/deploy/deploy_growth.py deploy $SHA"
+          if [ -n "$FISH_API_KEY" ]; then
+            run "docker exec ai-growth-os-api-1 python3 -c 'import os; assert os.getenv(\"FISH_API_KEY\"); print(\"FISH_API_RUNTIME_PRESENT\")'"
+            run "docker exec ai-growth-os-worker-1 python3 -c 'import os; assert os.getenv(\"FISH_API_KEY\"); print(\"FISH_WORKER_RUNTIME_PRESENT\")'"
+          fi
           if [ -n "$API_YANDEX" ]; then
             run "docker exec ai-growth-os-api-1 python3 -c 'import os; assert os.getenv(\"API_YANDEX\"); print(\"YANDEX_RUNTIME_PRESENT\")'"
           fi
