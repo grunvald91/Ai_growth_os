@@ -155,3 +155,15 @@ def test_overlay_passes_the_voice_key_as_a_reference():
     overlay = deploy_growth.overlay_document({"overlay_env": {}}, "img:1", "abc")
     for service in deploy_growth.SERVICES:
         assert overlay["services"][service]["environment"]["VOICE_API_KEY"] == "${VOICE_API_KEY:-}"
+
+
+def test_overlay_passes_consistent_seo_rollout_configuration():
+    overlay = deploy_growth.overlay_document({"overlay_env": {}}, "img:1", "abc")
+    for service in deploy_growth.SERVICES:
+        env = overlay["services"][service]["environment"]
+        assert env["SEO_AUTORUN_ENABLED"] == "${SEO_AUTORUN_ENABLED:-false}"
+        assert env["SEO_SERVGO_AUTORUN_ENABLED"] == "${SEO_SERVGO_AUTORUN_ENABLED:-true}"
+        for key in ("SEO_SCHEMA_RECOVERY_ENABLED", "SEO_HELD_REPAIR_ENABLED",
+                    "SEO_MODEL_AVAILABILITY_ENABLED", "SEO_RESERVE_ENABLED", "SEO_WATCHDOG_ENABLED"):
+            assert env[key] == "${" + key + ":-true}"
+        assert env["LLM_AVAILABILITY_ENABLED"] == "${LLM_AVAILABILITY_ENABLED:-false}"

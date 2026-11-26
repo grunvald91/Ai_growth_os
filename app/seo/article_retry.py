@@ -99,12 +99,15 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
             AgentRun.task_id == task.id, AgentRun.started_at.is_not(None),
         ).order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(1))
         family, stage = safe_error(latest.error if latest else None)
-        # Recover only structural failures addressed by the current pipeline.
-        # Provider outages/unknown errors need the separate availability policy.
+        # One bounded replay of known validation failures; all grounding,
+        # critic and publication checks still run. The historical marketing
+        # editor grounding failure must not be left outside recovery.
+        eligible = ((family == "invalid_article_output" and stage in {
+            "content_strategist", "seo_editor", "article_writer", "conversion_editor",
+            "human_editor", "marketing_editor"}) or
+            (family == "assembly_failed" and stage == "invalid_marketing_editor_grounding"))
         if (latest is None or latest.status not in {"failed", "completed"}
-                or latest.finished_at is None or family != "invalid_article_output"
-                or stage not in {"content_strategist", "seo_editor", "article_writer",
-                                 "conversion_editor", "human_editor", "marketing_editor"}):
+                or latest.finished_at is None or not eligible):
             raise ValueError("Failure is not eligible for automatic schema recovery")
         if db.scalar(select(exists().where(
             AgentRun.task_id == task.id, AgentRun.status == "running"

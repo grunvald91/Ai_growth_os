@@ -12,7 +12,7 @@ from test_seo_article import BRIEF
 from test_seo_factory import env  # noqa: F401
 
 
-@pytest.mark.parametrize("case", ["schema", "provider", "article_exists", "disabled", "manual", "recent"])
+@pytest.mark.parametrize("case", ["schema", "grounding", "unknown_assembly", "provider", "article_exists", "disabled", "manual", "recent"])
 def test_auto_recovery_is_bounded_and_preserves_schedule(env, case):
     factory, _, company = env
     old = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -30,7 +30,9 @@ def test_auto_recovery_is_bounded_and_preserves_schedule(env, case):
                 channel="own_site", light=True, seo_brief=BRIEF).model_dump_json()))
         db.add(AgentRun(task_id=task_id, agent_name="article_writer", status="failed",
             started_at=old, finished_at=old, error=("provider_request_failed:article_writer"
-                if case == "provider" else "invalid_article_output:article_writer:sections.0.kind")))
+                if case == "provider" else "assembly_failed:invalid_marketing_editor_grounding"
+                if case == "grounding" else "assembly_failed:invalid_derivative_assembly"
+                if case == "unknown_assembly" else "invalid_article_output:article_writer:sections.0.kind")))
         if case in {"article_exists", "manual"}:
             db.add(Artifact(product_id=company, task_id=task_id,
                 kind="article" if case == "article_exists" else "seo_article_manual_retry",
@@ -42,11 +44,11 @@ def test_auto_recovery_is_bounded_and_preserves_schedule(env, case):
         if case == "disabled":
             set_enabled(db, company, enabled=False, actor="test")
         assert recover_failed_schema_once(db, enabled=False) == 0
-        assert recover_failed_schema_once(db, enabled=True) == int(case == "schema")
+        assert recover_failed_schema_once(db, enabled=True) == int(case in {"schema", "grounding"})
         task = db.get(Task, task_id)
-        assert task.status == (TaskStatus.QUEUED if case == "schema" else TaskStatus.FAILED)
+        assert task.status == (TaskStatus.QUEUED if case in {"schema", "grounding"} else TaskStatus.FAILED)
         assert task.due_at.replace(tzinfo=timezone.utc) == old
-        if case == "schema":
+        if case in {"schema", "grounding"}:
             assert db.scalar(select(Artifact).where(Artifact.task_id == task_id, Artifact.kind == AUTO_RECOVERY))
             assert not db.scalar(select(Artifact).where(
                 Artifact.task_id == task_id, Artifact.kind == "seo_article_manual_retry"))

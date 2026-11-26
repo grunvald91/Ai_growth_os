@@ -200,8 +200,26 @@ def overlay_document(settings: dict, image: str, sha: str) -> dict:
     compose fills in from /opt/ai_growth_os/.env when the containers are created; the file never holds a value.
     Without them in .env the references are empty and the ServGo sign-in and schedule stay switched off."""
     references = {key: "${" + key + ":-}" for key in (*SSO_KEYS, VOICE_KEY, "API_YANDEX", "SERVGO_YANDEX_PPO_DAILY_BUDGET")}
+    # Production keeps the existing base Compose files; release-specific
+    # configuration must therefore be wired in this overlay as well.
+    seo_defaults = {
+        "SEO_AUTORUN_ENABLED": "false",
+        "SEO_SERVGO_AUTORUN_ENABLED": "true",
+        "SEO_SCHEMA_RECOVERY_ENABLED": "true",
+        "SEO_HELD_REPAIR_ENABLED": "true",
+        "SEO_MODEL_AVAILABILITY_ENABLED": "true",
+        "SEO_RESERVE_ENABLED": "true",
+        "SEO_WATCHDOG_ENABLED": "true",
+        # Broader non-SEO consumers still need durable deferral handling.
+        "LLM_AVAILABILITY_ENABLED": "false",
+        "SEO_ARTICLES_PER_DAY": "30",
+        "SEO_PUBLICATIONS_PER_DAY": "3",
+        "SEO_AUTORUN_INTERVAL_DAYS": "7",
+        "SEO_SERVGO_AUTORUN_INTERVAL_DAYS": "7",
+    }
+    seo = {key: "${" + key + ":-" + value + "}" for key, value in seo_defaults.items()}
     return {"services": {s: {"image": image, "environment": {
-        **settings["overlay_env"], **references, "RELEASE_SHA": sha}} for s in SERVICES}}
+        **seo, **settings["overlay_env"], **references, "RELEASE_SHA": sha}} for s in SERVICES}}
 
 
 def ensure_env_secrets(env_file: Path, keys: tuple[str, ...], min_length: int) -> tuple[dict[str, str], list[str]]:

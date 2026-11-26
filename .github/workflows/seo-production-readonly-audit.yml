@@ -49,6 +49,18 @@ jobs:
           set -euo pipefail
           echo "== Runtime containers"
           docker ps --format '{{.Names}} {{.Status}}' | grep -E 'ai-growth-os-(api|worker)' || true
+          echo "== Runtime worker SEO feature flags (read-only)"
+          docker exec -i ai-growth-os-worker-1 python - <<'WORKER'
+          import json, os
+          from app.core.config import get_settings
+          settings = get_settings()
+          keys = ("seo_autorun_enabled", "seo_servgo_autorun_enabled", "seo_schema_recovery_enabled",
+                  "seo_held_repair_enabled", "seo_model_availability_enabled", "seo_reserve_enabled",
+                  "seo_watchdog_enabled", "llm_availability_enabled")
+          print("worker_release_sha=", os.environ.get("RELEASE_SHA", "unknown"))
+          print("worker_seo_flags=", json.dumps({key: getattr(settings, key, None) for key in keys}))
+          print("worker_telegram_notifications_configured=", bool(settings.telegram_bot_token and settings.telegram_owner_chat_id is not None))
+          WORKER
           echo "== Database / article inspection (read-only)"
           docker exec -i ai-growth-os-api-1 python - <<'PY'
           import json
@@ -77,6 +89,17 @@ jobs:
               print("servgo_publish_limit=", prefs.publications_per_day)
               print("servgo_autorun_interval_days=", prefs.autorun_interval_days)
               print("servgo_autorun_horizon_days=", prefs.autorun_horizon_days)
+              if hasattr(settings, "seo_reserve_enabled"):
+                  from dataclasses import asdict
+                  from app.seo.reserve import coverage
+                  print("seo_reserve=", json.dumps(asdict(coverage(db, p.id,
+                      timezone_name=prefs.timezone_name, daily_limit=prefs.publications_per_day))))
+              marker = db.scalar(select(Artifact).where(Artifact.product_id == p.id,
+                  Artifact.kind == "seo_watchdog_state").order_by(Artifact.created_at.desc(), Artifact.id.desc()).limit(1))
+              if marker:
+                  state = json.loads(marker.content)
+                  print("seo_watchdog=", json.dumps({key: state.get(key) for key in ("observed_at", "issues", "since", "last_sent")}))
+
               tasks = list(db.scalars(select(Task).where(
                   Task.product_id == p.id, Task.title.like("SEO-ARTICLE:%"))))
               for status in TaskStatus:
