@@ -1,0 +1,52 @@
+name: Exa API readiness
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/exa-api-readiness.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+    steps:
+      - name: Verify optional Exa credential with official API
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+
+          key = os.getenv("EXA_API_KEY", "").strip()
+          if not key:
+              print("EXA_NOT_CONFIGURED: other search providers unaffected")
+              raise SystemExit(0)
+          request = urllib.request.Request(
+              "https://api.exa.ai/search",
+              data=json.dumps({
+                  "query": "Exa search API documentation",
+                  "numResults": 1,
+                  "type": "auto",
+              }).encode(),
+              headers={"x-api-key": key, "Content-Type": "application/json"},
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=25) as response:
+                  result = json.load(response)
+                  if not isinstance(result.get("results"), list):
+                      raise ValueError("Unexpected response shape")
+          except urllib.error.HTTPError as exc:
+              print("EXA_HTTP_STATUS", exc.code)
+              raise SystemExit(1)
+          except Exception:
+              print("EXA_CHECK_FAILED")
+              raise SystemExit(1)
+          print("EXA_API_VERIFIED")
+          PY
