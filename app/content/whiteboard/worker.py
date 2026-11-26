@@ -207,7 +207,8 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                 current = owner_task(db, product_id, task_id, lock=True)
                 _, saved, _, _ = records(db, current, lock=True)
                 latest = json.loads(saved.content)
-                latest.pop('preflight_outage', None)
+                for key in ('preflight_outage', 'image_catalog_outage_since', 'backup_image_catalog_outage_since'):
+                    latest.pop(key, None)
                 saved.content = json.dumps(latest)
                 db.commit()
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
