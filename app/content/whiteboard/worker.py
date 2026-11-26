@@ -16,7 +16,7 @@ from .adapters import (ClaudeHubGeminiImageProvider, ClaudeHubRegionProvider, LL
                        OpenRouterRegionProvider, OpenRouterSpeechProvider, FishSpeechProvider)
 from .checkpoints import CheckpointStore, CheckpointError, _Lock
 from .jobs import (AGENT, CallLedger, GuardedStage, job_directory, owner_task, record_error, records, refund_unanswered,
-                   retry_due, schedule_auto_resume)
+                   retry_due, schedule_auto_resume, effective_speech)
 from .pipeline import WhiteboardPipeline
 from .image_recovery import effective_image_model, image_recovery_enabled
 from .render import MarkerSweepRenderer
@@ -56,7 +56,7 @@ def build_pipeline(settings, payload, store):
         storyboard=LLMStoryboardProvider(service, model=payload.models.storyboard),
         images=ClaudeHubGeminiImageProvider(api_key=settings.xai_api_key, base_url=settings.xai_base_url, model=payload.models.image),
         speech=(CachedAudioOnlySpeech() if payload.repair_regenerate_images else
-                FishSpeechProvider(api_key=settings.fish_api_key, model=payload.models.speech)
+                FishSpeechProvider(api_key=settings.fish_api_key, model=payload.models.speech, voice_override=settings.whiteboard_voice)
                 if speech_on_fish(payload.models) else
                 OpenRouterSpeechProvider(api_key=settings.openrouter_api_key, model=payload.models.speech,
                                          proxy_url=settings.whiteboard_proxy_url)),
@@ -190,18 +190,19 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                     value.pop(key, None)
                 resuming = bool(value.pop('resume_requested', False))
                 refund_unanswered(value)
+                speech_model, speech_voice = effective_speech(db, task, source, value, payload)
                 state.content = json.dumps(value); db.commit()
             # The immutable approved request owns this job's model/voice choice.
             # Copy only these public fields; never alter shared settings or .env.
             active_model = effective_image_model(value, payload)
-            execution_models = payload.models.model_copy(update={'image': active_model})
+            execution_models = payload.models.model_copy(update={'image': active_model, 'speech': speech_model})
             execution_payload = payload.model_copy(update={'models': execution_models})
-            job_settings = scoped_settings(settings, execution_models, payload.request.voice)
+            job_settings = scoped_settings(settings, execution_models, speech_voice)
             if readiness is None:
-                await preflight(job_settings, execution_models, payload.request.voice,
+                await preflight(job_settings, execution_models, speech_voice,
                                 skip_speech=payload.repair_regenerate_images)
             else:
-                await readiness(job_settings, execution_models, payload.request.voice)
+                await readiness(job_settings, execution_models, speech_voice)
             store = CheckpointStore(directory / 'stages', payload.request, models=payload.models.model_dump(),
                                     visual_review=payload.visual_review,
                                     image_provider='claudehub' if payload.image_provider == 'claudehub' else None)
@@ -277,6 +278,7 @@ async def run_whiteboard_once(session_factory, settings, *, factory=None, readin
                         'scene_count': output.scene_count, 'storyboard': output.storyboard.model_dump(),
                         'cost_usd': None, 'cost_known': False, 'human_review_required': True,
                          'primary_image_model': payload.models.image, 'final_image_model': active_model,
+                        'primary_speech_model': payload.models.speech, 'final_speech_model': speech_model,
                         'visual_review': output.visual_review,
                         'science_review': output.science_review}, ensure_ascii=False))
                 db.add(result); db.flush()
