@@ -1502,6 +1502,11 @@ class ArticleProduction:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    from app.llm.seo_availability import ModelDeferred
+                    # Availability is not invalid output. Do not synthesize a
+                    # derivative or mark a stage complete while its model waits.
+                    if isinstance(exc, ModelDeferred):
+                        raise
                     if (name == 'content_strategist' and safe_request.seo_brief is not None
                             and strategist_twice_invalid
                             and isinstance(exc, (ValueError, ValidationError))
