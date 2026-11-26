@@ -318,6 +318,10 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
             outage = {'code': code, 'since': now.isoformat()}
         value['preflight_outage'] = outage
         at = next_check(datetime.fromisoformat(outage['since']), now)
+        db.add(Approval(product_id=task.product_id, artifact_id=source.id,
+                        action_type=AUTO_RESUME_ACTION, risk_level='YELLOW',
+                        status='approved', requested_by='policy', decided_by='policy:preflight_wait',
+                        decided_at=now, reason=f'preflight {code}; next {at.isoformat()}'))
         value.update(stage='retry_wait', error=None, last_error=code,
                      resume_requested=True, retry_at=at.isoformat())
         task.status = TaskStatus.QUEUED
@@ -462,7 +466,7 @@ class CallLedger:
             model_stage = {'visual_review': 'regions', 'visual_decision': 'storyboard', 'image_revision': 'image', 'science_review': 'regions'}.get(stage, stage)
             provider_name = ('configured_text' if model_stage == 'storyboard' or stage == 'science_review'
                              else payload.image_provider if model_stage == 'image'
-                             else 'claudehub' if regions_on_claudehub(payload.models) else 'openrouter')
+                             else 'claudehub' if model_stage == 'regions' and regions_on_claudehub(payload.models) else 'openrouter')
             run = AgentRun(task_id=task.id, agent_name='whiteboard_' + stage,
                            provider=provider_name,
                            model=effective_image_model(value, payload) if model_stage == 'image' else getattr(payload.models, model_stage), status='running',
@@ -483,8 +487,9 @@ class CallLedger:
                 task = owner_task(db, self.product_id, self.task_id, lock=True)
                 _, state, _, payload = records(db, task, lock=True)
                 value = json.loads(state.content)
-                if image_recovery_enabled(payload) and run.model == payload.models.image:
-                    value.pop('image_outage_since', None)
+                if image_recovery_enabled(payload):
+                    key = 'image_outage_since' if run.model == payload.models.image else 'backup_image_outage_since'
+                    value.pop(key, None)
                     state.content = json.dumps(value)
             run.status = 'failed' if error else 'completed'
             run.error = error
