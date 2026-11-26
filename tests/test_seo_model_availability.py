@@ -137,3 +137,55 @@ async def test_response_error_does_not_start_unavailability_or_select_reserve(tm
         await policy.generate(("any-new-model", "reserve"), call)
     assert calls == ["any-new-model"]
     assert not list(policy.root.glob("*.json"))
+
+
+@pytest.mark.asyncio
+async def test_reserve_itself_must_wait_before_third_model(tmp_path):
+    clock = SimpleNamespace(now=1_800_000_000.0)
+    start = clock.now
+    calls = []
+    async def call(model):
+        calls.append(model)
+        if model != "third":
+            raise httpx.ConnectError("offline")
+        return "third"
+    def policy():
+        return AvailabilityPolicy(tmp_path, "gateway", clock=lambda: clock.now)
+    chain = ("main", "reserve", "third")
+    with pytest.raises(ModelDeferred):
+        await policy().generate(chain, call)
+    clock.now = start + 86400
+    with pytest.raises(ModelDeferred) as wait:
+        await policy().generate(chain, call)
+    assert calls == ["main", "main", "reserve"]
+    assert wait.value.retry_at == start + 86400 + 300
+    clock.now += 300
+    with pytest.raises(ModelDeferred):
+        await policy().generate(chain, call)
+    assert calls[-1] == "reserve"
+    assert "third" not in calls
+    clock.now = start + 2 * 86400
+    assert await policy().generate(chain, call) == "third"
+
+
+@pytest.mark.asyncio
+async def test_configuration_error_breaks_previous_outage(tmp_path):
+    clock = SimpleNamespace(now=1_800_000_000.0)
+    mode = "offline"
+    async def call(model):
+        if mode == "invalid":
+            raise ValueError("invalid configuration")
+        if model == "main":
+            raise httpx.ConnectError("offline")
+        return "reserve"
+    p = AvailabilityPolicy(tmp_path, "gateway", clock=lambda: clock.now)
+    with pytest.raises(ModelDeferred):
+        await p.generate(("main", "reserve"), call)
+    clock.now += 86400
+    mode = "invalid"
+    with pytest.raises(ValueError):
+        await p.generate(("main", "reserve"), call)
+    mode = "offline"
+    with pytest.raises(ModelDeferred) as wait:
+        await p.generate(("main", "reserve"), call)
+    assert wait.value.retry_at == clock.now + 300

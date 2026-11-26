@@ -30,3 +30,18 @@ def test_format_repair_does_not_silently_rewrite_or_drop_existing_article_copy()
     after["sections"][0]["body"] = "Изменённый текст"
     with pytest.raises(ValueError, match="prose"):
         preserve_generated_copy(before, after)
+
+
+def test_seo_normalizer_has_own_availability_policy_and_ignores_author_router(tmp_path):
+    settings = Settings(
+        products_root=tmp_path,
+        xai_api_key="dummy-test-key", llm_model="kimi-2.7",
+        llm_fallback_models="grok-4.7",
+        llm_schema_repair_model="deepseek-v4.1-flash",
+        model_router_enabled=True,
+        seo_model_availability_enabled=True,
+    )
+    provider = build_schema_normalizer_llm(settings, seo_availability=True)._provider
+    assert isinstance(provider, FallbackProvider)
+    assert provider.availability is not None
+    assert [name for name, _ in provider._providers] == ["deepseek-v4.1-flash"]
