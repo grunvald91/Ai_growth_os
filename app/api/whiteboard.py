@@ -20,7 +20,7 @@ from app.content.whiteboard.topics import suggest_company_video_topics, suggest_
 from app.content.whiteboard.selector_ui import topic_picker_html
 from app.content.whiteboard.image_recovery import IMAGE_RECOVERY_RESERVE
 from app.content.whiteboard.jobs import (AGENT, MAX_API_CALLS, TOP_UP_STEP, approve_job, call_limit, can_resume, can_top_up, cancel_job,
-                                         digest, job_directory, owner_task, queue_job, records, required_calls, resume_job)
+                                         digest, job_directory, owner_task, queue_job, records, required_calls, resume_job, can_switch_to_fish, resume_with_fish)
 from app.content.whiteboard.runtime import (MESSAGES, ReadinessError, generation_profile, preflight, scoped_settings,
                                             DEFAULT_IMAGE_MODEL, GPT_IMAGE_MODEL, CLAUDEHUB_IMAGE_MODELS)
 from app.content.whiteboard.checkpoints import CheckpointError
@@ -80,6 +80,7 @@ def job_state(db, product_id, task_id):
             'repair_regenerate_images': payload.repair_regenerate_images,
             'request_digest': digest(source.content), 'approval_status': approval.status,
             'resumable': can_resume(task.status, json.loads(state.content), payload),
+            'fish_resume_available': can_switch_to_fish(task.status, json.loads(state.content), payload),
             'top_up': can_top_up(task.status, json.loads(state.content), payload),
             'call_limit_total': call_limit(json.loads(state.content), payload),
             **json.loads(state.content)}
@@ -352,6 +353,13 @@ def job_html(state, product_id, *, error=None):
                  f'<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
                  f'Разрешаю продолжить платную генерацию: осталось не более {left} API-вызовов из подтверждённого лимита</span></label>'
                  '<button class="btn primary" type="submit">Продолжить с места остановки</button></form>')
+    if state.get('fish_resume_available'):
+        body += (f'<form method="post" action="{base}/resume-fish" class="sg-form">'
+                 f'<input type="hidden" name="request_digest" value="{esc(state["request_digest"])}">'
+                 '<p>Сценарий, рисунки и готовые аудиофрагменты сохраняются. Недостающие реплики создаст Fish Audio; голоса могут отличаться.</p>'
+                 '<label class="sg-field"><span><input type="checkbox" name="confirmed" value="yes" required> '
+                 'Разрешаю продолжение с Fish Audio в пределах ранее подтверждённого лимита</span></label>'
+                 '<button class="btn primary" type="submit">Продолжить с Fish Audio</button></form>')
     errors = state.get('errors') or []
     if errors:
         body += f'<details><summary>Журнал ошибок ({len(errors)})</summary><ol>'
@@ -862,6 +870,22 @@ async def studio_resume(product_id: UUID, task_id: UUID, request: Request, db: S
         extra = int(fields.get('extra_calls') or 0)
         resume_job(db, product_id, task_id, confirmed=fields.get('confirmed') == 'yes', decided_by=actor or 'local-owner',
                    extra_calls=extra)
+    except (ReadinessError, ValueError):
+        db.rollback()
+        return page(_owner_product(db, product_id), 'Генерация видео',
+                    job_html(state, product_id, error=MESSAGES['approval_invalid']), status=409)
+    return RedirectResponse(f'/studio/products/{product_id}/whiteboard/{task_id}', status_code=303)
+
+
+@router.post('/studio/products/{product_id}/whiteboard/{task_id}/resume-fish')
+async def studio_resume_fish(product_id: UUID, task_id: UUID, request: Request, db: Session = Depends(get_db),
+                            actor=Depends(require_studio_auth), settings=Depends(get_settings)):
+    state = _load(db, product_id, task_id)
+    fields = await _studio_form(request)
+    try:
+        resume_with_fish(db, product_id, task_id, confirmed=fields.get('confirmed') == 'yes',
+                         request_digest=fields.get('request_digest') or '', decided_by=actor or 'local-owner',
+                         settings=settings)
     except (ReadinessError, ValueError):
         db.rollback()
         return page(_owner_product(db, product_id), 'Генерация видео',
