@@ -213,17 +213,14 @@ async def run_once() -> int:
         tick_calendar(db, settings)
     if await run_planner_once(SessionLocal, settings):
         return 1
+    # Publication runs independently in _seo_publication_loop, including
+    # while a video or model request holds up this generation worker.
     from app.seo.autoschedule import enqueue_enabled_if_due
     with SessionLocal() as db:
         enqueue_enabled_if_due(db, settings)
     from app.seo.factory import run_factory_once
     if await run_factory_once(SessionLocal, settings):
         return 1
-    from app.seo.publishing import publish_owner_approved, publish_pending
-    with SessionLocal() as db:
-        publish_pending(db, daily_limit=settings.seo_publications_per_day)
-        if publish_owner_approved(db, daily_limit=settings.seo_publications_per_day):
-            return 1
     from app.seo.held_repair import run_held_repair_once
     if await run_held_repair_once(SessionLocal, settings):
         return 1
@@ -304,6 +301,27 @@ async def run_once() -> int:
     return completed_products
 
 
+def _seo_publication_tick(settings):
+    from app.seo.publishing import publish_owner_approved, publish_pending
+    with SessionLocal() as db:
+        publish_pending(db, daily_limit=settings.seo_publications_per_day,
+                        reserve_enabled=settings.seo_reserve_enabled)
+        db.rollback()
+        publish_owner_approved(db, daily_limit=settings.seo_publications_per_day,
+                               reserve_enabled=settings.seo_reserve_enabled)
+
+
+async def _seo_publication_loop(settings):
+    # No model or remote network request on this path. Use a dedicated DB
+    # session per tick, in a thread so synchronous SQL cannot block the loop.
+    while True:
+        try:
+            await asyncio.to_thread(_seo_publication_tick, settings)
+        except Exception:
+            logging.getLogger(__name__).exception('seo_publication_tick_failed')
+        await asyncio.sleep(60)
+
+
 async def _calendar_loop(settings):
     from app.content.calendar import tick_calendar
     from app.comments.instagram_oauth import prune_expired_pending_oauth
@@ -358,6 +376,7 @@ async def _comment_draft_loop(settings):
 async def main() -> None:
     settings = get_settings()
     calendar_task = asyncio.create_task(_calendar_loop(settings))
+    seo_publication_task = asyncio.create_task(_seo_publication_loop(settings))
     comment_tasks = []
     if settings.comment_background_poll_enabled:
         comment_tasks.append(asyncio.create_task(_comment_poll_loop(settings)))
@@ -378,9 +397,10 @@ async def main() -> None:
             )
     finally:
         calendar_task.cancel()
+        seo_publication_task.cancel()
         for task in comment_tasks:
             task.cancel()
-        for task in (calendar_task, *comment_tasks):
+        for task in (calendar_task, seo_publication_task, *comment_tasks):
             try:
                 await task
             except asyncio.CancelledError:

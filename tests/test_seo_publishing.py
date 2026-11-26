@@ -250,6 +250,7 @@ async def test_publication_recovery_skips_disabled_companies_before_limit(env, t
     active_id = await make_article(db, product, tmp_path)
     active_row = db.get(Artifact, active_id)
     db.get(Task, active_row.task_id).title = "SEO-ARTICLE:active-recovery"
+    db.get(Task, active_row.task_id).assigned_agent = "content_factory"
 
     inactive = Product(name="SEO disabled company", slug="seo-disabled-company")
     db.add(inactive)
@@ -279,9 +280,10 @@ async def test_publication_recovery_logs_failed_articles(env, tmp_path, monkeypa
     db, product = env
     article_id = await make_article(db, product, tmp_path)
     db.get(Task, db.get(Artifact, article_id).task_id).title = "SEO-ARTICLE:bad-recovery"
+    db.get(Task, db.get(Artifact, article_id).task_id).assigned_agent = "content_factory"
     db.commit()
 
-    def fail(*_args):
+    def fail(*_args, **_kwargs):
         raise RuntimeError("simulated transient publication error")
 
     monkeypatch.setattr(publishing, "publish_if_clear", fail)
@@ -348,6 +350,7 @@ async def test_completed_seo_article_auto_publishes_on_worker_recovery_without_o
     article_id = await make_article(db, product, tmp_path)
     row = db.get(Artifact, article_id)
     db.get(Task, row.task_id).title = "SEO-ARTICLE:worker-recovery"
+    db.get(Task, row.task_id).assigned_agent = "content_factory"
     db.commit()
     assert not list(db.scalars(select(Publication)))
     assert publish_pending(db) == 1

@@ -249,7 +249,7 @@ async def _execute(db, settings, task_id, product_id, focus, provider, client, h
         default_articles_per_day=settings.seo_articles_per_day)
     queued = queue_plan(db, plan, {c.id: c for c in core.clusters},
                         per_day=prefs.publications_per_day, timezone_name=prefs.timezone_name,
-                        spread_days=horizon_days)
+                        spread_days=horizon_days, reserve_enabled=settings.seo_reserve_enabled)
     ArtifactService(db).create(product_id=product_id, task_id=task_id, kind=REPORT_KIND,
         title=f"SEO-завод: поставлено статей — {len(queued)}",
         content=json.dumps({"seeds": len(core.seeds), "clusters": len(core.clusters),
