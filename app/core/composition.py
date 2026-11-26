@@ -105,8 +105,10 @@ def build_dispatcher_provider(settings: Settings) -> LLMProvider:
     return ModelRoutingProvider(provider=provider, router=router, availability=availability)
 
 
-def build_llm_provider(settings: Settings, *, seo_availability: bool = False) -> LLMProvider:
-    settings = effective_router_settings(settings)
+def build_llm_provider(settings: Settings, *, seo_availability: bool = False,
+                       use_router: bool = True) -> LLMProvider:
+    settings = (effective_router_settings(settings) if use_router else
+                settings.model_copy(update={'model_router_enabled': False}))
     from app.llm.seo_availability import policy_for
     availability = policy_for(settings, seo=seo_availability)
     if settings.llm_provider == "anthropic":
@@ -155,7 +157,7 @@ def build_llm_provider(settings: Settings, *, seo_availability: bool = False) ->
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
 
-def build_schema_normalizer_llm(settings: Settings) -> LLMService:
+def build_schema_normalizer_llm(settings: Settings, *, seo_availability: bool = False) -> LLMService:
     """Dedicated economy-model gateway; the author's fallback chain must not override it."""
     selected = settings.llm_schema_repair_model.strip()
     if not selected:
@@ -166,7 +168,7 @@ def build_schema_normalizer_llm(settings: Settings) -> LLMService:
     })
     return LLMService(
         privacy_gateway=PrivacyGateway(allowed_context_fields=SAFE_LLM_METADATA_FIELDS),
-        provider=build_llm_provider(dedicated),
+        provider=build_llm_provider(dedicated, seo_availability=seo_availability, use_router=False),
         critic_enabled=False,
     )
 
@@ -209,7 +211,7 @@ def build_article_production(
         model=settings.llm_model,
         seo_default_articles_per_day=settings.seo_articles_per_day,
         schema_repair_model=settings.llm_schema_repair_model,
-        schema_repair_llm=(build_schema_normalizer_llm(settings)
+        schema_repair_llm=(build_schema_normalizer_llm(settings, seo_availability=seo_availability)
                            if not injected_provider and settings.llm_schema_repair_model.strip() else None),
     )
 
