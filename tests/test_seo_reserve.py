@@ -139,6 +139,13 @@ def test_extra_release_requires_seven_future_days_but_first_release_is_allowed(e
     db.add(Publication(product_id=product.id, artifact_id=first.id, channel="own_site",
                        status="published", published_at=now))
     db.commit()
+    assert check()  # An ordinary public article is not the daily SEO release.
+    task = Task(product_id=product.id, title="SEO-ARTICLE:example:a001",
+                assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    first.task_id, first.status = task.id, ArtifactStatus.PUBLISHED
+    db.commit()
     def short(db, product_id, **kw):
         assert kw["exclude_article_id"] == row.id
         return Coverage(6, 0, (), (), ("2026-12-03",), ())
@@ -155,3 +162,28 @@ def test_broken_or_foreign_plan_is_not_future_supply(env):
     task.title = "SEO-ARTICLE:missing:a001"
     db.commit()
     assert coverage(db, product.id, now=now).preparing_articles == 0
+
+
+def test_inconsistent_receipts_do_not_cover_daily_seo_obligation(env):
+    from app.models.domain import Publication
+    db, product = env
+    now = datetime(2026, 11, 26, 12, tzinfo=timezone.utc)
+    task = Task(product_id=product.id, title="SEO-ARTICLE:example:a001",
+                assigned_agent="content_factory", status=TaskStatus.COMPLETED)
+    db.add(task)
+    db.flush()
+    row = Artifact(product_id=product.id, task_id=task.id, kind="article",
+                   title="example", content="{}", status=ArtifactStatus.DRAFT)
+    db.add(row)
+    db.flush()
+    pub = Publication(product_id=product.id, artifact_id=row.id, channel="own_site",
+                      status="published", published_at=now)
+    db.add(pub)
+    db.commit()
+    assert "2026-11-26" in coverage(db, product.id, now=now).missing_ready_days
+    row.status = ArtifactStatus.PUBLISHED
+    db.commit()
+    assert "2026-11-26" in coverage(db, product.id, now=now).ready_days
+    pub.published_at = now + timedelta(hours=1)
+    db.commit()
+    assert "2026-11-26" in coverage(db, product.id, now=now).missing_ready_days
