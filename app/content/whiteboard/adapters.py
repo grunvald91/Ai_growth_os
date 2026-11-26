@@ -394,6 +394,44 @@ class ClaudeHubChat(OpenRouterBase):
         return response
 
 
+class FishSpeechProvider:
+    """Fish Audio REST TTS, one explicit free-model POST per beat."""
+
+    def __init__(self, *, api_key, model, client=None):
+        if model != 'fish/s2.1-pro-free':
+            raise ValueError('Unsupported Fish Audio model')
+        self.api_key, self.client = api_key, client
+
+    async def synthesize(self, text: str, *, language: str, voice: str) -> bytes:
+        if language != 'ru' or not 0 < len(text) <= 320:
+            raise ValueError('Invalid Russian speech segment')
+        payload = {'text': text, 'format': 'mp3'}
+        if voice != 'default':
+            if not re.fullmatch(r'[0-9a-fA-F]{32}', voice):
+                raise ValueError('Invalid Fish Audio voice ID')
+            payload['reference_id'] = voice
+        headers = {'Authorization': 'Bearer ' + self.api_key,
+                   'model': 's2.1-pro-free'}
+        async def request(connection):
+            try:
+                response = await connection.post('v1/tts', json=payload, headers=headers)
+            except httpx.HTTPError:
+                # Avoid leaking request headers through diagnostics.
+                from .runtime import ReadinessError
+                raise ReadinessError('fish_unavailable') from None
+            response.raise_for_status()
+            audio = response.content
+            if not 100 <= len(audio) <= 10_000_000 or not (
+                    audio.startswith(b'ID3') or (audio[0] == 0xFF and audio[1] & 0xE0 == 0xE0)):
+                raise ValueError('Fish Audio did not return valid MP3')
+            return audio
+        if self.client is not None:
+            return await request(self.client)
+        async with httpx.AsyncClient(base_url='https://api.fish.audio/', timeout=120,
+                                     follow_redirects=False, trust_env=False) as connection:
+            return await request(connection)
+
+
 class OpenRouterSpeechProvider(OpenRouterBase):
     """Documented POST /audio/speech. One beat per request for exact segment timing."""
 
