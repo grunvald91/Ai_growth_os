@@ -183,7 +183,7 @@ def approve_job(db, product_id, task_id, *, request_digest, confirmed, decided_b
 # A storyboard cut off at the (now generous) output ceiling is a runaway reply: repeating the
 # same request five times only bills the same failure again, so it is not resumed automatically.
 RESUMABLE_ERRORS = frozenset({'generation_failed', 'interrupted', 'provider_server_error',
-                              'openrouter_unavailable', 'claudehub_unavailable', 'storyboard_empty'})
+                              'openrouter_unavailable', 'claudehub_unavailable', 'fish_unavailable', 'storyboard_empty'})
 RESUME_ACTION = 'whiteboard_resume'
 AUTO_RESUME_ACTION = 'whiteboard_auto_resume'
 # Pause before an automatic continuation, the same every time (it never grows):
@@ -201,7 +201,7 @@ PROVIDER_EXCEPTIONS = frozenset({'ConnectError', 'ConnectTimeout', 'ReadTimeout'
 def resume_delay(code, value) -> int:
     """How long to wait before the next automatic attempt, by who caused the stop."""
     diagnostic = value.get('diagnostic') or {}
-    provider = (code in ('provider_server_error', 'openrouter_unavailable', 'claudehub_unavailable')
+    provider = (code in ('provider_server_error', 'openrouter_unavailable', 'claudehub_unavailable', 'fish_unavailable')
                 or diagnostic.get('exception_type') in PROVIDER_EXCEPTIONS
                 or diagnostic.get('http_status') in TRANSIENT_STATUSES)
     return PROVIDER_RESUME_DELAY if provider else OTHER_RESUME_DELAY
@@ -297,7 +297,7 @@ def schedule_auto_resume(db, task, source, value, payload, code, *, attempts, no
     # Preflight only checks connectivity/catalogues. No paid call has begun on this
     # attempt, so a prolonged outage must not require an operator to click Resume.
     provider_wait = (value.get('failed_stage') == 'preflight'
-                     and code in {'openrouter_unavailable', 'claudehub_unavailable'})
+                     and code in {'openrouter_unavailable', 'claudehub_unavailable', 'fish_unavailable'})
     if (code not in RESUMABLE_ERRORS or (used >= limit and not provider_wait)
             or (payload.visual_repair_from is not None and not payload.repair_regenerate_images)
             or not (started_attempts(value) < call_limit(value, payload) or provider_wait
