@@ -266,7 +266,7 @@
   const videoImage=document.getElementById('sg-create-video-image');
   function updateVideoSummary(){
     videoSummary.textContent=videoLength.value+' с · '+(videoImage.value==='gpt-image-2.5-sunburst'?'GPT Image':'Gemini')+' · '+
-      (videoProfile.value==='gemini_ru'?'Grok Voice':'Озвучка сервера');
+      (({gemini_ru:'Авто',fish:'Fish Audio',grok:'Grok Voice'})[videoProfile.value]||'Озвучка сервера');
   }
   videoLength.addEventListener('change',updateVideoSummary);
   videoProfile.addEventListener('change',updateVideoSummary);

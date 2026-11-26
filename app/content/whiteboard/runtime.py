@@ -54,6 +54,13 @@ def repair_image_model(models):
     return models.image if models.image in CLAUDEHUB_IMAGE_MODELS else DEFAULT_IMAGE_MODEL
 
 
+FISH_SPEECH_MODEL = 'fish/s2.1-pro-free'
+
+
+def speech_on_fish(models) -> bool:
+    return models.speech == FISH_SPEECH_MODEL
+
+
 def regions_on_claudehub(models) -> bool:
     return '/' not in models.regions
 
@@ -68,10 +75,11 @@ def storyboard_model(settings) -> str:
 def generation_profile(settings, profile: str, image_model: str = DEFAULT_IMAGE_MODEL):
     if image_model not in CLAUDEHUB_IMAGE_MODELS:
         raise ValueError('Unknown ClaudeHub image model')
-    if profile == 'gemini_ru':
+    if profile in ('gemini_ru', 'fish', 'grok'):
+        fish = profile == 'fish' or (profile == 'gemini_ru' and bool(settings.fish_api_key))
         return WhiteboardModels(storyboard=storyboard_model(settings),
-            image=image_model, speech='x-ai/grok-voice-tts-1.0',
-            regions=CLAUDEHUB_VISION_MODEL), 'eve'
+            image=image_model, speech=FISH_SPEECH_MODEL if fish else 'x-ai/grok-voice-tts-1.0',
+            regions=CLAUDEHUB_VISION_MODEL), (settings.fish_voice_id or 'default') if fish else 'eve'
     if profile == 'configured':
         return (configured_models(settings).model_copy(update={'image': image_model,
                                                               'regions': CLAUDEHUB_VISION_MODEL,
@@ -87,6 +95,9 @@ class ReadinessError(RuntimeError):
 
 
 MESSAGES = {
+    'fish_unavailable': 'Fish Audio временно недоступен. Завершённые этапы сохранены.',
+    'fish_key_invalid': 'Fish Audio не принял API-ключ или отклонил доступ.',
+    'fish_request_rejected': 'Fish Audio отклонил параметры запроса или доступ к модели.',
     'configuration_missing': 'Администратору нужно настроить ключи и модели генерации.',
     'openrouter_security_policy': 'OpenRouter отклонил доступ сервера: HTTP 403, Access denied by security policy. Новые вызовы остановлены. Администратору нужно обратиться в поддержку OpenRouter.',
     'openrouter_forbidden': 'OpenRouter вернул HTTP 403. Новые вызовы остановлены; проверьте разрешения аккаунта и доступ сервера.',
@@ -131,6 +142,12 @@ def safe_error(exc) -> str:
             host = exc.response.request.url.host
         except RuntimeError:
             host = None
+        if host == 'api.fish.audio':
+            if exc.response.status_code in (401, 403):
+                return 'fish_key_invalid'
+            if exc.response.status_code in TRANSIENT_STATUSES:
+                return 'fish_unavailable'
+            return 'fish_request_rejected'
         if host == 'api.claudehub.fun' and exc.response.status_code in (401, 403):
             return 'claudehub_rejected'
         if exc.response.status_code == 403:
@@ -142,10 +159,13 @@ def safe_error(exc) -> str:
     return 'generation_failed'
 
 
-async def preflight(settings, models: WhiteboardModels, voice: str, *, client=None, claudehub_client=None, skip_speech=False):
+async def preflight(settings, models: WhiteboardModels, voice: str, *, client=None, claudehub_client=None, skip_speech=False, fish_client=None):
     """Only GETs. Fail before any paid call, using the actual adapter's HTTP client."""
-    if (not settings.xai_api_key or
-            (not settings.openrouter_api_key and not (skip_speech and regions_on_claudehub(models)))):
+    fish_required = not skip_speech and speech_on_fish(models)
+    openrouter_required = (not regions_on_claudehub(models) or models.image not in CLAUDEHUB_IMAGE_MODELS
+                           or (not skip_speech and not fish_required))
+    if (not settings.xai_api_key or (fish_required and not settings.fish_api_key)
+            or (openrouter_required and not settings.openrouter_api_key)):
         raise ReadinessError('configuration_missing')
     try:
         if configured_models(settings) != models or voice != settings.whiteboard_voice:
@@ -162,7 +182,7 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
             raise ReadinessError('openrouter_key_invalid')
         if response.status_code != 200:
             raise ReadinessError('openrouter_unavailable' if response.status_code in TRANSIENT_STATUSES else 'openrouter_catalog_error')
-        catalogues = [] if skip_speech else [('models?output_modalities=speech', models.speech)]
+        catalogues = [] if skip_speech or fish_required else [('models?output_modalities=speech', models.speech)]
         if not regions_on_claudehub(models):
             catalogues.append(('models', models.regions))
         if models.image not in CLAUDEHUB_IMAGE_MODELS:
@@ -219,8 +239,23 @@ async def preflight(settings, models: WhiteboardModels, voice: str, *, client=No
                 async with httpx.AsyncClient(base_url=settings.xai_base_url.rstrip('/')+'/', timeout=15,
                         follow_redirects=False, trust_env=False) as connection:
                     await check_claudehub(connection)
-        # The stored speech tracks cannot need a new TTS model or OpenRouter key.
-        if skip_speech and regions_on_claudehub(models):
+        if fish_required:
+            async def check_fish(connection):
+                try:
+                    response = await connection.get('wallet/self/api-credit', headers={'Authorization': 'Bearer ' + settings.fish_api_key})
+                except httpx.HTTPError:
+                    raise ReadinessError('fish_unavailable') from None
+                if response.status_code in (401, 403):
+                    raise ReadinessError('fish_key_invalid')
+                if response.status_code != 200:
+                    raise ReadinessError('fish_unavailable' if response.status_code in TRANSIENT_STATUSES else 'fish_request_rejected')
+            if fish_client is not None:
+                await check_fish(fish_client)
+            else:
+                async with httpx.AsyncClient(base_url='https://api.fish.audio/', timeout=15, follow_redirects=False, trust_env=False) as connection:
+                    await check_fish(connection)
+        # No OpenRouter calls for an independent Fish + ClaudeHub pipeline.
+        if not openrouter_required:
             return {'ready': True, 'code': 'ready'}
         if client is not None:
             return await check(client)

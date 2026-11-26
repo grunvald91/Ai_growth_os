@@ -124,7 +124,9 @@ def create_workspace_v4(pid, warning, voice_project="", voice_max=300):
           </label>
           <label class="sg-create-setting"><span>Модель озвучки</span>
             <select id="sg-create-video-profile" name="video_profile" form="dp-form">
-              <option value="gemini_ru">Grok Voice TTS · Eve</option>
+              <option value="gemini_ru">Автоматический выбор озвучки</option>
+              <option value="fish">Fish Audio S2.1 Pro Free</option>
+              <option value="grok">Grok Voice TTS · Eve</option>
               <option value="configured">Модель и голос из настроек сервера</option>
             </select>
           </label>
