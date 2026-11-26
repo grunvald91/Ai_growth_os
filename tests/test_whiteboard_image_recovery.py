@@ -38,7 +38,8 @@ def test_preflight_does_not_spend_reserve_and_backup_waits():
     assert schedule_image_recovery(state, p, 'claudehub_image_unavailable', now=start+timedelta(hours=24)).at == start+timedelta(hours=24)
     assert effective_image_model(state, p) == DEFAULT_IMAGE_MODEL
     assert 'image_recovery_failures' not in state
-    assert schedule_image_recovery(state, p, 'claudehub_unavailable', now=start+timedelta(hours=24)).at == start+timedelta(hours=24, minutes=15)
+    assert schedule_image_recovery(state, p, 'claudehub_unavailable', now=start+timedelta(hours=24)) is None
+    assert schedule_image_recovery(state, p, 'claudehub_image_unavailable', now=start+timedelta(hours=24)).at == start+timedelta(hours=24, minutes=5)
 
 
 def test_non_image_failure_and_legacy_model():
@@ -59,3 +60,29 @@ def test_reserve_is_bounded_and_not_available_for_legacy_approvals():
     assert call_limit(state, p) == 14 + IMAGE_RECOVERY_RESERVE
     p.image_recovery = False
     assert call_limit(state, p) == 14
+
+
+def test_general_provider_outage_never_switches_image_model():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    p = payload()
+    state = {'failed_stage': 'preflight'}
+    for hours in (0, 1, 24, 48):
+        assert schedule_image_recovery(state, p, 'claudehub_unavailable',
+                                       now=start + timedelta(hours=hours)) is None
+        assert effective_image_model(state, p) == DEFAULT_IMAGE_MODEL
+    assert 'image_outage_since' not in state
+
+
+def test_invalid_image_response_resets_actual_outage():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    p = payload()
+    state = {'failed_stage': 'image', 'diagnostic': {'http_status': 502}}
+    schedule_image_recovery(state, p, 'provider_server_error', now=start)
+    state['diagnostic'] = {'exception_type': 'ValueError'}
+    assert schedule_image_recovery(state, p, 'generation_failed',
+                                   now=start + timedelta(hours=23)) is None
+    state['diagnostic'] = {'http_status': 502}
+    result = schedule_image_recovery(state, p, 'provider_server_error',
+                                     now=start + timedelta(hours=24))
+    assert result.at == start + timedelta(hours=24, minutes=5)
+    assert effective_image_model(state, p) == DEFAULT_IMAGE_MODEL
