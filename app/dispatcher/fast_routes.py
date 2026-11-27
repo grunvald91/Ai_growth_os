@@ -85,11 +85,25 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     explainer = re.search(r"\b(?:объясн\w*|объясня\w*|рисован\w*|рисунк\w*|анимац\w*|"
                           r"разбор\w*|объяснялк\w*|почему|whiteboard)\b|на\s+доске", words)
     compound = re.search(r"\bвидео-?(?:объясн|разбор)\w*\b", words)
-    if not (explainer or compound):
+    # Explicit creation + duration + topic also forms a complete request.
+    # Restrict this to a leading creation instruction, so a quoted command or
+    # a discussion of somebody else's request cannot create a new draft.
+    explicit = re.match(
+        r"^(?:пожалуйста\s+|давай\s+)?(?:сделай|сделаем|создай|создадим|подготовь|подготовим|"
+        r"сгенерируй|сгенерируем|запусти|запустим)\s+(?:мне\s+)?"
+        r"(?:(?:минутн\w*|полуминутн\w*|нов\w+)\s+)?(?:видео|видеоролик|ролик)\b"
+        r"(?:\s+(?:на\s+(?:одну\s+)?минуту|на\s+полминуты|(?:на\s+)?(?:30|60)\s*секунд\w*))?"
+        r"\s+на\s+тему\b", words)
+    duration = re.search(r"\b(?:минутн\w*|полуминутн\w*|(?:30|60)\s*секунд\w*|"
+                         r"на\s+(?:одну\s+)?минуту|на\s+полминуты)\b", words[:120])
+    if not (explainer or compound or (explicit and duration)):
+        return None
+    if explicit and re.search(r"\b(?:и\s+(?:создай|сделай|покажи|опубликуй|отмени)|"
+                              r"без\s+рисунк\w*)\b", words):
         return None
 
     # The subject is taken from the user's original words, not invented by a model.
-    match = re.search(r"\bна\s+тему\s*[:—-]?\s*(.+)$", source, re.I | re.S)
+    match = re.search(r"\bна\s+тему\s*[:.—-]?\s*(.+)$", source, re.I | re.S)
     if match is None:
         match = re.search(r"\bпро\s+(.+)$", source, re.I | re.S)
     if match is None:
@@ -106,5 +120,5 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     if not 8 <= len(topic) <= 400:
         return None
 
-    minute = bool(re.search(r"\b(?:60\s*секунд\w*|(?:1|одн\w*)\s+минут\w*|минутн\w*)\b", words))
+    minute = bool(re.search(r"\b(?:60\s*секунд\w*|(?:1|одн\w*)\s+минут\w*|на\s+минуту|минутн\w*)\b", words))
     return {"topic": topic, "length": "60" if minute else "30"}
