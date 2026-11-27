@@ -115,6 +115,44 @@ def _add_committed(db: Session, conversation: DispatcherConversation, **values) 
 
 # ---- model ------------------------------------------------------------------------------
 
+def pending_creation_cards(history: list[DispatcherMessage]) -> list[dict]:
+    """Only server-persisted, pending editable cards from this conversation."""
+    from app.dispatcher.editable import EDITABLE_CAPABILITIES
+    fields = ("format", "topic", "platform", "frame_count", "audience",
+              "editorial_brief", "image_model", "aspect_ratio")
+    result = []
+    for message in reversed(history):
+        if (message.role != "assistant" or message.confirmation_state != "pending"
+                or (message.params or {}).get("_capability", message.capability) not in EDITABLE_CAPABILITIES):
+            continue
+        for block in message.blocks or []:
+            if (block.get("type") == "confirm" and block.get("state") == "pending"
+                    and block.get("confirmation_id") == message.confirmation_id
+                    and isinstance(block.get("editable"), dict)):
+                result.append({"confirmation_id": message.confirmation_id,
+                               "revision": block.get("revision", 0),
+                               **{key: block["editable"].get(key) for key in fields}})
+                break
+        if len(result) == 4:
+            break
+    return result
+
+
+def card_edit_request(decision: DispatcherDecision, pending: list[dict]):
+    """Pin model proposals to the exact snapshot; the locked editor rechecks revision."""
+    from app.dispatcher.editable import EditCreation
+    allowed = {"topic", "platform", "frame_count", "audience",
+               "editorial_brief", "image_model", "aspect_ratio"}
+    raw = dict(decision.params)
+    target = raw.pop("confirmation_id", None)
+    revision = raw.pop("revision", None)
+    card = next((item for item in pending if item["confirmation_id"] == target), None)
+    if card is None or revision != str(card["revision"]) or not raw or not raw.keys() <= allowed:
+        raise ValueError("Уточните, какую открытую карточку и какие параметры изменить.")
+    merged = {**card, **raw}
+    return EditCreation.model_validate(merged)
+
+
 def record_llm_cost(db: Session, product_id: UUID, response, provider: str, *, latency_ms: int | None = None) -> None:
     usage = response.usage
     db.add(CostRecord(
@@ -140,7 +178,8 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
             "Заново сопоставь исходную цель со всем каталогом. Выбери точное действие с реальными параметрами, "
             "либо предложи ближайшее доступное действие с пояснением, либо задай один предметный вопрос. "
             "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
-        messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
+        messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
+                "pending_creation_cards": pending_creation_cards(history)}, text))],
         model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
         max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
@@ -419,8 +458,15 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         if existing is not None:
             reply = db.scalar(select(DispatcherMessage).where(
                 DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.seq == existing.seq + 1))
-            return {"messages": [to_dict(existing), *([to_dict(reply)] if reply else [])], "replayed": True}
+            edited = None
+            if reply is not None and (reply.params or {}).get("_edited_card_id"):
+                edited = db.scalar(select(DispatcherMessage).where(
+                    DispatcherMessage.conversation_id == conversation.id,
+                    DispatcherMessage.id == UUID(reply.params["_edited_card_id"])))
+            return {"messages": [to_dict(existing), *([to_dict(edited)] if edited else []),
+                                 *([to_dict(reply)] if reply else [])], "replayed": True}
     history = messages(db, conversation)
+    edit_snapshot = pending_creation_cards(history)
     label = (chip or {}).get("label") or text
     try:
         user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
@@ -544,7 +590,46 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         chips = _valid_chips(decision.next_chips)
         reply_text = decision.reply_text or reply_text
         spoken = decision.spoken or decision.reply_text or spoken
-        if decision.intent == "execute":
+        if decision.intent == "form":
+            from app.dispatcher.forms import form_for
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = spoken = "Что именно вы хотите посмотреть?"
+            else:
+                try:
+                    blocks = [form_for(decision.capability, decision.params)]
+                except ValueError:
+                    intent = "clarify"
+                    reply_text = spoken = "Уточните, какие данные и за какой период нужны."
+                else:
+                    reply_text = spoken = "Укажите нужные параметры и нажмите «Показать результат»."
+        elif decision.intent == "edit_card":
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = spoken = "Уточните, какой параметр открытой карточки изменить."
+            else:
+                try:
+                    edit = card_edit_request(decision, edit_snapshot)
+                    updated = await edit_confirmation(db, ctx, edit, commit=False)
+                    edited = updated["messages"][0]
+                    # Same transaction for the revised card and acknowledgement.
+                    # Replaying the message returns the current saved card, not a second edit.
+                    answer = _add(db, conversation, role="assistant", input_mode="text",
+                                  text="Параметры обновлены. Проверьте карточку перед подтверждением.",
+                                  spoken="Параметры обновлены.",
+                                  blocks=[{"type": "text", "text": "Параметры обновлены. Проверьте карточку перед подтверждением."}],
+                                  intent="edit_card", params={"_edited_card_id": edited["id"]},
+                                  confidence=decision.confidence, model=model_name)
+                    db.commit()
+                    return {"messages": [to_dict(user), edited, to_dict(answer)], "replayed": False}
+                except (LookupError, PermissionError, ValueError) as exc:
+                    db.rollback()
+                    intent = "clarify"
+                    reply_text = spoken = ("Не удалось изменить карточку. Проверьте её актуальные параметры "
+                                           "и уточните, что нужно изменить.")
+        elif decision.intent == "execute":
             if decision.capability not in CAPABILITIES:
                 intent = "clarify"
                 reply_text = "Не удалось подобрать точное действие. Какой результат вы хотите получить?"
@@ -631,7 +716,7 @@ def _fallback_chips() -> list[Chip]:
 
 # ---- confirmations ----------------------------------------------------------------------
 
-async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
+async def edit_confirmation(db: Session, ctx: Context, edit, *, commit: bool = True) -> dict:
     """Edit a content request under the same conversation lock as confirmation.
 
     Never queues work: only the explicit /confirm endpoint may start the saved draft.
@@ -672,7 +757,10 @@ async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
     card.capability = capability_id
     card.text = "Параметры обновлены. Проверьте и подтвердите создание."
     card.spoken = card.text
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"messages": [to_dict(card)], "replayed": False}
 
 

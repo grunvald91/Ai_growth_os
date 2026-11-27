@@ -243,6 +243,60 @@
     return wrapper;
   }
 
+  function renderToolForm(block) {
+    var wrapper = el('article', 'sg-resource-widget');
+    wrapper.setAttribute('data-sg-resource-widget', 'tool_form');
+    var details = resourceDetails(block.title, 'Настройте параметры просмотра.');
+    details.open = true;
+    var body = details.querySelector('.sg-resource-details-body');
+    var fields = el('form', 'dp-tool-form');
+    var controls = [];
+    (block.fields || []).forEach(function (field) {
+      var label = el('label', 'dp-tool-field');
+      label.appendChild(el('span', '', field.label));
+      var control;
+      if (field.kind === 'select') {
+        control = el('select', '');
+        (field.options || []).forEach(function (option) {
+          var entry = el('option', '', option.label);
+          entry.value = option.value;
+          control.appendChild(entry);
+        });
+      } else {
+        control = el('input', '');
+        control.type = field.kind === 'integer' ? 'number' : 'text';
+        if (field.minimum != null) control.min = String(field.minimum);
+        if (field.maximum != null) control.max = String(field.maximum);
+        if (field.min_length != null) control.minLength = field.min_length;
+        if (field.max_length != null) control.maxLength = field.max_length;
+        if (field.kind === 'integer') control.step = '1';
+        if (field.kind === 'integer' && !field.required) control.placeholder = 'По умолчанию';
+      }
+      control.name = field.name;
+      control.required = field.required;
+      control.value = field.value;
+      label.appendChild(control);
+      fields.appendChild(label);
+      controls.push(control);
+    });
+    var submit = el('button', 'dp-btn primary', block.submit_label);
+    submit.type = 'submit';
+    fields.appendChild(submit);
+    fields.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (busy || !fields.reportValidity()) return;
+      var params = Object.create(null);
+      controls.forEach(function (control) {
+        if (control.value !== '') params[control.name] = control.value;
+      });
+      // Read-only request; the regular dispatcher validates params and scope.
+      sendChip({label: block.title, capability: block.capability, params: params});
+    });
+    body.appendChild(fields);
+    wrapper.appendChild(details);
+    return wrapper;
+  }
+
   function renderWorkflow(block, synchronized) {
     var main = el('section', 'sg-workflow-main');
     main.appendChild(el('strong', 'sg-workflow-title', block.title));
@@ -894,6 +948,7 @@
         if (!duplicate) bubble.appendChild(el('p', 'dp-text', shortProgress && started ? 'Видео создаётся' : voiceHoldEnabled ?
           String(block.text).replace(/^Запустил рисованное видео\./, 'Запустил простое видео.') : block.text));
       }
+      else if (block.type === 'tool_form') bubble.appendChild(renderToolForm(block));
       else if (block.type === 'clarification') bubble.appendChild(renderClarification(block));
       else if (block.type === 'chips') bubble.appendChild(renderChips(block.items, sendChip));
       else if (block.type === 'links') {
@@ -1031,9 +1086,15 @@
   function applyResult(data) {
     if (root.classList.contains('sg-create-dispatch')) {
       // Keep only the current assistant response, not the conversation log.
-      var latest = (data.messages || []).filter(function (message) {
+      var assistantMessages = (data.messages || []).filter(function (message) {
         return message.role === 'assistant';
-      }).pop();
+      });
+      var latest = assistantMessages[assistantMessages.length - 1];
+      if (latest && latest.intent === 'edit_card') {
+        latest = assistantMessages.find(function (message) {
+          return (message.blocks || []).some(function (block) { return block.type === 'confirm'; });
+        }) || latest;
+      }
       if (latest) {
         Array.from(feed.children).forEach(function (child) {
           if (!child.classList.contains('dp-typing')) child.remove();

@@ -37,6 +37,32 @@ class ClarificationBlock(_Block):
     options: list[Annotated[str, Field(min_length=1, max_length=160)]] = Field(min_length=2, max_length=4)
 
 
+class FormOption(_Block):
+    value: str = Field(min_length=1, max_length=60)
+    label: str = Field(min_length=1, max_length=100)
+
+
+class ToolFormField(_Block):
+    name: str = Field(pattern=r"^[a-z][a-z_]{0,39}$")
+    label: str = Field(min_length=1, max_length=100)
+    kind: Literal["select", "text", "integer"]
+    value: str = Field(default="", max_length=400)
+    required: bool = False
+    options: list[FormOption] = Field(default_factory=list, max_length=20)
+    min_length: int | None = Field(default=None, ge=0)
+    max_length: int | None = Field(default=None, ge=1, le=400)
+    minimum: int | None = None
+    maximum: int | None = None
+
+
+class ToolFormBlock(_Block):
+    type: Literal["tool_form"] = "tool_form"
+    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights"]
+    title: str = Field(min_length=1, max_length=100)
+    fields: list[ToolFormField] = Field(min_length=1, max_length=8)
+    submit_label: Literal["Показать результат"] = "Показать результат"
+
+
 class Chip(_Block):
     """A complete request: pressing it sends the capability and parameters at once."""
     label: str = Field(min_length=1, max_length=80)
@@ -195,7 +221,7 @@ class WorkflowBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ClarificationBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
+    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)
