@@ -31,7 +31,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "23"
+ASSET_VERSION = "27"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -69,6 +69,13 @@ class ChipIn(BaseModel):
 from app.dispatcher.editable import CreateHints, EditCreation
 
 
+class FormSubmissionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    message_id: UUID
+    revision: int = Field(default=0, ge=0)
+    params: dict[str, str] = Field(default_factory=dict, max_length=12)
+
+
 class MessageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = ""
@@ -76,6 +83,7 @@ class MessageIn(BaseModel):
     client_key: str | None = Field(default=None, max_length=100)
     mode: str = Field(default="text", pattern="^(text|chip|voice)$")
     creation: CreateHints | None = None
+    form_submission: FormSubmissionIn | None = None
 
 
 class WorkflowCreateIn(BaseModel):
@@ -314,12 +322,23 @@ async def dispatch_message(product_id: UUID, request: Request, db: Session = Dep
     product = _owner_product(db, product_id)
     body = await _json(request, MessageIn)
     text = body.text.strip()
-    if body.chip is None and not text:
+    if body.form_submission is not None and (body.chip is not None or text or body.creation is not None):
+        raise HTTPException(422, "Форму нужно отправлять отдельно")
+    if body.chip is None and body.form_submission is None and not text:
         raise HTTPException(422, "Напишите, что нужно сделать")
-    result = await service.handle_message(
-        db, _context(db, product, settings, request), llm, text=text, client_key=body.client_key,
-        mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None,
-        creation=body.creation)
+    try:
+        result = await service.handle_message(
+            db, _context(db, product, settings, request), llm, text=text, client_key=body.client_key,
+            mode="chip" if body.chip else body.mode, chip=body.chip.model_dump() if body.chip else None,
+            creation=body.creation, form_submission=body.form_submission)
+    except LookupError:
+        if body.form_submission is None:
+            raise
+        raise HTTPException(404, "Форма не найдена") from None
+    except ValueError:
+        if body.form_submission is None and not (body.client_key or "").startswith("form:"):
+            raise
+        raise HTTPException(422, "Проверьте параметры формы и совместимость выбранных значений") from None
     result["hints"] = _hints(db, product, settings)
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
