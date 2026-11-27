@@ -24,6 +24,15 @@ const state = {hints:[], messages:[{
     {title:"Что ждёт проверки",status:"skipped",detail:"Не выполнялось.",
       blocks:[]},
   ]}]},{id:"clarification-message",seq:2,role:"assistant",text:"Какой результат нужен?",blocks:[{type:"text",text:"Какой результат нужен?"},{type:"clarification",options:["Привлечь новых клиентов","<img src=x onerror=alert(1)>"]}]}]};
+state.messages.push({
+  id:"form-message",seq:3,role:"assistant",text:"Выберите параметры",
+  blocks:[{type:"tool_form",capability:"show_insights",title:"Итоги бизнеса по записям",
+    submit_label:"Показать результат",fields:[
+      {name:"topic",label:"Раздел аналитики",kind:"select",value:"all",required:false,
+       options:[{value:"all",label:"Все"},{value:"clients",label:"Клиенты <img src=x>"}]},
+      {name:"days",label:"Количество дней",kind:"integer",value:"",required:false,minimum:7,maximum:365}
+    ]}]
+});
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -84,6 +93,28 @@ try{
     assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
     assert.equal(await clarification.locator("img").count(),0);
     assert.equal(posted.length,0);
+    const form=page.locator('[data-sg-resource-widget="tool_form"]');
+    await form.locator("ui-collapsible").waitFor();
+    const formCalls=[];
+    await page.route("**/fake/messages", async route=>{
+      formCalls.push(route.request().postDataJSON());
+      await route.fulfill({json:{messages:[],hints:[]}});
+    });
+    await form.getByLabel("Раздел аналитики").selectOption("clients");
+    await form.getByLabel("Количество дней").fill("366");
+    await form.getByRole("button",{name:"Показать результат"}).click();
+    assert.equal(formCalls.length,0);
+    await form.getByLabel("Количество дней").fill("30");
+    assert.equal(formCalls.length,0);
+    assert.equal(await form.locator("img").count(),0);
+    await form.getByRole("button",{name:"Показать результат"}).click();
+    await page.waitForFunction(()=>!document.querySelector(".dp-home").classList.contains("busy"));
+    assert.equal(formCalls.length,1);
+    assert.equal(formCalls[0].mode,"chip");
+    assert.equal(formCalls[0].form_submission.message_id,"form-message");
+    assert.equal(formCalls[0].chip,undefined);
+    assert.deepEqual(formCalls[0].form_submission.params,{topic:"clients",days:"30"});
+    assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -94,6 +125,10 @@ try{
     assert.equal(await legacy.locator(".sg-workflow-result").count(),3);
     await legacy.locator('[data-sg-resource-widget="clarification"]').getByRole("button",{name:"Привлечь новых клиентов"}).click();
     assert.equal(await legacy.locator("#dp-input").inputValue(),"Привлечь новых клиентов");
+    const nativeForm=legacy.locator('[data-sg-resource-widget="tool_form"]');
+    assert.equal(await nativeForm.locator("details[open]").count(),1);
+    await nativeForm.getByLabel("Количество дней").fill("7");
+    assert.equal(await nativeForm.getByLabel("Количество дней").inputValue(),"7");
     await legacy.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");
