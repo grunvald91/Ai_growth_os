@@ -13,14 +13,22 @@ from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
 from app.services.artifacts import ArtifactService
 from app.workflows.article_contracts import ArticleProductionInput, ShortVideoDerivativeDraft
 
-async def run_content_once(session_factory, settings):
-    from app.seo.interruption import recover_interrupted_articles
-    recover_interrupted_articles(session_factory, settings.products_root)
+async def run_content_once(session_factory, settings, *, seo_only: bool | None = None):
+    # The dedicated SEO lane and the general worker use disjoint task sets.
+    # None preserves the original behavior for standalone worker callers.
+    if seo_only is not False:
+        from app.seo.interruption import recover_interrupted_articles
+        recover_interrupted_articles(session_factory, settings.products_root)
     with session_factory() as db:
         from app.seo.queue import SEO_TASK_PREFIX, exhausted_products, SeoQuotaDeferred
         from app.seo.activation import enabled_product_ids, require_enabled
         query = select(Task).where(Task.assigned_agent.in_(['content_factory', 'content_renderer', 'content_editor', 'content_creative', 'content_image_regen']),
             Task.status == TaskStatus.QUEUED)
+        if seo_only is True:
+            query = query.where(Task.assigned_agent == 'content_factory',
+                                Task.title.like(f'{SEO_TASK_PREFIX}%'))
+        elif seo_only is False:
+            query = query.where(~Task.title.like(f'{SEO_TASK_PREFIX}%'))
         # Never run paid SEO content work for a company that did not opt in.
         enabled = enabled_product_ids(db)
         from sqlalchemy import or_
