@@ -197,3 +197,12 @@ async def test_submitted_video_form_creates_only_one_unapproved_job(db, tmp_path
                                              form_submission=request)
     assert repeated["replayed"]
     assert len(list(db.scalars(select(Task).where(Task.product_id == product.id)))) == 1
+
+
+@pytest.mark.parametrize("profile", ["configured", "gemini_ru", "fish", "grok"])
+def test_video_form_projects_current_speech_profiles(profile):
+    from app.dispatcher.forms import form_for
+    block = form_for("whiteboard_video", {"topic": "Как устроена онлайн-запись", "profile": profile})
+    field = next(field for field in block["fields"] if field["name"] == "profile")
+    assert field["value"] == profile
+    assert {option["value"] for option in field["options"]} == {"configured", "gemini_ru", "fish", "grok"}
