@@ -95,10 +95,10 @@ def quick_video_request(text: str) -> dict[str, str] | None:
         r"(?:\s+(?:на\s+(?:одну\s+)?минуту|на\s+полминуты|(?:на\s+)?(?:30|60)\s*секунд\w*))?"
         r"\s+на\s+тему\b", words)
     duration = re.search(r"\b(?:минутн\w*|полуминутн\w*|(?:30|60)\s*секунд\w*|"
-                         r"на\s+(?:одну\s+)?минуту|на\s+полминуты)\b", words[:120])
+                         r"на\s+(?:одну\s+)?минуту|на\s+полминуты)\b", words[:explicit.end()] if explicit else "")
     if not (explainer or compound or (explicit and duration)):
         return None
-    if explicit and re.search(r"\b(?:и\s+(?:создай|сделай|покажи|опубликуй|отмени)|"
+    if explicit and re.search(r"\b(?:и\s+(?:создай|сделай|покажи)|опубликуй|отмени|"
                               r"без\s+рисунк\w*)\b", words):
         return None
 
