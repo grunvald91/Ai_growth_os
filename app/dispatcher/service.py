@@ -44,7 +44,7 @@ DECISION_TIMEOUT_SECONDS = 45
 # thread stays stored and visible on the page.
 HISTORY_FOR_MODEL = 20
 
-FALLBACK_TEXT = ("Не получилось разобрать просьбу — попробуйте сказать иначе или выберите готовый вариант ниже.")
+FALLBACK_TEXT = ("Не удалось получить рабочий ответ ИИ-диспетчера. Это технический сбой, а не ошибка в вашей просьбе. Повторите запрос позже или воспользуйтесь доступными действиями.")
 
 
 # ---- conversation -----------------------------------------------------------------------
@@ -471,14 +471,13 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             # Already validated owner form values, not model-generated strings.
             decision.params.update(creation.video.model_dump(exclude_none=True))
     else:
-        quick = quick_capability(text)
-        if quick is not None:
-            decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
-        elif (video_params := quick_video_request(text)) is not None:
+        if (video_params := quick_video_request(text)) is not None:
             # Exact topic and duration from the user's explicit request. Existing
             # whiteboard executor still requires paid approval before rendering.
             decision = DispatcherDecision(intent="execute", capability="whiteboard_video",
                                           params=video_params, confidence=1.0)
+        elif (quick := quick_capability(text)) is not None:
+            decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
             if decision is not None and (decision.intent == "unsupported" or (
