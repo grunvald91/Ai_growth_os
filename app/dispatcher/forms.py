@@ -41,7 +41,8 @@ OPTION_LABELS = {
     "none": "Без изображения", "auto": "Автоматически", "gemini": "Gemini", "openai": "GPT Image",
     "4:5": "4:5", "1:1": "1:1",
     "30": "30 секунд", "60": "60 секунд", "configured": "Настроенный профиль",
-    "gemini_ru": "Gemini (русская озвучка)", "gemini-3.1-flash-image": "Gemini",
+    "gemini_ru": "Gemini (русская озвучка)", "fish": "Fish Audio", "grok": "Grok",
+    "gemini-3.1-flash-image": "Gemini",
     "gpt-image-2.5-sunburst": "GPT Image", "general": "Общий", "scientific": "Научный",
 }
 
