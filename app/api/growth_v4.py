@@ -607,8 +607,8 @@ def render_v4(page, request, pid, switch):
     if home:
         extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>voice-start-fast-20261121', extras)
     if pid and current == base+'/create':
-        extras += '<script src="/studio/assets/create-studio.js?v=dynamic-clarification-20261125"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=dynamic-clarification-20261125"></script>'
+        extras += '<script src="/studio/assets/create-studio.js?v=scoped-action-forms-20261125"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=scoped-action-forms-20261125"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'

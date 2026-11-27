@@ -115,6 +115,44 @@ def _add_committed(db: Session, conversation: DispatcherConversation, **values) 
 
 # ---- model ------------------------------------------------------------------------------
 
+def pending_creation_cards(history: list[DispatcherMessage]) -> list[dict]:
+    """Only server-persisted, pending editable cards from this conversation."""
+    from app.dispatcher.editable import EDITABLE_CAPABILITIES
+    fields = ("format", "topic", "platform", "frame_count", "audience",
+              "editorial_brief", "image_model", "aspect_ratio")
+    result = []
+    for message in reversed(history):
+        if (message.role != "assistant" or message.confirmation_state != "pending"
+                or (message.params or {}).get("_capability", message.capability) not in EDITABLE_CAPABILITIES):
+            continue
+        for block in message.blocks or []:
+            if (block.get("type") == "confirm" and block.get("state") == "pending"
+                    and block.get("confirmation_id") == message.confirmation_id
+                    and isinstance(block.get("editable"), dict)):
+                result.append({"confirmation_id": message.confirmation_id,
+                               "revision": block.get("revision", 0),
+                               **{key: block["editable"].get(key) for key in fields}})
+                break
+        if len(result) == 4:
+            break
+    return result
+
+
+def card_edit_request(decision: DispatcherDecision, pending: list[dict]):
+    """Pin model proposals to the exact snapshot; the locked editor rechecks revision."""
+    from app.dispatcher.editable import EditCreation
+    allowed = {"topic", "platform", "frame_count", "audience",
+               "editorial_brief", "image_model", "aspect_ratio"}
+    raw = dict(decision.params)
+    target = raw.pop("confirmation_id", None)
+    revision = raw.pop("revision", None)
+    card = next((item for item in pending if item["confirmation_id"] == target), None)
+    if card is None or revision != str(card["revision"]) or not raw or not raw.keys() <= allowed:
+        raise ValueError("Уточните, какую открытую карточку и какие параметры изменить.")
+    merged = {**card, **raw}
+    return EditCreation.model_validate(merged)
+
+
 def record_llm_cost(db: Session, product_id: UUID, response, provider: str, *, latency_ms: int | None = None) -> None:
     usage = response.usage
     db.add(CostRecord(
@@ -140,7 +178,8 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
             "Заново сопоставь исходную цель со всем каталогом. Выбери точное действие с реальными параметрами, "
             "либо предложи ближайшее доступное действие с пояснением, либо задай один предметный вопрос. "
             "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
-        messages=[*turns, LLMMessage(role="user", content=build_user_message(snapshot(ctx.db, ctx.product), text))],
+        messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
+                "pending_creation_cards": pending_creation_cards(history)}, text))],
         model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
         max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
@@ -408,23 +447,69 @@ def _visual_preferences(text: str) -> tuple[str | None, str | None]:
 
 
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
-                         mode: str = "text", chip: dict | None = None, creation=None) -> dict:
+                         mode: str = "text", chip: dict | None = None, creation=None, form_submission=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
+    if form_submission is None and client_key and client_key.startswith("form:"):
+        raise ValueError("Ключ зарезервирован для отправки формы.")
+    if form_submission is not None:
+        from app.dispatcher.forms import PREPARE_FORMS, form_for
+        source = db.scalar(select(DispatcherMessage).where(
+            DispatcherMessage.id == form_submission.message_id,
+            DispatcherMessage.conversation_id == conversation.id,
+            DispatcherMessage.product_id == ctx.product.id,
+            DispatcherMessage.role == "assistant",
+            DispatcherMessage.intent == "form"))
+        if source is None:
+            raise LookupError("Форма не найдена в текущей беседе.")
+        stored_form = next((b for b in source.blocks or [] if b.get("type") == "tool_form"), None)
+        if stored_form is None or stored_form.get("capability") != source.capability:
+            raise ValueError("Форма больше недоступна.")
+        target = stored_form["capability"]
+        submitted = form_submission.params
+        if not submitted.keys() <= {f["name"] for f in stored_form["fields"]}:
+            raise ValueError("В форме есть неизвестные поля.")
+        # Re-check the current registry and validate the complete request.
+        form_for(target, submitted, partial=False)
+        if target in PREPARE_FORMS:
+            # One preparation per saved form, including cross-tab repeats.
+            client_key = "form:" + str(source.id)
+        chip = {"label": stored_form["title"], "capability": target, "params": submitted}
+        mode = "chip"
     if client_key:
         existing = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.client_key == client_key))
         if existing is not None:
             reply = db.scalar(select(DispatcherMessage).where(
-                DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.seq == existing.seq + 1))
-            return {"messages": [to_dict(existing), *([to_dict(reply)] if reply else [])], "replayed": True}
+                DispatcherMessage.conversation_id == conversation.id,
+                DispatcherMessage.role == "assistant",
+                DispatcherMessage.params["_reply_to"].as_string() == str(existing.id)).limit(1))
+            if reply is None and not (existing.params or {}).get("_linked_reply"):
+                # Compatibility for older messages. Never replay an unrelated
+                # update or a response explicitly linked to another request.
+                candidate = db.scalar(select(DispatcherMessage).where(
+                    DispatcherMessage.conversation_id == conversation.id,
+                    DispatcherMessage.seq == existing.seq + 1,
+                    DispatcherMessage.role == "assistant"))
+                if (candidate is not None and candidate.capability != "task_result"
+                        and not (candidate.params or {}).get("_reply_to")):
+                    reply = candidate
+            edited = None
+            if reply is not None and (reply.params or {}).get("_edited_card_id"):
+                edited = db.scalar(select(DispatcherMessage).where(
+                    DispatcherMessage.conversation_id == conversation.id,
+                    DispatcherMessage.id == UUID(reply.params["_edited_card_id"])))
+            return {"messages": [to_dict(existing), *([to_dict(edited)] if edited else []),
+                                 *([to_dict(reply)] if reply else [])], "replayed": True}
     history = messages(db, conversation)
+    edit_snapshot = pending_creation_cards(history)
     label = (chip or {}).get("label") or text
     try:
         user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
-                              capability=(chip or {}).get("capability"), params=(chip or {}).get("params") or {})
+                              capability=(chip or {}).get("capability"),
+                              params={**((chip or {}).get("params") or {}), "_linked_reply": True})
     except IntegrityError:
         return {"messages": [], "replayed": True}
 
@@ -544,7 +629,46 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         chips = _valid_chips(decision.next_chips)
         reply_text = decision.reply_text or reply_text
         spoken = decision.spoken or decision.reply_text or spoken
-        if decision.intent == "execute":
+        if decision.intent == "form":
+            from app.dispatcher.forms import form_for
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = spoken = "Что именно вы хотите посмотреть?"
+            else:
+                try:
+                    blocks = [form_for(decision.capability, decision.params)]
+                except ValueError:
+                    intent = "clarify"
+                    reply_text = spoken = "Уточните, какие данные и за какой период нужны."
+                else:
+                    reply_text = spoken = ("Укажите параметры и нажмите «" + blocks[0]["submit_label"] + "».")
+        elif decision.intent == "edit_card":
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT:
+                intent = "clarify"
+                reply_text = spoken = "Уточните, какой параметр открытой карточки изменить."
+            else:
+                try:
+                    edit = card_edit_request(decision, edit_snapshot)
+                    updated = await edit_confirmation(db, ctx, edit, commit=False)
+                    edited = updated["messages"][0]
+                    # Same transaction for the revised card and acknowledgement.
+                    # Replaying the message returns the current saved card, not a second edit.
+                    answer = _add(db, conversation, role="assistant", input_mode="text",
+                                  text="Параметры обновлены. Проверьте карточку перед подтверждением.",
+                                  spoken="Параметры обновлены.",
+                                  blocks=[{"type": "text", "text": "Параметры обновлены. Проверьте карточку перед подтверждением."}],
+                                  intent="edit_card", params={"_edited_card_id": edited["id"], "_reply_to": str(user.id)},
+                                  confidence=decision.confidence, model=model_name)
+                    db.commit()
+                    return {"messages": [to_dict(user), edited, to_dict(answer)], "replayed": False}
+                except (LookupError, PermissionError, ValueError) as exc:
+                    db.rollback()
+                    intent = "clarify"
+                    reply_text = spoken = ("Не удалось изменить карточку. Проверьте её актуальные параметры "
+                                           "и уточните, что нужно изменить.")
+        elif decision.intent == "execute":
             if decision.capability not in CAPABILITIES:
                 intent = "clarify"
                 reply_text = "Не удалось подобрать точное действие. Какой результат вы хотите получить?"
@@ -613,6 +737,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         blocks.append({"type": "chips", "items": chips})
     params = {**confirmation.params, "_capability": capability_id} if confirmation is not None else \
         (decision.params if decision else {})
+    params = {**params, "_reply_to": str(user.id)}
     if workflow_id:
         params = {**params, "_workflow_id": workflow_id}
     answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
@@ -631,7 +756,7 @@ def _fallback_chips() -> list[Chip]:
 
 # ---- confirmations ----------------------------------------------------------------------
 
-async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
+async def edit_confirmation(db: Session, ctx: Context, edit, *, commit: bool = True) -> dict:
     """Edit a content request under the same conversation lock as confirmation.
 
     Never queues work: only the explicit /confirm endpoint may start the saved draft.
@@ -668,11 +793,16 @@ async def edit_confirmation(db: Session, ctx: Context, edit) -> dict:
         *[replacement if b.get("type") == "confirm" else b
           for b in blocks if b.get("type") != "text"],
     ])
-    card.params = {**described.params, "_capability": capability_id}
+    reply_to = (card.params or {}).get("_reply_to")
+    card.params = {**described.params, "_capability": capability_id,
+                   **({"_reply_to": reply_to} if reply_to else {})}
     card.capability = capability_id
     card.text = "Параметры обновлены. Проверьте и подтвердите создание."
     card.spoken = card.text
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"messages": [to_dict(card)], "replayed": False}
 
 
@@ -683,7 +813,7 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     card = db.scalar(select(DispatcherMessage).where(
         DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.confirmation_id == confirmation_id,
-        DispatcherMessage.role == "assistant").with_for_update())
+        DispatcherMessage.role == "assistant").with_for_update().execution_options(populate_existing=True))
     if card is None:
         raise LookupError("Карточка не найдена")
     if card.confirmation_state != "pending":
@@ -706,6 +836,7 @@ async def confirm(db: Session, ctx: Context, confirmation_id: str, *, accept: bo
             raise PermissionError("Голосом можно ответить только на последний вопрос")
     stored = dict(card.params or {})
     capability_id = str(stored.pop("_capability", card.capability or ""))
+    stored.pop("_reply_to", None)
     card.confirmation_state = "confirmed" if accept else "declined"
     card.decided_at = datetime.now(timezone.utc)
     card.blocks = [({**b, "state": card.confirmation_state} if b.get("type") == "confirm" else b) for b in card.blocks]

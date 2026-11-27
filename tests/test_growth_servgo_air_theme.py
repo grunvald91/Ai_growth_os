@@ -231,7 +231,7 @@ def test_dispatcher_review_cards_keep_video_subjects_and_material_status_separat
     ):
         assert fragment in adapter, fragment
     assert 'growth-servgo-air.css?v=21-system-notices' in v4
-    assert 'create-studio.js?v=dynamic-clarification-20261125' in v4
+    assert 'create-studio.js?v=scoped-action-forms-20261125' in v4
 
 
 def test_system_notices_keep_block_messages_separate_from_inline_badges():
