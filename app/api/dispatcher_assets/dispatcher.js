@@ -1031,9 +1031,15 @@
   function applyResult(data) {
     if (root.classList.contains('sg-create-dispatch')) {
       // Keep only the current assistant response, not the conversation log.
-      var latest = (data.messages || []).filter(function (message) {
+      var assistantMessages = (data.messages || []).filter(function (message) {
         return message.role === 'assistant';
-      }).pop();
+      });
+      var latest = assistantMessages[assistantMessages.length - 1];
+      if (latest && latest.intent === 'edit_card') {
+        latest = assistantMessages.find(function (message) {
+          return (message.blocks || []).some(function (block) { return block.type === 'confirm'; });
+        }) || latest;
+      }
       if (latest) {
         Array.from(feed.children).forEach(function (child) {
           if (!child.classList.contains('dp-typing')) child.remove();
