@@ -26,7 +26,7 @@ _links = links_block
 
 # ---- reading -----------------------------------------------------------------------------
 
-def _task_rows_outcome(ctx: Context, rows: list[dict], total: int) -> Outcome:
+def _task_rows_outcome(ctx: Context, rows: list[dict], total: int, *, params=None, page: int = 1) -> Outcome:
     from app.api.content_studio_activity import ANIMATOR_PHASES, work_url
     if not rows:
         return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")])
@@ -36,15 +36,46 @@ def _task_rows_outcome(ctx: Context, rows: list[dict], total: int) -> Outcome:
                       for row in rows]}
     links = {"type": "links", "items": [{"label": str(row["title"])[:80] or "Открыть задание",
                                        "href": work_url(ctx.product.id, row)} for row in rows]}
-    text = f"Найдено заданий: {total}." + (f" Показаны первые {len(rows)}." if total > len(rows) else "")
-    return Outcome(text, blocks=[table, links, _links(ctx, "work")])
+    text = f"Найдено заданий: {total}."
+    blocks = [table, links]
+    if params is not None:
+        first = (page - 1) * 8 + 1
+        if total > len(rows):
+            text += f" Показаны {first}–{first + len(rows) - 1}."
+        if params.list_presentation == "list":
+            from app.dispatcher.blocks import clean_blocks
+            items = []
+            for row, cells in zip(rows, table["rows"]):
+                detail = cells[2]
+                items.append({"kind": "video" if row.get("agent") == "whiteboard_renderer" else "task",
+                              "title": cells[0].strip()[:140] or "Задание", "status": cells[1][:80],
+                              "href": work_url(ctx.product.id, row),
+                              "detail": detail if len(detail) <= 1000 else detail[:990] + "…",
+                              "link_label": "Открыть задание"})
+            cards = clean_blocks([{"type": "resource_list", "title": "Задания", "filterable": True, "items": items}])
+            if cards:
+                blocks = cards
+        base = params.model_dump(mode="json")
+        def chip(label, **changes):
+            return {"label": label, "capability": "list_tasks",
+                    "params": {k: str(v) for k, v in {**base, "page": page, **changes}.items()}}
+        controls = [chip("Показать таблицу" if params.list_presentation == "list" else "Показать карточки",
+                         list_presentation="table" if params.list_presentation == "list" else "list")]
+        if page > 1:
+            controls.append(chip("Предыдущая страница", page=page - 1))
+        if page * 8 < total and page < 1000:
+            controls.append(chip("Следующая страница", page=page + 1))
+        blocks.append({"type": "chips", "items": controls})
+    elif total > len(rows):
+        text += f" Показаны первые {len(rows)}."
+    return Outcome(text, blocks=[*blocks, _links(ctx, "work")])
 
 
 async def list_tasks(ctx: Context, params) -> Outcome:
     from app.api.content_studio_activity import work_page
     result = work_page(ctx.db, ctx.product.id, tab=params.tab, kind=params.kind,
-                       query=params.query, page_size=8)
-    return _task_rows_outcome(ctx, result["items"], result["total"])
+                       query=params.query, page_size=8, page=params.page)
+    return _task_rows_outcome(ctx, result["items"], result["total"], params=params, page=result["page"])
 
 
 async def show_task(ctx: Context, params) -> Outcome:
@@ -105,7 +136,8 @@ async def show_review(ctx: Context, params) -> Outcome:
     } for note in shown]
     blocks: list[dict] = []
     if resources:
-        blocks.append({"type": "resource_list", "items": resources})
+        blocks.append({"type": "resource_list", "title": "Материалы на проверке",
+                       "filterable": True, "items": resources})
     # Older records aren't lost: the full read-only review list is still here.
     if len(candidates) > len(shown):
         blocks.append({"type": "links", "items": [
