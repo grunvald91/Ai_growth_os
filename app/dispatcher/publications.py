@@ -130,7 +130,7 @@ async def list_publications(ctx: Context, params):
         stmt = stmt.where(Publication.status == params.status)
     rows = list(ctx.db.execute(stmt.order_by(Publication.created_at.desc(), Publication.id.desc()).limit(16)))
     if not rows:
-        return Outcome("Подходящих публикаций не найдено.", blocks=[links_block(ctx, "channels", "vk")])
+        return Outcome("Подходящих публикаций не найдено.", blocks=[links_block(ctx, "channels", "vk")], no_data=True)
     shown = rows[:15]
     table = {"type": "table", "columns": ["Материал", "Площадка", "Статус", "Назначено (МСК)"],
              "rows": [[title[:140], CHANNELS[pub.channel], STATES.get(pub.status, pub.status),

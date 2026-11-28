@@ -211,7 +211,8 @@ async def test_read_before_write_runs_first_without_starting_generation(db, comp
         chain(READ, FIRST), "read-first")
     assert start["status"] == "waiting_approval"
     assert start["approval"]["position"] == 1
-    assert [s["status"] for s in start["steps"]] == ["completed", "waiting_approval"]
+    assert [s["status"] for s in start["steps"]] == ["no_data", "waiting_approval"]
+    assert "ничего не выполняется" in start["steps"][0]["detail"].lower()
     assert not list(db.scalars(select(Task)))
 
 
