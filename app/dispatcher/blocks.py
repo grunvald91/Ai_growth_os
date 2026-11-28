@@ -6,6 +6,7 @@ validation is dropped; the owner always still has the text.
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -132,6 +133,30 @@ class MetricsSummaryBlock(_Block):
     points: list[ChartPoint] = Field(min_length=1, max_length=4)
 
 
+class CalendarDay(_Block):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    label: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=160)
+    rows: list[list[str]] = Field(default_factory=list, max_length=100)
+
+
+class CalendarBlock(_Block):
+    """Read-only scoped schedule, not an availability promise or booking action."""
+    type: Literal["calendar"] = "calendar"
+    title: str = Field(min_length=1, max_length=120)
+    source: Literal["BookingBot"] = "BookingBot"
+    timezone: Literal["Europe/Moscow"] = "Europe/Moscow"
+    columns: list[str] = Field(min_length=1, max_length=5)
+    days: list[CalendarDay] = Field(min_length=1, max_length=7)
+
+    def model_post_init(self, __context) -> None:
+        dates = [date.fromisoformat(day.date) for day in self.days]
+        if any(b - a != timedelta(days=1) for a, b in zip(dates, dates[1:])):
+            raise ValueError("Calendar dates must be consecutive and ordered")
+        if any(len(row) != len(self.columns) for day in self.days for row in day.rows):
+            raise ValueError("Calendar rows must match columns")
+
+
 class ResourceItem(_Block):
     """One clickable resource with its own status, never a detached text/link pair."""
     kind: Literal["video", "post", "plan", "material", "task"] = "material"
@@ -209,7 +234,7 @@ class PlanResultStep(_Block):
     review_href: str | None = None
     detail: str = Field(max_length=600)
     blocks: list[Annotated[
-        TextBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | MetricsSummaryBlock | ResourceListBlock | TaskBlock | MaterialBlock,
+        TextBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | MetricsSummaryBlock | CalendarBlock | ResourceListBlock | TaskBlock | MaterialBlock,
         Field(discriminator="type"),
     ]] = Field(default_factory=list, max_length=8)
 
@@ -254,7 +279,7 @@ class WorkflowBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | MetricsSummaryBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
+    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | MetricsSummaryBlock | CalendarBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)
