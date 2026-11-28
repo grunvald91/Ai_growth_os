@@ -177,8 +177,29 @@ def pending_read_forms(history: list[DispatcherMessage]) -> list[dict]:
     return result
 
 
+def pending_prepare_forms(history: list[DispatcherMessage]) -> list[dict]:
+    """Unsubmitted creation forms. Format is context, never an editable control."""
+    from app.dispatcher.forms import PREPARE_FORMS
+    consumed = {m.client_key for m in history if m.role == "user"}
+    result = []
+    for message in reversed(history):
+        if (message.role != "assistant" or message.intent != "form"
+                or message.capability not in PREPARE_FORMS - {"whiteboard_video"}
+                or "form:" + str(message.id) in consumed):
+            continue
+        for block in message.blocks or []:
+            if block.get("type") == "tool_form" and block.get("capability") == message.capability:
+                result.append({"message_id": str(message.id), "revision": block.get("revision", 0),
+                               "capability": message.capability,
+                               **{f["name"]: f["value"] for f in block["fields"]}})
+                break
+        if len(result) == 2:
+            break
+    return result
+
+
 def edit_saved_form(db, conversation, decision, snapshot):
-    from app.dispatcher.forms import READ_FORMS, VIDEO_EDIT_FIELDS, form_for
+    from app.dispatcher.forms import PREPARE_FORMS, READ_FORMS, VIDEO_EDIT_FIELDS, form_for
     raw = dict(decision.params)
     target = raw.pop("message_id", None)
     revision = raw.pop("revision", None)
@@ -188,8 +209,8 @@ def edit_saved_form(db, conversation, decision, snapshot):
     capability = candidate.get("capability", "whiteboard_video")
     if capability == "whiteboard_video":
         allowed = VIDEO_EDIT_FIELDS
-    elif capability in READ_FORMS:
-        allowed = set(candidate) - {"message_id", "revision", "capability"}
+    elif capability in READ_FORMS or capability in PREPARE_FORMS:
+        allowed = set(candidate) - {"message_id", "revision", "capability", "format"}
     else:
         raise ValueError("Форма недоступна.")
     if not raw.keys() <= allowed:
@@ -213,7 +234,10 @@ def edit_saved_form(db, conversation, decision, snapshot):
     values = {f["name"]: f["value"] for f in old["fields"] if f["value"] != ""}
     for key, value in raw.items():
         if not value and ((capability == "whiteboard_video" and key == "call_to_action")
-                          or (capability == "show_insights" and key == "days")):
+                          or (capability == "show_insights" and key == "days")
+                          or (capability in PREPARE_FORMS - {"whiteboard_video"}
+                              and key in {"topic", "audience", "editorial_brief", "platform",
+                                          "frame_count", "aspect_ratio", "image_ratio", "image_model"})):
             values.pop(key, None)
         else:
             values[key] = value
@@ -267,7 +291,8 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
         messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
                 "pending_creation_cards": pending_creation_cards(history),
                 "pending_video_forms": pending_video_forms(history),
-                "pending_read_forms": pending_read_forms(history)}, text))],
+                "pending_read_forms": pending_read_forms(history),
+                "pending_prepare_forms": pending_prepare_forms(history)}, text))],
         model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
         max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
@@ -599,7 +624,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                                  *([to_dict(reply)] if reply else [])], "replayed": True}
     history = messages(db, conversation)
     edit_snapshot = pending_creation_cards(history)
-    form_snapshot = pending_video_forms(history) + pending_read_forms(history)
+    form_snapshot = pending_video_forms(history) + pending_read_forms(history) + pending_prepare_forms(history)
     label = (chip or {}).get("label") or text
     try:
         user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
