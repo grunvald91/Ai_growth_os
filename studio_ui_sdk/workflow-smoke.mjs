@@ -56,6 +56,12 @@ state.messages.push({id:"calendar-message",seq:9,role:"assistant",text:"Расп
   days:[{date:"2026-11-28",label:"Сб 28.11.2026",summary:"Записей: 1",rows:[["09:00","<img src=x>","Услуга","Мастер","подтверждена"]]},
         {date:"2026-11-29",label:"Вс 29.11.2026",summary:"Записей: 0",rows:[]}]
 }]});
+state.messages.push({id:"list-message",seq:10,role:"assistant",text:"Материалы",blocks:[{
+  type:"resource_list",title:"Публикации",filterable:true,items:[
+    {kind:"publication",title:"Пост <img src=x>",status:"Запланировано",detail:"ВКонтакте · 09:00",href:"/studio/products/demo/materials/one",link_label:"Открыть исходный материал"},
+    {kind:"task",title:"Видео",status:"Ошибка",detail:"Этап озвучки",href:"/studio/products/demo/tasks/two"}
+  ]
+}]});
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -165,6 +171,19 @@ try{
     assert.equal(await calendar.locator("details[open]").count(),2);
     assert.match(await calendar.innerText(),/Нет записей для отображения/);
     assert.equal(posted.length,requestsBeforeDay);
+    const resources=page.locator('[data-id="list-message"] .dp-resource-filter');
+    assert.equal(await resources.locator(".dp-resource:visible").count(),2);
+    assert.equal(await resources.locator("img").count(),0);
+    const beforeFilter=posted.length;
+    await resources.getByLabel("Поиск на этой странице").fill("озвучки");
+    assert.equal(await resources.locator(".dp-resource:visible").count(),1);
+    assert.match(await resources.locator(".dp-resource:visible").innerText(),/Видео/);
+    await resources.getByLabel("Поиск на этой странице").fill("нет совпадений");
+    assert.equal(await resources.locator(".dp-resource:visible").count(),0);
+    assert.match(await resources.innerText(),/совпадений нет/);
+    await resources.getByLabel("Поиск на этой странице").fill("");
+    assert.equal(await resources.locator(".dp-resource:visible").count(),2);
+    assert.equal(posted.length,beforeFilter);
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -186,6 +205,8 @@ try{
     assert.equal(await legacy.locator(".dp-calendar-day").count(),2);
     await legacy.locator(".dp-calendar-day summary").nth(1).click();
     assert.equal(await legacy.locator(".dp-calendar-day[open]").count(),2);
+    await legacy.getByLabel("Поиск на этой странице").fill("ВКонтакте");
+    assert.equal(await legacy.locator('[data-id="list-message"] .dp-resource:visible').count(),1);
     await legacy.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");
