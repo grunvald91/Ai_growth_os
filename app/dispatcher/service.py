@@ -224,22 +224,6 @@ def record_llm_cost(db: Session, product_id: UUID, response, provider: str, *, l
 async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, history: list[DispatcherMessage],
                     text: str, *, recovery: bool = False) -> tuple[DispatcherDecision | None, str | None]:
     """(decision, model name). A model failure or unreadable answer gives (None, ...)."""
-    turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text][-HISTORY_FOR_MODEL:]
-    while turns and turns[0].role != "user":
-        turns.pop(0)  # Start the shortened thread with the owner's message, as models expect.
-    request = LLMRequest(
-        system_prompt=SYSTEM_PROMPT + ("\nПовторная проверка: первый ответ отсутствовал, был некорректным или не нашёл доступное действие. "
-            "Заново сопоставь исходную цель со всем каталогом. Выбери точное действие с реальными параметрами, "
-            "либо предложи ближайшее доступное действие с пояснением, либо задай один предметный вопрос. "
-            "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
-        messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
-                "pending_creation_cards": pending_creation_cards(history),
-                "pending_video_forms": pending_video_forms(history)}, text))],
-        model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
-        max_tokens=900,
-        response_schema=DispatcherDecision.model_json_schema(),
-        metadata={"team_role": "dispatcher", "task_type": "dispatcher", "reasoning_effort": "low"},
-    )
     seen: list[str] = []
     started = time.monotonic()
 
@@ -250,7 +234,23 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
                         latency_ms=elapsed_ms)
 
     try:
-        reply = await asyncio.wait_for(llm.generate(request, on_observed=observed), timeout=12 if recovery else DECISION_TIMEOUT_SECONDS)
+        turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text][-HISTORY_FOR_MODEL:]
+        while turns and turns[0].role != "user":
+            turns.pop(0)  # Start the shortened thread with the owner's message, as models expect.
+        request = LLMRequest(
+            system_prompt=SYSTEM_PROMPT + ("\nПовторная проверка: первый ответ отсутствовал, был некорректным или не нашёл доступное действие. "
+                "Заново сопоставь исходную цель со всем каталогом. Выбери точное действие с реальными параметрами, "
+                "либо предложи ближайшее доступное действие с пояснением, либо задай один предметный вопрос. "
+                "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
+            messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
+                    "pending_creation_cards": pending_creation_cards(history),
+                    "pending_video_forms": pending_video_forms(history)}, text))],
+            model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
+            max_tokens=900,
+            response_schema=DispatcherDecision.model_json_schema(),
+            metadata={"team_role": "dispatcher", "task_type": "dispatcher", "reasoning_effort": "low"},
+        )
+        reply = await asyncio.wait_for(llm.generate(request, on_observed=observed), timeout=min(12, DECISION_TIMEOUT_SECONDS) if recovery else DECISION_TIMEOUT_SECONDS)
         data = json.loads(reply.content)
         if isinstance(data, str):
             data = json.loads(data)
@@ -829,7 +829,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 chips = [] if confirmation else (chips or FOLLOW_UP)
         elif decision.intent == "investigate":
             from app.dispatcher.investigation import run_investigation
-            if decision.confidence < CONFIDENCE_TO_ACT or llm is None or not decision.capability:
+            if decision.confidence < CONFIDENCE_TO_ACT or llm is None or _decision_needs_recovery(decision):
                 intent = "clarify"
                 reply_text = spoken = "Уточните, какую проблему нужно проверить."
                 chips = []
