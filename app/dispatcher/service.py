@@ -381,8 +381,15 @@ def _decision_needs_recovery(decision: DispatcherDecision | None) -> bool:
         return decision.capability not in CAPABILITIES
     if decision.intent == "specialist":
         from app.ai_chat.specialists import SPECIALISTS
-        return (decision.specialist_id not in SPECIALISTS or bool(
-            decision.capability or decision.params or decision.steps or decision.next_chips))
+        from app.dispatcher.specialist_evidence import preflight
+        if decision.specialist_id not in SPECIALISTS or bool(
+                decision.capability or decision.params or decision.steps or decision.next_chips):
+            return True
+        try:
+            preflight(decision.specialist_reads)
+        except ValueError:
+            return True
+        return False
     if decision.intent == "investigate":
         from app.dispatcher.investigation import read_params
         try:
@@ -951,9 +958,13 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 intent = "failed"
                 reply_text = spoken = "Специалист сейчас недоступен. Консультация не выполнена."
             else:
+                facts = []
                 answer_text, expert_model = await consult(
                     ctx, llm, decision.specialist_id, text, history,
-                    deadline=turn_deadline, record_cost=record_llm_cost)
+                    deadline=turn_deadline, record_cost=record_llm_cost,
+                    reads=decision.specialist_reads, act=act, facts_out=facts)
+                from app.dispatcher.specialist_evidence import display_blocks
+                blocks = display_blocks(facts)
                 reply_text = spoken = answer_text
                 if expert_model:
                     model_name = expert_model

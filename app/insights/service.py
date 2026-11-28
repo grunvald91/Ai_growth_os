@@ -32,7 +32,7 @@ def read(source: ScheduleSource, depth: int) -> Insights | None:
     Blocking: asks the booking platform over HTTP, so async callers run it in a thread."""
     today = datetime.now(ZoneInfo(SCHEDULE_TZ)).date()
     schedule = source.fetch(today - timedelta(days=depth), today + timedelta(days=AHEAD_DAYS - 1))
-    if schedule is None:
+    if schedule is None or "bookings" not in schedule.model_fields_set:
         return None
     return compute(schedule, schedule.today or today, depth, AHEAD_DAYS)
 

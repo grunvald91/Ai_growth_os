@@ -134,11 +134,14 @@ async def list_publications(ctx: Context, params):
     def chip(label, **changes):
         return {"label": label, "capability": "list_publications",
                 "params": {k: str(v) for k, v in {**base, **changes}.items()}}
+    from app.dispatcher.specialist_evidence import publication_facts
+    facts = publication_facts([pub for pub, _ in rows[:15]], params.page, len(rows) > 15)
     if not rows:
         blocks = [links_block(ctx, "channels", "vk")]
         if params.page > 1:
             blocks.insert(0, {"type": "chips", "items": [chip("Первая страница", page=1)]})
-        return Outcome("Подходящих публикаций на этой странице не найдено.", blocks=blocks, no_data=True)
+        return Outcome("Подходящих публикаций на этой странице не найдено.", blocks=blocks, no_data=True,
+                       specialist_facts=facts)
     shown = rows[:15]
     table = {"type": "table", "columns": ["Материал", "Площадка", "Статус", "Назначено (МСК)"],
              "rows": [[title[:140], CHANNELS[pub.channel], STATES.get(pub.status, pub.status),
@@ -163,7 +166,8 @@ async def list_publications(ctx: Context, params):
         controls.append(chip("Предыдущая страница", page=params.page - 1))
     if len(rows) > 15 and params.page < 1000:
         controls.append(chip("Следующая страница", page=params.page + 1))
-    return Outcome(text, blocks=[*blocks, {"type": "chips", "items": controls}, links_block(ctx, "channels", "vk")])
+    return Outcome(text, blocks=[*blocks, {"type": "chips", "items": controls}, links_block(ctx, "channels", "vk")],
+                   specialist_facts=facts)
 
 
 async def describe_schedule_vk_post(ctx: Context, params):

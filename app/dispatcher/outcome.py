@@ -42,6 +42,8 @@ class Outcome:
     no_data: bool = False
     # Bounded task references for adaptive reasoning, not a UI block.
     diagnostic_tasks: list[dict] = field(default_factory=list)
+    # Server-computed aggregate projection; never serialized as an arbitrary UI block.
+    specialist_facts: dict | None = None
 
 
 def task_block(ctx: Context, task: Task, title: str, href: str) -> dict:
