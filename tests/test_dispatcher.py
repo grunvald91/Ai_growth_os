@@ -2042,3 +2042,45 @@ async def test_consumed_form_rejects_changed_retry_and_exposes_only_source_id(db
         form_submission=request)
     assert replay["replayed"] and replay["messages"][-1]["id"] == result["messages"][-1]["id"]
     assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_task_resource_cards_paginate_with_same_company_filters(db, product):
+    other = Product(name="Foreign", slug="foreign-resource-list")
+    db.add(other)
+    db.flush()
+    for i in range(10):
+        db.add(Task(product_id=product.id, title=f"OWN RESOURCE {i}", assigned_agent="whiteboard_renderer",
+                    status=TaskStatus.FAILED))
+    db.add(Task(product_id=other.id, title="FOREIGN RESOURCE", assigned_agent="whiteboard_renderer",
+                status=TaskStatus.FAILED))
+    db.commit()
+    answer = (await send(db, product, chip={"label": "Карточки", "capability": "list_tasks",
+        "params": {"tab": "problems", "kind": "video", "list_presentation": "list"}}))["messages"][-1]
+    block = next(b for b in answer["blocks"] if b["type"] == "resource_list")
+    assert len(block["items"]) == 8 and block["filterable"]
+    assert all(item["href"].startswith(f"/studio/products/{product.id}/whiteboard/") for item in block["items"])
+    assert "FOREIGN" not in json.dumps(block)
+    assert not any(b["type"] == "table" for b in answer["blocks"])
+    next_page = next(c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+                     if c["label"] == "Следующая страница")
+    assert next_page["params"]["page"] == "2" and next_page["params"]["tab"] == "problems"
+    second = (await send(db, product, chip=next_page, key="page2"))["messages"][-1]
+    second_items = next(b for b in second["blocks"] if b["type"] == "resource_list")["items"]
+    assert len(second_items) == 2
+    assert not {x["href"] for x in second_items} & {x["href"] for x in block["items"]}
+    table = next(c for b in second["blocks"] if b["type"] == "chips" for c in b["items"]
+                 if c["label"] == "Показать таблицу")
+    assert table["params"]["page"] == "2"
+    result = (await send(db, product, chip=table, key="page2-table"))["messages"][-1]
+    assert len(next(b for b in result["blocks"] if b["type"] == "table")["rows"]) == 2
+    assert not list(db.scalars(select(ToolCall)))
+
+
+def test_resource_cards_reject_unsafe_links_and_preserve_legacy_blocks():
+    legacy = {"type": "resource_list", "items": [{"title": "Материал", "status": "Готово",
+                                                 "href": "/studio/products/demo/materials/id"}]}
+    assert clean_blocks([legacy])[0]["filterable"] is False
+    unsafe = {"type": "resource_list", "items": [{"title": "Материал", "status": "Готово",
+                                                 "href": "javascript:alert(1)"}]}
+    assert clean_blocks([unsafe]) == []
