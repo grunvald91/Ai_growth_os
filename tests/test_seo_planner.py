@@ -288,3 +288,24 @@ def test_seo_planner_prefers_daily_useful_topics_without_padding():
     from app.seo.planner import PLAN_PROMPT
     assert "one distinct, useful and source-backed article per day" in PLAN_PROMPT
     assert "never invent or duplicate topics just to fill a day" in PLAN_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_invalid_plan_schema_gets_one_corrective_generation(db, product, tmp_path):
+    provider = Provider({"items": [{"id": "a001"}]}, {"items": [item()]})
+    artifact = await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
+                                  products_root=tmp_path / "products", model="fake")
+    assert artifact.kind == "seo_content_plan"
+    assert len(provider.requests) == 2
+    assert "invalid JSON" in provider.requests[1].messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_invalid_plan_schema_twice_still_fails(db, product, tmp_path):
+    from pydantic import ValidationError
+    provider = Provider({"items": [{"id": "a001"}]}, {"items": [{"id": "a001"}]})
+    with pytest.raises(ValidationError):
+        await plan_content(db, service(provider), PrivacyGateway(), product.id, core(),
+                           products_root=tmp_path / "products", model="fake")
+    assert len(provider.requests) == 2
+    assert db.query(Task).one().status == TaskStatus.FAILED
