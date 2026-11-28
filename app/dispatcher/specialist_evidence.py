@@ -69,7 +69,10 @@ def insight_facts(insights, topic):
         if key not in base and (group is None or topic not in {"all", group}):
             continue
         if math.isfinite(fact.value):
-            rows.append((fact.label, f"{fact.value:g} {fact.unit or ''}".strip()))
+            # Avoid the default six significant digits of :g rounding large
+            # counts or booking values. Preserve the computed precision.
+            value = str(int(fact.value)) if float(fact.value).is_integer() else str(fact.value)
+            rows.append((fact.label, f"{value} {fact.unit or ''}".strip()))
     note = "Расчётная стоимость записей не выручка; запись не подтверждает визит."
     if insights.low_data:
         note += " Мало данных, закономерности ненадёжны."
@@ -81,11 +84,15 @@ def insight_facts(insights, topic):
                   note=note)
 
 
-def schedule_facts(schedule, first, last, mode, period):
+def schedule_facts(schedule, first, last, mode, period, *, source_fields=None):
     if mode not in {"free", "load"}:
         return None
     scope = f"{first:%d.%m.%Y}–{last:%d.%m.%Y}, МСК"
+    fields = schedule.model_fields_set if source_fields is None else source_fields
     if mode == "free":
+        if "free_slots" not in fields:
+            return packet("BookingBot · варианты начала записи", scope, [], status="unavailable",
+                          note="Источник не передал раздел свободных окон.")
         counts = Counter()
         for item in schedule.free_slots:
             if first <= item.date <= last:
@@ -94,7 +101,14 @@ def schedule_facts(schedule, first, last, mode, period):
                 for i in range((last - first).days + 1)]
         return packet("BookingBot · варианты начала записи", scope, rows,
                       note="Число вариантов начала по данным источника, не независимые свободные часы.")
-    from app.schedule.views import load_view
+    if "bookings" not in fields:
+        return packet("BookingBot · загрузка", scope, [], status="unavailable",
+                      note="Источник не передал раздел записей.")
+    from app.schedule.views import load_view, COUNTED
+    if any(b.duration_minutes is None or b.duration_minutes <= 0 for b in schedule.bookings
+           if b.status in COUNTED and b.occupies_resource):
+        return packet("BookingBot · загрузка", scope, [], status="unavailable",
+                      note="У записей отсутствует корректная длительность; загрузка неизвестна.")
     # Reuse the deterministic calculation without the company label. Never
     # forward its staff table; only the day-level aggregate and summary.
     view = load_view(schedule, period, first, last, None)
