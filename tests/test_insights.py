@@ -787,3 +787,58 @@ async def test_unsupported_chart_falls_back_and_switch_preserves_context(db, lin
     back = next(c for b in table["blocks"] if b["type"] == "chips" for c in b["items"]
                 if c["label"] == "Показать график")
     assert back["params"] == {"days": "30", "topic": "weekdays", "presentation": "chart"}
+
+
+def test_calendar_groups_authoritative_rows_including_empty_days_and_cancellations():
+    from app.schedule.views import calendar_block
+    from app.dispatcher.blocks import clean_blocks
+    first = TODAY
+    last = first + timedelta(days=2)
+    records = schedule([row(1, first, time="13:00"), row(2, first, time="09:00"),
+                        row(3, first, status="cancelled"), row(4, last),
+                        row(5, first - timedelta(days=1))])
+    block = clean_blocks([calendar_block(records, first, last, "bookings")])[0]
+    assert block["source"] == "BookingBot" and block["timezone"] == "Europe/Moscow"
+    assert [d["date"] for d in block["days"]] == [(first + timedelta(days=i)).isoformat() for i in range(3)]
+    assert [r[0] for r in block["days"][0]["rows"]] == ["09:00", "13:00"]
+    assert block["days"][0]["summary"] == "Записей: 2; отменено: 1"
+    assert block["days"][1]["rows"] == [] and block["days"][1]["summary"] == "Записей: 0"
+    assert len(block["days"][2]["rows"]) == 1
+    assert "+79990000000" not in str(block)
+    assert calendar_block(records, first, first + timedelta(days=7), "bookings") is None
+    assert clean_blocks([{**block, "days": [block["days"][1], block["days"][0]]}]) == []
+
+
+def test_calendar_free_times_are_explicit_and_large_data_falls_back():
+    from app.schedule.views import calendar_block
+    from app.dispatcher.blocks import clean_blocks
+    data = Schedule.model_validate({"today": TODAY.isoformat(), "free_slots": [
+        {"date": TODAY.isoformat(), "resource": "Мастер", "times": ["09:00", "10:00"]},
+        {"date": TODAY.isoformat(), "resource": "Другой", "times": []}]})
+    block = clean_blocks([calendar_block(data, TODAY, TODAY + timedelta(days=1), "free")])[0]
+    assert block["days"][0]["rows"] == [["Мастер", "09:00, 10:00"]]
+    assert block["days"][0]["summary"] == "Показано вариантов начала: 2"
+    assert block["days"][1]["summary"] == "Нет подтверждённых свободных окон"
+    assert calendar_block(schedule([row(i, TODAY) for i in range(101)]), TODAY, TODAY, "bookings") is None
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_and_table_switch_use_same_scoped_parameters(db, linked, platform):
+    platform.bookings = [row(1, TODAY)]
+    answer = await chip(db, linked, "show_schedule",
+                        {"view": "bookings", "period": "week", "schedule_presentation": "calendar"})
+    calendar = next(b for b in answer["blocks"] if b["type"] == "calendar")
+    assert len(calendar["days"]) == 7
+    assert not any(b["type"] == "table" for b in answer["blocks"])
+    switch = next(c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+                  if c["label"] == "Показать таблицу")
+    assert switch["params"] == {"view": "bookings", "period": "week", "schedule_presentation": "table"}
+    table = await chip(db, linked, switch["capability"], switch["params"], key="calendar-table")
+    assert not any(b["type"] == "calendar" for b in table["blocks"])
+    back = next(c for b in table["blocks"] if b["type"] == "chips" for c in b["items"]
+                if c["label"] == "Показать календарь")
+    assert back["params"] == {"view": "bookings", "period": "week", "schedule_presentation": "calendar"}
+    platform.down = True
+    unavailable = await chip(db, linked, "show_schedule",
+        {"view": "bookings", "period": "week", "schedule_presentation": "calendar"}, key="calendar-down")
+    assert not any(b["type"] == "calendar" for b in unavailable["blocks"])
