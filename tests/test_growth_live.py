@@ -210,7 +210,7 @@ def test_create_has_bottom_dispatcher_and_real_voice_controls(live):
     assert 'id="sg-create-form"' not in page.text
     assert '/studio/assets/create-studio.js?v=video-dynamic-forms-20261125' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=video-dynamic-forms-20261125' in page.text
+    assert '/studio/assets/dispatcher.js?v=ui-form-review-20261128' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert page.text.count('id="dp-input"') == 1
