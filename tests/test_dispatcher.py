@@ -2084,3 +2084,37 @@ def test_resource_cards_reject_unsafe_links_and_preserve_legacy_blocks():
     unsafe = {"type": "resource_list", "items": [{"title": "Материал", "status": "Готово",
                                                  "href": "javascript:alert(1)"}]}
     assert clean_blocks([unsafe]) == []
+
+
+@pytest.mark.asyncio
+async def test_publication_resource_cards_preserve_filters_and_delivery_warning(db, product):
+    from app.models.domain import Publication
+    other = Product(name="Foreign publications", slug="foreign-pub-cards")
+    db.add(other)
+    db.flush()
+    for idx in range(17):
+        post = Artifact(product_id=product.id, kind="channel_text", title=f"OWN PUBLICATION {idx}", content="{}")
+        db.add(post)
+        db.flush()
+        db.add(Publication(product_id=product.id, artifact_id=post.id, channel="vk",
+                           status="delivery_unknown", scheduled_at=datetime.now(timezone.utc)))
+    post = Artifact(product_id=other.id, kind="channel_text", title="FOREIGN PUBLICATION", content="{}")
+    db.add(post)
+    db.flush()
+    db.add(Publication(product_id=other.id, artifact_id=post.id, channel="vk", status="delivery_unknown"))
+    db.commit()
+    answer = (await send(db, product, chip={"label": "Публикации", "capability": "list_publications",
+        "params": {"channel": "vk", "status": "problems", "list_presentation": "list"}}))["messages"][-1]
+    block = next(b for b in answer["blocks"] if b["type"] == "resource_list")
+    assert len(block["items"]) == 15 and block["filterable"]
+    assert all(x["href"].startswith(f"/studio/products/{product.id}/materials/") for x in block["items"])
+    assert all(x["status"] == "Доставка не подтверждена" for x in block["items"])
+    assert "FOREIGN" not in json.dumps(block)
+    assert "повторно отправлять такой пост нельзя" in answer["text"]
+    next_page = next(c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+                     if c["label"] == "Следующая страница")
+    assert next_page["params"] == {"channel": "vk", "status": "problems", "page": "2", "list_presentation": "list"}
+    second = (await send(db, product, chip=next_page, key="pub-page2"))["messages"][-1]
+    items = next(b for b in second["blocks"] if b["type"] == "resource_list")["items"]
+    assert len(items) == 2 and not {x["href"] for x in items} & {x["href"] for x in block["items"]}
+    assert not list(db.scalars(select(ToolCall)))
