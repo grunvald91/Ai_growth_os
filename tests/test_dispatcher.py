@@ -1777,3 +1777,68 @@ async def test_video_form_edit_same_revision_and_no_task_before_submit(db, produ
                                           client_key="edit-video-form", mode="voice")
     assert replay["replayed"] and replay["messages"][1]["blocks"] == result["messages"][1]["blocks"]
     assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.parametrize("capability,initial_params,changes,expected", [
+    ("list_tasks", {"kind": "video", "query": "старый запрос"},
+     {"tab": "problems", "query": ""}, {"kind": "video", "tab": "problems", "query": ""}),
+    ("list_publications", {"channel": "vk"}, {"status": "problems"},
+     {"channel": "vk", "status": "problems"}),
+    ("show_schedule", {"view": "free"}, {"period": "tomorrow"},
+     {"view": "free", "period": "tomorrow"}),
+    ("show_insights", {"topic": "money", "days": "30"}, {"days": "90"},
+     {"topic": "money", "days": "90"}),
+    ("show_insights", {"topic": "clients", "days": "30"}, {"days": ""},
+     {"topic": "clients", "days": ""}),
+])
+@pytest.mark.asyncio
+async def test_read_form_conversational_edit_revision_replay_and_no_execution(
+        db, product, capability, initial_params, changes, expected):
+    from app.api.dispatcher import FormSubmissionIn
+    model, _ = llm({"intent": "form", "capability": capability, "confidence": 1,
+                    "params": initial_params})
+    original = (await send(db, product, text="Выбрать параметры просмотра", model=model))["messages"][-1]
+    assert original["intent"] == "form"
+    editor, _ = llm({"intent": "edit_form", "confidence": 1,
+                     "params": {"message_id": original["id"], "revision": 0, **changes}})
+    result = await service.handle_message(db, context(db, product), editor,
+        text="Измени параметры этой формы", client_key="edit-read-form", mode="voice")
+    edited = result["messages"][1]
+    assert edited["id"] == original["id"]
+    block = next(b for b in edited["blocks"] if b["type"] == "tool_form")
+    assert block["capability"] == capability and block["revision"] == 1
+    fields = {f["name"]: f["value"] for f in block["fields"]}
+    assert {k: fields[k] for k in expected} == expected
+    assert not list(db.scalars(select(Task)))
+    replay = await service.handle_message(db, context(db, product), editor,
+        text="Измени параметры этой формы", client_key="edit-read-form", mode="voice")
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == edited["blocks"]
+    with pytest.raises(ValueError):
+        await service.handle_message(db, context(db, product), None, text="",
+            client_key="stale-read-form", form_submission=FormSubmissionIn(
+                message_id=original["id"], revision=0, params=initial_params))
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_read_form_edit_rejects_unknown_fields_stale_revision_and_invalid_values(db, product):
+    model, _ = llm({"intent": "form", "capability": "list_tasks", "confidence": 1,
+                    "params": {"kind": "video"}})
+    original = (await send(db, product, text="Фильтры заданий", model=model))["messages"][-1]
+    for idx, params in enumerate((
+        {"revision": 0, "capability": "create_post"},
+        {"revision": 0, "tab": "invented"},
+        {"revision": 1, "tab": "problems"},
+        {"revision": 0, "max_api_calls": "999"},
+    )):
+        editor, _ = llm({"intent": "edit_form", "confidence": 1,
+                         "params": {"message_id": original["id"], **params}})
+        result = await service.handle_message(db, context(db, product), editor,
+            text="Измени форму", client_key=f"invalid-read-edit-{idx}")
+        assert result["messages"][-1]["intent"] == "clarify"
+    valid, _ = llm({"intent": "edit_form", "confidence": 1, "params": {
+        "message_id": original["id"], "revision": 0, "tab": "ready"}})
+    result = await service.handle_message(db, context(db, product), valid,
+        text="Покажи готовые", client_key="valid-read-edit")
+    assert result["messages"][1]["blocks"][0]["revision"] == 1
+    assert not list(db.scalars(select(Task)))
