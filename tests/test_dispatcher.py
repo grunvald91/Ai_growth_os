@@ -2118,3 +2118,17 @@ async def test_publication_resource_cards_preserve_filters_and_delivery_warning(
     items = next(b for b in second["blocks"] if b["type"] == "resource_list")["items"]
     assert len(items) == 2 and not {x["href"] for x in items} & {x["href"] for x in block["items"]}
     assert not list(db.scalars(select(ToolCall)))
+
+
+@pytest.mark.parametrize("href", ["/studioevil", "/studio/../admin", "/studio/%2e%2e/admin",
+    "/studio/%5c%5cevil", "/studio/%2f%2fevil", "https://servgo.ru@evil.example/",
+    "https://servgo.ru:8443/", "https://[invalid", "/studio/\nfoo"])
+def test_dynamic_link_normalization_rejects_out_of_scope_paths(href):
+    assert not safe_href(href)
+
+
+@pytest.mark.parametrize("text", ["Покажи последние видео таблицей", "Покажи форму фильтра видео",
+    "Покажи следующую страницу видео", "Покажи график по бизнесу"])
+def test_parameterized_views_are_not_swallowed_by_fast_routes(text):
+    from app.dispatcher.fast_routes import quick_capability
+    assert quick_capability(text) is None
