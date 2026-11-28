@@ -185,7 +185,25 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
         view = views.next_view(schedule, now, label)
     else:
         view = views.bookings_view(schedule, period, first, last, label)
-    return Outcome(view.text, view.spoken, [*view.blocks, _links(ctx, "schedule")])
+    blocks = list(view.blocks)
+    if params.view in {"bookings", "free"}:
+        from app.dispatcher.blocks import clean_blocks
+        candidate = views.calendar_block(schedule, first, last, params.view)
+        available = clean_blocks([candidate]) if candidate else []
+        use_calendar = bool(available and params.schedule_presentation == "calendar")
+        if use_calendar:
+            blocks = available
+        if available:
+            next_presentation = "table" if use_calendar else "calendar"
+            blocks.append({"type": "chips", "items": [{
+                "label": "Показать таблицу" if use_calendar else "Показать календарь",
+                "capability": "show_schedule", "params": {"view": params.view, "period": params.period,
+                    "schedule_presentation": next_presentation}}]})
+        elif params.schedule_presentation == "calendar":
+            view.text += " Календарь недоступен для такого объёма; показываю таблицу."
+    elif params.schedule_presentation == "calendar":
+        view.text += " Для этого вида расписания показываю таблицу."
+    return Outcome(view.text, view.spoken, [*blocks, _links(ctx, "schedule")])
 
 
 # ---- business insights -------------------------------------------------------------------
