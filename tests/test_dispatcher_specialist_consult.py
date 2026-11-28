@@ -152,3 +152,83 @@ async def test_expert_rejects_provider_model_substitution(db, tmp_path):
     assert actual is None and "Консультация не выполнена" in answer
     assert "Нельзя показывать" not in answer
     assert len(list(db.scalars(select(CostRecord)))) == 1
+
+
+@pytest.mark.parametrize("capability,params", [
+    ("show_schedule", {"view": "bookings"}),
+    ("show_schedule", {"view": "next"}),
+    ("show_insights", {"topic": "services"}),
+    ("list_tasks", {"query": "private contact"}),
+    ("schedule_post", {}),
+    ("set_insights_depth", {}),
+])
+def test_expert_read_preflight_rejects_sensitive_or_mutating_views(capability, params):
+    from app.dispatcher.decision import PlannedStep
+    from app.dispatcher.specialist_evidence import preflight
+    with pytest.raises(ValueError):
+        preflight([PlannedStep(capability=capability, params=params)])
+
+
+def test_expert_aggregate_projections_remove_individual_details():
+    from datetime import date
+    from types import SimpleNamespace
+    from app.insights.compute import Insights, Fact, METRIC_PREFIX
+    from app.dispatcher.specialist_evidence import insight_facts, task_facts, publication_facts
+    data = Insights(30, date(2026, 10, 1), date(2026, 10, 30), facts=[
+        Fact(METRIC_PREFIX + "bookings_total", "Записей", 25, "шт"),
+        Fact(METRIC_PREFIX + "resource_bookings:PRIVATE_NAME", "PRIVATE_NAME", 10, "шт"),
+        Fact(METRIC_PREFIX + "service_bookings:PRIVATE_SERVICE", "PRIVATE_SERVICE", 5, "шт"),
+    ])
+    fact = insight_facts(data, "all")
+    assert fact["rows"] == [["Записей", "25 шт"]]
+    assert "PRIVATE" not in str(fact)
+    task = task_facts([{"state": "failed", "title": "PRIVATE_TASK", "id": "PRIVATE_ID"}], 10, 1)
+    assert task["rows"] == [["failed", "1"]]
+    assert "PRIVATE" not in str(task)
+    pub = publication_facts([SimpleNamespace(channel="vk", status="delivery_unknown", title="PRIVATE_POST")], 1, True)
+    assert "PRIVATE" not in str(pub) and "повторная отправка запрещена" in pub["note"]
+
+
+@pytest.mark.asyncio
+async def test_expert_reads_scoped_data_and_persists_sources(db, tmp_path, monkeypatch):
+    from app.dispatcher.outcome import Outcome
+    from app.dispatcher.specialist_evidence import packet
+    ctx = context(db, tmp_path)
+    calls = []
+    async def read(actual, capability, params):
+        assert actual.product.id == ctx.product.id and actual.account == "owner"
+        calls.append(capability)
+        if capability == "show_insights":
+            return Outcome("PRIVATE_TEXT", blocks=[{"type": "text", "text": "PRIVATE_CLIENT"}],
+                specialist_facts=packet("BookingBot", "30 дней", [("Записей", 25)])), None, capability
+        return Outcome("PRIVATE_ERROR", ok=False), None, capability
+    monkeypatch.setattr(service, "act", read)
+    llm, provider = model([json.dumps({
+        "intent": "specialist", "specialist_id": "marketer", "confidence": 1,
+        "specialist_reads": [{"capability": "show_insights", "params": {"days": "30"}},
+                             {"capability": "list_publications", "params": {}}]}),
+        "Рекомендации на основе доступных данных."])
+    result = await service.handle_message(db, ctx, llm, text="Проанализируй продвижение на основе записей",
+        client_key="expert-facts")
+    assistant = result["messages"][-1]
+    assert assistant["intent"] == "specialist"
+    assert calls == ["show_insights", "list_publications"]
+    payload = json.loads(provider.requests[-1].messages[-1].content)
+    facts = payload["platform_facts"]
+    assert facts[0]["rows"] == [["Записей", "25"]]
+    assert facts[1]["status"] == "unavailable" and not facts[1]["rows"]
+    assert "PRIVATE" not in str(facts)
+    assert any(b["type"] == "table" and b["rows"] == [["Записей", "25"]] for b in assistant["blocks"])
+    assert any("Данные недоступны" in b.get("text", "") for b in assistant["blocks"])
+    assert not list(db.scalars(select(Task))) and not list(db.scalars(select(ToolCall)))
+    replay = await service.handle_message(db, ctx, llm, text="Проанализируй продвижение на основе записей",
+        client_key="expert-facts")
+    assert replay["replayed"] and calls == ["show_insights", "list_publications"]
+
+
+def test_expert_preflight_rejects_duplicate_representation():
+    from app.dispatcher.decision import PlannedStep
+    from app.dispatcher.specialist_evidence import preflight
+    with pytest.raises(ValueError):
+        preflight([PlannedStep(capability="show_insights", params={"presentation": "table"}),
+                   PlannedStep(capability="show_insights", params={"presentation": "chart"})])
