@@ -57,7 +57,7 @@ class ToolFormField(_Block):
 
 class ToolFormBlock(_Block):
     type: Literal["tool_form"] = "tool_form"
-    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights", "create_post", "create_package", "whiteboard_video"]
+    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights", "create_post", "create_package", "whiteboard_video", "create_creative"]
     title: str = Field(min_length=1, max_length=100)
     fields: list[ToolFormField] = Field(min_length=1, max_length=12)
     revision: int = Field(default=0, ge=0)
