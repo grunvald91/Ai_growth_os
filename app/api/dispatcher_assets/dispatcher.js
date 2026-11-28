@@ -310,12 +310,14 @@
   // One visual item = one accessible link. No duplicate table/link sections.
   function renderResourceList(block) {
     var list = el('div', 'dp-resource-list');
+    var entries = [];
     var kinds = {
       video: { label: 'Простое видео', glyph: '▶' },
       post: { label: 'Пост', glyph: '✎' },
       plan: { label: 'Контент-план', glyph: '▦' },
       task: { label: 'Задание', glyph: '◷' },
-      material: { label: 'Материал', glyph: '▤' }
+      material: { label: 'Материал', glyph: '▤' },
+      publication: { label: 'Публикация', glyph: '▤' }
     };
     block.items.forEach(function (item) {
       var kind = kinds[item.kind] ? item.kind
@@ -332,13 +334,43 @@
         kind === 'video' ? legacyVideoTitle(item.title)
           : voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
       if (item.status) content.appendChild(el('span', 'dp-resource-status', item.status));
+      if (item.detail) content.appendChild(el('span', 'dp-resource-detail', item.detail));
+      if (item.link_label) content.appendChild(el('span', 'dp-resource-link-label', item.link_label));
       card.appendChild(content);
       var arrow = el('span', 'dp-resource-arrow', '→');
       arrow.setAttribute('aria-hidden', 'true');
       card.appendChild(arrow);
       list.appendChild(card);
+      entries.push({card: card, search: [item.title, content.textContent, item.status, item.detail].join(' ').toLocaleLowerCase('ru-RU')});
     });
-    return list;
+    if (!block.filterable) return list;
+    var section = el('section', 'dp-resource-filter');
+    if (block.title) section.appendChild(el('strong', 'dp-chart-title', block.title));
+    var label = el('label', 'dp-resource-search');
+    label.appendChild(el('span', '', 'Поиск на этой странице'));
+    var input = el('input', '');
+    input.type = 'search';
+    input.maxLength = 120;
+    label.appendChild(input);
+    section.appendChild(label);
+    var count = el('p', 'dp-chart-caption');
+    count.setAttribute('aria-live', 'polite');
+    section.appendChild(count);
+    section.appendChild(list);
+    function filter() {
+      var value = input.value.trim().toLocaleLowerCase('ru-RU');
+      var visible = 0;
+      entries.forEach(function (entry) {
+        var match = !value || entry.search.indexOf(value) !== -1;
+        entry.card.hidden = !match;
+        if (match) visible++;
+      });
+      count.textContent = visible ? 'Показано на странице: ' + visible + ' из ' + entries.length
+        : 'На этой странице совпадений нет.';
+    }
+    input.addEventListener('input', filter);
+    filter();
+    return section;
   }
 
   function resourceDetails(label, description, note) {
