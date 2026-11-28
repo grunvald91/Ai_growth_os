@@ -381,7 +381,8 @@ def _decision_needs_recovery(decision: DispatcherDecision | None) -> bool:
         return decision.capability not in CAPABILITIES
     if decision.intent == "specialist":
         from app.ai_chat.specialists import SPECIALISTS
-        return (decision.specialist_id not in SPECIALISTS or bool(decision.capability or decision.params or decision.steps))
+        return (decision.specialist_id not in SPECIALISTS or bool(
+            decision.capability or decision.params or decision.steps or decision.next_chips))
     if decision.intent == "investigate":
         from app.dispatcher.investigation import read_params
         try:
