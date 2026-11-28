@@ -15,6 +15,7 @@
   // A result may arrive after the original task message, or before it during
   // a reordered update. Keep only confirmed completion/failure events.
   var taskResults = Object.create(null);
+  var submittedForms = Object.create(null);
 
   // Enabled by default for the current owner-led Studio pilot.
   // ?ui_sdk=0 restores the legacy form on this page, without any server changes.
@@ -139,6 +140,150 @@
       .replace(/рисованное видео/gi, 'простое видео');
   }
 
+  function chartValue(p, unit) {
+    return p.value.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ' + unit;
+  }
+
+  function renderMetricsSummary(block) {
+    var section = el('section', 'dp-chart');
+    section.appendChild(el('strong', 'dp-chart-title', block.title));
+    section.appendChild(el('p', 'dp-chart-caption', block.period + ' · ' + block.source));
+    var grid = el('div', 'dp-metrics-grid');
+    (block.points || []).forEach(function (p) {
+      var item = el('div', 'dp-metric');
+      item.appendChild(el('strong', 'dp-metric-value', chartValue(p, block.unit)));
+      item.appendChild(el('span', 'dp-metric-label', p.label));
+      grid.appendChild(item);
+    });
+    section.appendChild(grid);
+    return section;
+  }
+
+  function renderLineChart(figure, points, unit, max) {
+    var wrap = el('div', 'dp-line-chart');
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 320 144');
+    svg.setAttribute('aria-hidden', 'true');
+    var scale = max || 1;
+    [12, 72, 132].forEach(function (y) {
+      var line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', '8'); line.setAttribute('x2', '312');
+      line.setAttribute('y1', String(y)); line.setAttribute('y2', String(y));
+      line.setAttribute('class', 'dp-line-grid');
+      svg.appendChild(line);
+    });
+    var coords = points.map(function (p, i) {
+      return [8 + 304 * i / Math.max(1, points.length - 1), 132 - 120 * p.value / scale];
+    });
+    var polyline = document.createElementNS(ns, 'polyline');
+    polyline.setAttribute('points', coords.map(function (p) { return p.join(','); }).join(' '));
+    polyline.setAttribute('class', 'dp-line-series');
+    svg.appendChild(polyline);
+    coords.forEach(function (p) {
+      var dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('cx', String(p[0])); dot.setAttribute('cy', String(p[1]));
+      dot.setAttribute('r', '2.1'); dot.setAttribute('class', 'dp-line-point');
+      svg.appendChild(dot);
+    });
+    wrap.appendChild(el('p', 'dp-chart-caption', 'Шкала: 0–' + scale.toLocaleString('ru-RU') + ' ' + unit));
+    wrap.appendChild(svg);
+    var dates = el('div', 'dp-line-dates');
+    dates.appendChild(el('span', '', points[0].label));
+    dates.appendChild(el('span', '', points[points.length - 1].label));
+    wrap.appendChild(dates);
+    figure.appendChild(wrap);
+    var detail = el('details', 'dp-chart-data');
+    detail.appendChild(el('summary', '', 'Все значения по датам'));
+    detail.appendChild(renderTable({columns: ['Дата / интервал', 'Значение'],
+      rows: points.map(function (p) { return [p.label, chartValue(p, unit)]; })}));
+    figure.appendChild(detail);
+  }
+
+  function renderDonutChart(figure, points, unit) {
+    var total = points.reduce(function (sum, p) { return sum + p.value; }, 0);
+    if (!total || !Number.isFinite(total)) return false;
+    var colors = ['#4787c9', '#a7792e', '#9969ba', '#56938c', '#a3a3a3', '#716fba', '#c37b68', '#608db4'];
+    var cursor = 0;
+    var stops = points.map(function (p, i) {
+      var start = cursor;
+      cursor += 100 * (p.value / total);
+      return colors[i] + ' ' + start + '% ' + cursor + '%';
+    });
+    var ring = el('div', 'dp-donut-ring');
+    ring.setAttribute('aria-hidden', 'true');
+    ring.style.background = 'conic-gradient(' + stops.join(', ') + ')';
+    ring.appendChild(el('span', 'dp-donut-center', total.toLocaleString('ru-RU')));
+    figure.appendChild(ring);
+    points.forEach(function (p, i) {
+      var row = el('div', 'dp-chart-heading');
+      var label = el('span', 'dp-donut-label');
+      var swatch = el('span', 'dp-donut-swatch');
+      swatch.setAttribute('aria-hidden', 'true'); swatch.style.backgroundColor = colors[i];
+      label.appendChild(swatch); label.appendChild(el('span', '', p.label));
+      row.appendChild(label);
+      row.appendChild(el('strong', '', chartValue(p, unit) + ' · ' +
+        (100 * p.value / total).toLocaleString('ru-RU', {maximumFractionDigits: 1}) + '%'));
+      figure.appendChild(row);
+    });
+    return true;
+  }
+
+  function renderChart(block) {
+    var figure = el('figure', 'dp-chart');
+    figure.appendChild(el('figcaption', 'dp-chart-title', block.title));
+    figure.appendChild(el('p', 'dp-chart-caption', block.period + ' · ' + block.source));
+    var points = block.points || [];
+    if (!points.length || points.some(function (p) {
+      return typeof p.value !== 'number' || !Number.isFinite(p.value) || p.value < 0;
+    })) return figure;
+    var max = Math.max.apply(null, points.map(function (p) { return p.value; }));
+    if (block.kind === 'line' && points.length >= 2) {
+      renderLineChart(figure, points, block.unit, max);
+    } else if (block.kind === 'donut' && renderDonutChart(figure, points, block.unit)) {
+      // The text legend is the accessible data representation.
+    } else points.forEach(function (p) {
+      var row = el('div', 'dp-chart-row');
+      var heading = el('div', 'dp-chart-heading');
+      heading.appendChild(el('span', '', p.label));
+      heading.appendChild(el('strong', '', chartValue(p, block.unit)));
+      row.appendChild(heading);
+      var track = el('div', 'dp-chart-track');
+      track.setAttribute('aria-hidden', 'true');
+      var bar = el('div', 'dp-chart-bar');
+      bar.style.width = (max ? 100 * p.value / max : 0) + '%';
+      track.appendChild(bar);
+      row.appendChild(track);
+      figure.appendChild(row);
+    });
+    if (block.note) figure.appendChild(el('p', 'dp-chart-caption', block.note));
+    return figure;
+  }
+
+  function renderCalendar(block) {
+    var section = el('section', 'dp-calendar');
+    section.setAttribute('aria-label', block.title);
+    section.appendChild(el('strong', 'dp-chart-title', block.title));
+    section.appendChild(el('p', 'dp-chart-caption', block.source + ' · Время московское'));
+    var days = el('div', 'dp-calendar-days');
+    (block.days || []).forEach(function (day, index) {
+      var details = el('details', 'dp-calendar-day');
+      details.open = index === 0;
+      var summary = el('summary', 'dp-calendar-summary');
+      summary.appendChild(el('strong', '', day.label));
+      summary.appendChild(el('span', '', day.summary));
+      details.appendChild(summary);
+      if (day.rows && day.rows.length) {
+        details.appendChild(renderTable({columns: block.columns, rows: day.rows}));
+      } else {
+        details.appendChild(el('p', 'dp-calendar-empty', 'Нет записей для отображения.'));
+      }
+      days.appendChild(details);
+    });
+    section.appendChild(days);
+    return section;
+  }
+
   function renderTable(block) {
     var wrap = el('div', 'dp-tablewrap');
     var table = el('table', 'dp-table');
@@ -165,12 +310,14 @@
   // One visual item = one accessible link. No duplicate table/link sections.
   function renderResourceList(block) {
     var list = el('div', 'dp-resource-list');
+    var entries = [];
     var kinds = {
       video: { label: 'Простое видео', glyph: '▶' },
       post: { label: 'Пост', glyph: '✎' },
       plan: { label: 'Контент-план', glyph: '▦' },
       task: { label: 'Задание', glyph: '◷' },
-      material: { label: 'Материал', glyph: '▤' }
+      material: { label: 'Материал', glyph: '▤' },
+      publication: { label: 'Публикация', glyph: '▤' }
     };
     block.items.forEach(function (item) {
       var kind = kinds[item.kind] ? item.kind
@@ -187,13 +334,43 @@
         kind === 'video' ? legacyVideoTitle(item.title)
           : voiceHoldEnabled ? friendlyTitle(item.title) : item.title));
       if (item.status) content.appendChild(el('span', 'dp-resource-status', item.status));
+      if (item.detail) content.appendChild(el('span', 'dp-resource-detail', item.detail));
+      if (item.link_label) content.appendChild(el('span', 'dp-resource-link-label', item.link_label));
       card.appendChild(content);
       var arrow = el('span', 'dp-resource-arrow', '→');
       arrow.setAttribute('aria-hidden', 'true');
       card.appendChild(arrow);
       list.appendChild(card);
+      entries.push({card: card, search: [item.title, content.textContent, item.status, item.detail].join(' ').toLocaleLowerCase('ru-RU')});
     });
-    return list;
+    if (!block.filterable) return list;
+    var section = el('section', 'dp-resource-filter');
+    if (block.title) section.appendChild(el('strong', 'dp-chart-title', block.title));
+    var label = el('label', 'dp-resource-search');
+    label.appendChild(el('span', '', 'Поиск на этой странице'));
+    var input = el('input', '');
+    input.type = 'search';
+    input.maxLength = 120;
+    label.appendChild(input);
+    section.appendChild(label);
+    var count = el('p', 'dp-chart-caption');
+    count.setAttribute('aria-live', 'polite');
+    section.appendChild(count);
+    section.appendChild(list);
+    function filter() {
+      var value = input.value.trim().toLocaleLowerCase('ru-RU');
+      var visible = 0;
+      entries.forEach(function (entry) {
+        var match = !value || entry.search.indexOf(value) !== -1;
+        entry.card.hidden = !match;
+        if (match) visible++;
+      });
+      count.textContent = visible ? 'Показано на странице: ' + visible + ' из ' + entries.length
+        : 'На этой странице совпадений нет.';
+    }
+    input.addEventListener('input', filter);
+    filter();
+    return section;
   }
 
   function resourceDetails(label, description, note) {
@@ -280,13 +457,26 @@
       fields.appendChild(label);
       controls.push(control);
     });
+    if (block.capability === 'list_tasks' || block.capability === 'list_publications') {
+      var pageControl = controls.find(function (control) { return control.name === 'page'; });
+      if (pageControl) controls.forEach(function (control) {
+        if (['tab','kind','query','channel','status'].indexOf(control.name) !== -1)
+          control.addEventListener('change', function () { pageControl.value = '1'; });
+      });
+    }
     var submit = el('button', 'dp-btn primary', block.submit_label);
     submit.type = 'submit';
     fields.appendChild(submit);
+    function lockSubmitted() {
+      submit.disabled = true;
+      submit.textContent = 'Форма отправлена';
+      controls.forEach(function (control) { control.disabled = true; });
+    }
+    if (preparing && submittedForms[messageId]) lockSubmitted();
     var submissionKey = null, previousValues = null;
     fields.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || !fields.reportValidity()) return;
+      if (busy || (preparing && submittedForms[messageId]) || !fields.reportValidity()) return;
       var params = Object.create(null);
       controls.forEach(function (control) {
         if (control.value !== '') params[control.name] = control.value;
@@ -300,8 +490,8 @@
         if (ok) {
           submissionKey = null;
           if (preparing) {
-            submit.textContent = 'Подтверждение подготовлено';
-            controls.forEach(function (control) { control.disabled = true; });
+            submittedForms[messageId] = true;
+            lockSubmitted();
             return;
           }
         }
@@ -379,6 +569,9 @@
       (step.blocks || []).forEach(function (item) {
         if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
         else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'calendar') group.appendChild(renderCalendar(item));
+        else if (item.type === 'chart') group.appendChild(renderChart(item));
+        else if (item.type === 'metrics_summary') group.appendChild(renderMetricsSummary(item));
         else if (item.type === 'table') group.appendChild(renderTable(item));
         else if (item.type === 'resource_list') group.appendChild(renderResourceList(item));
         else if (item.type === 'task') group.appendChild(renderTask(item));
@@ -976,6 +1169,9 @@
         }) : block.items;
         if (items.length) bubble.appendChild(renderLinks(items));
       }
+      else if (block.type === 'calendar') bubble.appendChild(renderCalendar(block));
+      else if (block.type === 'chart') bubble.appendChild(renderChart(block));
+      else if (block.type === 'metrics_summary') bubble.appendChild(renderMetricsSummary(block));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
       else if (block.type === 'resource_list') bubble.appendChild(renderResourceList(block));
       else if (block.type === 'workflow') bubble.appendChild(renderWorkflow(block));
@@ -1027,7 +1223,21 @@
     });
   }
 
+  function rememberSubmittedForm(message) {
+    if (message.role !== 'user' || !message.submitted_form_id) return;
+    submittedForms[message.submitted_form_id] = true;
+    var source = Array.from(feed.children).find(function (node) {
+      return node.getAttribute('data-id') === message.submitted_form_id;
+    });
+    if (!source) return;
+    source.querySelectorAll('.dp-tool-form input, .dp-tool-form textarea, .dp-tool-form select, .dp-tool-form button').forEach(function (control) {
+      control.disabled = true;
+      if (control.tagName === 'BUTTON') control.textContent = 'Форма отправлена';
+    });
+  }
+
   function upsert(message) {
+    rememberSubmittedForm(message);
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
     if (Number.isInteger(message.seq)) node.setAttribute('data-seq', String(message.seq));
@@ -1102,6 +1312,7 @@
 
   function applyResult(data) {
     if (root.classList.contains('sg-create-dispatch')) {
+      (data.messages || []).forEach(rememberSubmittedForm);
       // Keep only the current assistant response, not the conversation log.
       var assistantMessages = (data.messages || []).filter(function (message) {
         return message.role === 'assistant';
@@ -1136,7 +1347,16 @@
     var key = body.client_key || newKey();
     body.client_key = key;
     var echoNode = null;
-    if (root.classList.contains('sg-create-dispatch')) feed.replaceChildren();
+    // Detach rather than destroy the current form. A failed request must
+    // restore its actual controls and the closure holding the retry key.
+    var previousCreateNodes = root.classList.contains('sg-create-dispatch') ? Array.from(feed.children) : null;
+    if (previousCreateNodes) feed.replaceChildren();
+    function restoreCreateDraft() {
+      if (!previousCreateNodes) return;
+      previousCreateNodes.forEach(function (node) { feed.appendChild(node); });
+      previousCreateNodes = null;
+      syncConversationLayout();
+    }
     if (echo && !root.classList.contains('sg-create-dispatch')) {
       echoNode = renderMessage({ id: 'local-' + key, role: 'user', text: echo });
       feed.appendChild(echoNode);
@@ -1145,6 +1365,9 @@
     setBusy(true);
     post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
+      if ((previousCreateNodes || body.form_submission) && !(data.messages || []).some(function (message) { return message.role === 'assistant'; })) {
+        throw new Error('Ответ ещё не получен. Повторите запрос с теми же параметрами.');
+      }
       applyResult(data);
       if (root.classList.contains('sg-create-dispatch')) {
         root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
@@ -1155,6 +1378,7 @@
       if (voiceRequest) showNote('');
     }).catch(function (error) {
       if (echoNode) echoNode.remove();
+      restoreCreateDraft();
       if (onSettled) onSettled(false);
       notify(error.message);
       if (voiceRequest) {
@@ -1342,7 +1566,7 @@
     // Start a new conversation without opening the Android keyboard.
     if (voiceHoldEnabled) input.blur();
     post('/new', {}).then(function (data) {
-      feed.textContent = ''; syncConversationLayout();
+      feed.textContent = ''; submittedForms = Object.create(null); syncConversationLayout();
       state.hints = data.hints || []; renderHints();
       if (voiceHoldEnabled) {
         input.value = '';

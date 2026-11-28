@@ -37,7 +37,7 @@ def test_pilot_is_default_on_with_legacy_query_override_and_only_changes_existin
     assert "/studio/assets/ui-sdk-pilot.bundle.js?v=3" in js
     assert "?ui_sdk=0" in js
     growth = (ROOT / "app/api/growth_v4.py").read_text(encoding="utf-8")
-    assert "dispatcher.js?v=video-dynamic-forms-20261125" in growth
+    assert "dispatcher.js?v=ui-sdk-review-20261128-r2" in growth
     assert "sg:dispatcher:editor-ready" in js
     assert "sg:dispatcher:editor-ready" in pilot
     assert "data-ui-sdk-advanced" in js
@@ -67,3 +67,14 @@ def test_ui_sdk_dependencies_are_version_pinned():
     for name in ("@ui-sdk/core", "@ui-sdk/web"):
         value = package["dependencies"][name]
         assert value and value[0].isdigit() and "*" not in value
+
+
+def test_dynamic_widget_styles_are_shared_by_classic_and_growth():
+    css = dispatcher.studio_resource_widgets_css().body.decode("utf-8")
+    for selector in (".dp-tool-form", ".dp-chart-track", ".dp-line-chart svg",
+                     ".dp-calendar-day", ".dp-resource-filter .dp-resource[hidden]",
+                     ".dp-clarification-option"):
+        assert selector in css
+    growth = (ROOT / "app/api/growth_v4.py").read_text(encoding="utf-8")
+    assert "resource-widgets.css?v=6" in growth
+    assert "resource-widgets.css?v=6" in (ROOT / "app/api/dispatcher.py").read_text(encoding="utf-8")

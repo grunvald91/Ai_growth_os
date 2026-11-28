@@ -286,14 +286,3 @@
   outline:2px solid var(--dp-accent,#3478d6);outline-offset:2px}
 .dp-plan-change-collapsible ui-collapsible-panel{display:block}
 .dp-plan-change-collapsible ui-collapsible-panel[hidden]{display:none!important}
-
-/* Conversational clarification choices: readable, full-width and not action chips. */
-.dp-msg .dp-clarification-option{width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:left;justify-content:flex-start;min-height:44px;height:auto;padding:10px 12px;border-radius:8px}
-
-/* Generic tool forms: labels and controls wrap on narrow screens. */
-.dp-tool-form{display:grid;gap:10px;min-width:0}
-.dp-tool-field{display:grid;gap:5px;min-width:0;font-size:13px;color:inherit}
-.dp-tool-field input,.dp-tool-field select,.dp-tool-field textarea{box-sizing:border-box;width:100%;min-width:0;min-height:44px;font:inherit;font-size:16px;padding:8px 10px;border:1px solid var(--sg-widget-line,var(--dp-line,#dce6f1));border-radius:8px;background:var(--sg-widget-surface,var(--dp-surface,#fff));color:inherit}
-.dp-tool-form>.dp-btn{min-height:44px;white-space:normal}
-
-.dp-tool-field textarea{resize:vertical;min-height:90px}

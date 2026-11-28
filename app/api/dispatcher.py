@@ -31,7 +31,7 @@ from app.voice.dictionary import SLUG
 
 router = APIRouter(dependencies=[Depends(require_studio_auth), Depends(require_studio_csrf)])
 ASSETS = Path(__file__).parent / "dispatcher_assets"
-ASSET_VERSION = "27"
+ASSET_VERSION = "33"
 MAX_BODY_BYTES = 1_000_000  # same guard as the Studio forms
 
 
@@ -157,7 +157,7 @@ def home_html(db: Session, product: Product, settings: Settings, request: Reques
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="stylesheet" href="/studio/assets/studio.css?v=14">
   <link rel="stylesheet" href="/studio/assets/dispatcher.css?v={ASSET_VERSION}">
-  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=5">
+  <link rel="stylesheet" href="/studio/assets/resource-widgets.css?v=6">
 </head>
 <body>
 <div class="studio-page"><div class="studio-layout">
@@ -336,6 +336,8 @@ async def dispatch_message(product_id: UUID, request: Request, db: Session = Dep
         if body.form_submission is None:
             raise
         raise HTTPException(404, "Форма не найдена") from None
+    except service.FormPreparationError as exc:
+        raise HTTPException(422, str(exc)) from None
     except ValueError:
         if body.form_submission is None and not (body.client_key or "").startswith("form:"):
             raise

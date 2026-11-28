@@ -141,3 +141,50 @@ body[data-growth-design="v4"] .sg-resource-widget{
   .sg-review-sections{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
   .sg-review-sections .sg-filter{white-space:nowrap}
 }
+
+/* Dynamic dispatcher blocks shared by classic Studio and Growth v4. */
+/* Conversational clarification choices: readable, full-width and not action chips. */
+.dp-msg .dp-clarification-option{width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;text-align:left;justify-content:flex-start;min-height:44px;height:auto;padding:10px 12px;border-radius:8px}
+
+/* Generic tool forms: labels and controls wrap on narrow screens. */
+.dp-tool-form{display:grid;gap:10px;min-width:0}
+.dp-tool-field{display:grid;gap:5px;min-width:0;font-size:13px;color:inherit}
+.dp-tool-field input,.dp-tool-field select,.dp-tool-field textarea{box-sizing:border-box;width:100%;min-width:0;min-height:44px;font:inherit;font-size:16px;padding:8px 10px;border:1px solid var(--sg-widget-line,var(--dp-line,#dce6f1));border-radius:8px;background:var(--sg-widget-surface,var(--dp-surface,#fff));color:inherit}
+.dp-tool-form>.dp-btn{min-height:44px;white-space:normal}
+
+.dp-tool-field textarea{resize:vertical;min-height:90px}
+
+/* Read-only analytics, accessible numeric labels and zero-based horizontal bars. */
+.dp-chart{margin:8px 0;display:grid;gap:9px;min-width:0}
+.dp-chart-title{font-weight:650;font-size:15px}
+.dp-chart-caption{font-size:12px;opacity:.8;margin:0;overflow-wrap:anywhere}
+.dp-chart-heading{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:13px}
+.dp-chart-heading span{min-width:0;overflow-wrap:anywhere}.dp-chart-heading strong{white-space:nowrap;font-variant-numeric:tabular-nums}
+.dp-chart-track{height:9px;background:var(--dp-soft,#e4e8ed);border-radius:3px;overflow:hidden}
+.dp-chart-bar{height:100%;background:#4787c9;border-radius:3px}
+
+/* Accessible native analytics: values are text, SVG and ring are decorative. */
+.dp-metrics-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.dp-metric{padding:10px;display:grid;gap:3px;min-width:0;border:1px solid var(--dp-line,#dce6f1);border-radius:6px}
+.dp-metric-value{font-size:20px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.dp-metric-label{font-size:12px;overflow-wrap:anywhere}
+.dp-line-chart{min-width:0}.dp-line-chart svg{display:block;width:100%;height:auto;max-height:220px}.dp-line-grid{stroke:currentColor;opacity:.15;stroke-width:1}.dp-line-series{fill:none;stroke:#4787c9;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}.dp-line-point{fill:#4787c9}.dp-line-dates{display:flex;justify-content:space-between;gap:8px;font-size:11px;overflow-wrap:anywhere}.dp-chart-data summary{cursor:pointer;min-height:32px;padding:6px 0}.dp-chart-data{min-width:0}
+.dp-donut-ring{margin:6px auto;width:136px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center}.dp-donut-center{width:72%;aspect-ratio:1;border-radius:50%;background:var(--dp-surface,var(--sg-widget-surface,#fff));display:grid;place-items:center;font-weight:650;font-size:20px;color:var(--dp-text,#222)}.dp-donut-label{display:flex;gap:7px;align-items:center}.dp-donut-swatch{width:10px;height:10px;flex:0 0 10px;border-radius:2px}.dp-chart-heading strong{white-space:normal;text-align:right}
+
+/* Native read-only calendar. Day selection does not send a request. */
+.dp-calendar{display:grid;gap:8px;min-width:0;margin:8px 0}
+.dp-calendar-days{display:grid;gap:6px;min-width:0}
+.dp-calendar-day{min-width:0;border:1px solid var(--dp-line,#dce6f1);border-radius:8px;overflow:hidden}
+.dp-calendar-summary{cursor:pointer;padding:10px 12px;min-height:44px;box-sizing:border-box;background:var(--dp-soft,#f6f9fd);color:inherit}
+.dp-calendar-summary strong,.dp-calendar-summary span{overflow-wrap:anywhere}
+.dp-calendar-summary span{display:block;font-size:12px;margin-top:3px;opacity:.85}
+.dp-calendar-summary:focus-visible{outline:2px solid var(--dp-accent,#3478d6);outline-offset:-2px}
+.dp-calendar-day .dp-tablewrap{margin:0;max-width:100%}
+.dp-calendar-empty{font-size:13px;padding:8px 12px;margin:0}
+
+/* Scoped resource page: a local filter does not trigger any tool. */
+.dp-resource-filter{display:grid;gap:8px;min-width:0}
+.dp-resource-search{display:grid;gap:5px;font-size:13px;min-width:0}
+.dp-resource-search input{box-sizing:border-box;min-width:0;width:100%;min-height:44px;font:inherit;font-size:16px;padding:8px 10px;border:1px solid var(--dp-line,#dce6f1);border-radius:8px;background:var(--dp-soft,#f6f9fd);color:inherit}
+.dp-resource-filter .dp-resource[hidden]{display:none!important}
+.dp-resource-detail,.dp-resource-link-label{display:block;overflow-wrap:anywhere;white-space:normal;font-size:12px}
+.dp-resource-link-label{font-weight:600}

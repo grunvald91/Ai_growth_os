@@ -26,7 +26,7 @@ _links = links_block
 
 # ---- reading -----------------------------------------------------------------------------
 
-def _task_rows_outcome(ctx: Context, rows: list[dict], total: int) -> Outcome:
+def _task_rows_outcome(ctx: Context, rows: list[dict], total: int, *, params=None, page: int = 1) -> Outcome:
     from app.api.content_studio_activity import ANIMATOR_PHASES, work_url
     if not rows:
         return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")])
@@ -36,15 +36,46 @@ def _task_rows_outcome(ctx: Context, rows: list[dict], total: int) -> Outcome:
                       for row in rows]}
     links = {"type": "links", "items": [{"label": str(row["title"])[:80] or "Открыть задание",
                                        "href": work_url(ctx.product.id, row)} for row in rows]}
-    text = f"Найдено заданий: {total}." + (f" Показаны первые {len(rows)}." if total > len(rows) else "")
-    return Outcome(text, blocks=[table, links, _links(ctx, "work")])
+    text = f"Найдено заданий: {total}."
+    blocks = [table, links]
+    if params is not None:
+        first = (page - 1) * 8 + 1
+        if total > len(rows):
+            text += f" Показаны {first}–{first + len(rows) - 1}."
+        if params.list_presentation == "list":
+            from app.dispatcher.blocks import clean_blocks
+            items = []
+            for row, cells in zip(rows, table["rows"]):
+                detail = cells[2]
+                items.append({"kind": "video" if row.get("agent") == "whiteboard_renderer" else "task",
+                              "title": cells[0].strip()[:140] or "Задание", "status": cells[1][:80],
+                              "href": work_url(ctx.product.id, row),
+                              "detail": detail if len(detail) <= 1000 else detail[:990] + "…",
+                              "link_label": "Открыть задание"})
+            cards = clean_blocks([{"type": "resource_list", "title": "Задания", "filterable": True, "items": items}])
+            if cards:
+                blocks = cards
+        base = params.model_dump(mode="json")
+        def chip(label, **changes):
+            return {"label": label, "capability": "list_tasks",
+                    "params": {k: str(v) for k, v in {**base, "page": page, **changes}.items()}}
+        controls = [chip("Показать таблицу" if params.list_presentation == "list" else "Показать карточки",
+                         list_presentation="table" if params.list_presentation == "list" else "list")]
+        if page > 1:
+            controls.append(chip("Предыдущая страница", page=page - 1))
+        if page * 8 < total and page < 1000:
+            controls.append(chip("Следующая страница", page=page + 1))
+        blocks.append({"type": "chips", "items": controls})
+    elif total > len(rows):
+        text += f" Показаны первые {len(rows)}."
+    return Outcome(text, blocks=[*blocks, _links(ctx, "work")])
 
 
 async def list_tasks(ctx: Context, params) -> Outcome:
     from app.api.content_studio_activity import work_page
     result = work_page(ctx.db, ctx.product.id, tab=params.tab, kind=params.kind,
-                       query=params.query, page_size=8)
-    return _task_rows_outcome(ctx, result["items"], result["total"])
+                       query=params.query, page_size=8, page=params.page)
+    return _task_rows_outcome(ctx, result["items"], result["total"], params=params, page=result["page"])
 
 
 async def show_task(ctx: Context, params) -> Outcome:
@@ -105,7 +136,8 @@ async def show_review(ctx: Context, params) -> Outcome:
     } for note in shown]
     blocks: list[dict] = []
     if resources:
-        blocks.append({"type": "resource_list", "items": resources})
+        blocks.append({"type": "resource_list", "title": "Материалы на проверке",
+                       "filterable": True, "items": resources})
     # Older records aren't lost: the full read-only review list is still here.
     if len(candidates) > len(shown):
         blocks.append({"type": "links", "items": [
@@ -176,6 +208,12 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
     if schedule is None:
         return Outcome("Сейчас не вижу расписание: онлайн-запись не отвечает. Остальное работает.",
                        "Сейчас не вижу расписание, онлайн-запись не отвечает.", [_links(ctx, "schedule")], no_data=True)
+    # The provider is expected to honour the requested dates; enforce the same
+    # bounds for the summary, calendar and table even if it returns extra rows.
+    schedule = schedule.model_copy(update={
+        "bookings": [b for b in schedule.bookings if first <= b.date <= last],
+        "free_slots": [s for s in schedule.free_slots if first <= s.date <= last],
+    })
     label = source.business_label
     if params.view == "free":
         view = views.free_view(schedule, period, label)
@@ -185,7 +223,25 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
         view = views.next_view(schedule, now, label)
     else:
         view = views.bookings_view(schedule, period, first, last, label)
-    return Outcome(view.text, view.spoken, [*view.blocks, _links(ctx, "schedule")])
+    blocks = list(view.blocks)
+    if params.view in {"bookings", "free"}:
+        from app.dispatcher.blocks import clean_blocks
+        candidate = views.calendar_block(schedule, first, last, params.view)
+        available = clean_blocks([candidate]) if candidate else []
+        use_calendar = bool(available and params.schedule_presentation == "calendar")
+        if use_calendar:
+            blocks = available
+        if available:
+            next_presentation = "table" if use_calendar else "calendar"
+            blocks.append({"type": "chips", "items": [{
+                "label": "Показать таблицу" if use_calendar else "Показать календарь",
+                "capability": "show_schedule", "params": {"view": params.view, "period": params.period,
+                    "schedule_presentation": next_presentation}}]})
+        elif params.schedule_presentation == "calendar":
+            view.text += " Календарь недоступен для такого объёма; показываю таблицу."
+    elif params.schedule_presentation == "calendar":
+        view.text += " Для этого вида расписания показываю таблицу."
+    return Outcome(view.text, view.spoken, [*blocks, _links(ctx, "schedule")])
 
 
 # ---- business insights -------------------------------------------------------------------
@@ -222,18 +278,44 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     chips = []
     if params.topic != "all":
         chips.append({"label": "Показать всё", "capability": "show_insights",
-                      "params": {"days": str(params.days)} if params.days else {}})
+                      "params": {"days": str(insights.depth_days), "presentation": params.presentation}})
     if params.topic in ("all", "clients"):
         chips.append({"label": "Кого пригласить повторно", "capability": "show_return_candidates", "params": {}})
     chips.append({"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}})
-    if insights.depth_days < 90:
-        chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights",
-                      "params": {"days": "90", **({"topic": params.topic} if params.topic != "all" else {})}})
+    periods = [{"label": f"За {days} дней", "capability": "show_insights",
+                "params": {"days": str(days), "topic": params.topic, "presentation": params.presentation}}
+               for days in (7, 30, 90) if days != insights.depth_days]
+    if params.topic == "all":
+        chips.append({"label": "Динамика записей", "capability": "show_insights",
+                      "params": {"topic": "trend", "days": str(insights.depth_days),
+                                 "presentation": params.presentation}})
     note = ""
     if params.days and params.days != depth_for(ctx.db, ctx.product.id):
         note = f"\n(Срок {params.days} дн. — только для этого просмотра. Сохранить как обычный: «смотри за {params.days} дней».)"
+    from app.insights.charts import chart_for, metrics_for, trend_points
+    from app.dispatcher.blocks import clean_blocks
+    candidate = chart_for(insights, params.topic)
+    available = clean_blocks([candidate]) if candidate else []
+    chart = available[0] if available and params.presentation != "table" else None
+    summary = metrics_for(insights) if params.topic == "all" and params.presentation != "table" else None
+    if params.presentation == "chart" and chart is None:
+        lines.append("Для этого показателя нет сопоставимых данных для графика; показываю таблицу.")
+    if available:
+        presentation = "table" if chart is not None else "chart"
+        chips.insert(0, {"label": "Только таблица" if presentation == "table" else "Показать график",
+                         "capability": "show_insights",
+                         "params": {"days": str(insights.depth_days), "topic": params.topic,
+                                    "presentation": presentation}})
+    if params.topic == "trend":
+        points, unit, explanation = trend_points(insights)
+        lines.append(explanation)
+        if chart is None:
+            rows = [*rows, *[[p["label"], f'{p["value"]:g} {unit}'] for p in points]]
     return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
-                   [{"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
+                   [*([summary] if summary else []),
+                    {"type": "chips", "items": periods},
+                    *([chart] if chart else []),
+                    {"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
                     {"type": "chips", "items": chips}, _links(ctx, "schedule")])
 
 

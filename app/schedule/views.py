@@ -184,3 +184,33 @@ def _hours(minutes: int) -> str:
 
 def _percent(booked: int, capacity: int) -> str:
     return f"{round(booked * 100 / capacity)}%" if capacity > 0 else "—"
+
+
+def calendar_block(schedule: Schedule, first: date, last: date, view: str) -> dict | None:
+    """Project the same fetched schedule into days; never query or create bookings."""
+    if view not in {"bookings", "free"} or not 0 <= (last - first).days <= 6:
+        return None
+    days = []
+    columns = (["Время", "Клиент", "Услуга", "Мастер", "Статус"] if view == "bookings"
+               else ["Кто", "Свободные окна"])
+    for offset in range((last - first).days + 1):
+        day = first + timedelta(days=offset)
+        if view == "bookings":
+            own = sorted((b for b in schedule.bookings if b.date == day), key=lambda b: (b.time, b.id))
+            active = [b for b in own if b.status != "cancelled"]
+            cancelled = len(own) - len(active)
+            rows = [[b.time, b.client_name, b.service, b.resource or "—",
+                     STATUS_LABELS.get(b.status, b.status)] for b in active]
+            summary = f"Записей: {len(active)}" + (f"; отменено: {cancelled}" if cancelled else "")
+        else:
+            slots = sorted((s for s in schedule.free_slots if s.date == day), key=lambda s: s.resource or "")
+            rows = [[s.resource or "Все", ", ".join(s.times)] for s in slots if s.times]
+            total = sum(len(s.times) for s in slots)
+            summary = f"Показано вариантов начала: {total}" if total else "Нет подтверждённых свободных окон"
+        # Do not truncate silently; keep the original table if the calendar contract is too large.
+        if len(rows) > 100:
+            return None
+        days.append({"date": day.isoformat(), "label": f"{WEEKDAYS[day.weekday()]} {day:%d.%m.%Y}",
+                     "summary": summary, "rows": rows})
+    return {"type": "calendar", "title": "Календарь записей" if view == "bookings" else "Календарь свободных окон",
+            "source": "BookingBot", "timezone": SCHEDULE_TZ, "columns": columns, "days": days}

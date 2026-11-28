@@ -688,3 +688,161 @@ async def test_tasks_from_other_sources_are_not_touched(db, linked, tmp_path):
     db.commit()
     _, builder = specialist_builder(tmp_path)
     assert await run_specialists_once(factory(db), env(), builder=builder) == 0
+
+
+def test_dispatcher_chart_uses_only_computed_comparable_facts():
+    from app.dispatcher.blocks import clean_blocks
+    from app.insights.charts import chart_for
+    result = compute(schedule(twelve_bookings()), TODAY, 30, 14)
+    weekdays = chart_for(result, "weekdays")
+    assert clean_blocks([weekdays])[0]["type"] == "chart"
+    assert weekdays["source"] == "BookingBot" and weekdays["unit"] == "шт"
+    assert len(weekdays["points"]) == 7
+    assert sum(p["value"] for p in weekdays["points"]) == 11
+    assert chart_for(result, "money") is None
+    statuses = chart_for(result, "cancellations")
+    assert [p["value"] for p in statuses["points"]] == [0, 11, 1]
+    assert chart_for(result, "clients")["unit"] == "чел"
+    assert "не подтверждение визита" in chart_for(result, "clients")["note"]
+    empty = compute(schedule([]), TODAY, 30, 14)
+    assert chart_for(empty, "clients") is None
+    assert "Мало данных" in chart_for(empty, "weekdays")["note"]
+    invalid = {**weekdays, "points": [{"label": "x", "value": -1}, {"label": "y", "value": 1}]}
+    assert clean_blocks([invalid]) == []
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_chart_presentation_and_table_fallback(db, linked, platform):
+    answer = await chip(db, linked, "show_insights", {"topic": "weekdays", "presentation": "chart"})
+    chart = next(b for b in answer["blocks"] if b["type"] == "chart")
+    assert chart["source"] == "BookingBot"
+    assert any(b["type"] == "table" for b in answer["blocks"])
+    table = await chip(db, linked, "show_insights", {"topic": "weekdays", "presentation": "table"}, key="table")
+    assert not any(b["type"] == "chart" for b in table["blocks"])
+    assert any(b["type"] == "table" for b in table["blocks"])
+
+
+def test_trend_and_distribution_preserve_booking_definitions():
+    from app.dispatcher.blocks import clean_blocks
+    from app.insights.charts import chart_for, metrics_for, trend_points
+    short = compute(schedule(twelve_bookings()), TODAY, 30, 14)
+    trend = chart_for(short, "trend")
+    assert trend["kind"] == "line" and trend["unit"] == "шт"
+    assert len(trend["points"]) == 30
+    assert sum(p["value"] for p in trend["points"]) == 11
+    assert trend["points"][-1]["label"] == (TODAY - timedelta(days=1)).strftime("%d.%m.%Y")
+    assert clean_blocks([trend])[0]["kind"] == "line"
+    distribution = chart_for(short, "cancellations")
+    assert distribution["kind"] == "donut"
+    assert sum(p["value"] for p in distribution["points"]) == 12
+    assert clean_blocks([distribution])[0]["kind"] == "donut"
+    summary = metrics_for(short)
+    assert [p["value"] for p in summary["points"]] == [11, 0, 11, 1]
+    assert clean_blocks([summary])[0]["type"] == "metrics_summary"
+    long = compute(schedule([row(1, TODAY - timedelta(days=1))]), TODAY, 365, 14)
+    points, unit, _ = trend_points(long)
+    assert len(points) == 53 and unit == "шт/день"
+    # Last interval has one day, not seven.
+    assert points[-1]["value"] == 1
+    assert clean_blocks([chart_for(long, "trend")])[0]["kind"] == "line"
+    empty = compute(schedule([]), TODAY, 30, 14)
+    assert chart_for(empty, "cancellations")["kind"] == "bar"
+    assert clean_blocks([{**distribution, "points": [{"label": "x", "value": 0},
+                                                    {"label": "y", "value": 0}]}]) == []
+
+
+@pytest.mark.asyncio
+async def test_analytics_period_switch_preserves_topic_and_does_not_save_depth(db, linked, platform):
+    answer = await chip(db, linked, "show_insights", {"topic": "trend", "presentation": "chart", "days": "30"})
+    chart = next(b for b in answer["blocks"] if b["type"] == "chart")
+    assert chart["kind"] == "line" and len(chart["points"]) == 30
+    periods = [c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+               if c["capability"] == "show_insights" and c["label"].startswith("За ")]
+    assert {c["params"]["days"] for c in periods} == {"7", "90"}
+    request = next(c for c in periods if c["params"]["days"] == "90")
+    assert request["params"] == {"days": "90", "topic": "trend", "presentation": "chart"}
+    changed = await chip(db, linked, request["capability"], request["params"], key="changed")
+    assert len(next(b for b in changed["blocks"] if b["type"] == "chart")["points"]) == 13
+    assert depth_settings.depth_for(db, linked.id) == 30
+    tabular = await chip(db, linked, "show_insights",
+        {"topic": "trend", "presentation": "table", "days": "7"}, key="tabular")
+    assert not any(b["type"] == "chart" for b in tabular["blocks"])
+    table = next(b for b in tabular["blocks"] if b["type"] == "table")
+    assert table["rows"][-1][0] == (TODAY - timedelta(days=1)).strftime("%d.%m.%Y")
+
+
+@pytest.mark.asyncio
+async def test_unsupported_chart_falls_back_and_switch_preserves_context(db, linked, platform):
+    money = await chip(db, linked, "show_insights", {"topic": "money", "presentation": "chart"})
+    assert not any(b["type"] == "chart" for b in money["blocks"])
+    assert any(b["type"] == "table" for b in money["blocks"])
+    assert "сопоставимых данных для графика" in money["text"]
+    answer = await chip(db, linked, "show_insights",
+                        {"topic": "weekdays", "presentation": "chart", "days": "30"}, key="with-chart")
+    switch = next(c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+                  if c["label"] == "Только таблица")
+    assert switch["params"] == {"days": "30", "topic": "weekdays", "presentation": "table"}
+    table = await chip(db, linked, switch["capability"], switch["params"], key="switch-table")
+    assert not any(b["type"] == "chart" for b in table["blocks"])
+    back = next(c for b in table["blocks"] if b["type"] == "chips" for c in b["items"]
+                if c["label"] == "Показать график")
+    assert back["params"] == {"days": "30", "topic": "weekdays", "presentation": "chart"}
+
+
+def test_calendar_groups_authoritative_rows_including_empty_days_and_cancellations():
+    from app.schedule.views import calendar_block
+    from app.dispatcher.blocks import clean_blocks
+    first = TODAY
+    last = first + timedelta(days=2)
+    records = schedule([row(1, first, time="13:00"), row(2, first, time="09:00"),
+                        row(3, first, status="cancelled"), row(4, last),
+                        row(5, first - timedelta(days=1))])
+    block = clean_blocks([calendar_block(records, first, last, "bookings")])[0]
+    assert block["source"] == "BookingBot" and block["timezone"] == "Europe/Moscow"
+    assert [d["date"] for d in block["days"]] == [(first + timedelta(days=i)).isoformat() for i in range(3)]
+    assert [r[0] for r in block["days"][0]["rows"]] == ["09:00", "13:00"]
+    assert block["days"][0]["summary"] == "Записей: 2; отменено: 1"
+    assert block["days"][1]["rows"] == [] and block["days"][1]["summary"] == "Записей: 0"
+    assert len(block["days"][2]["rows"]) == 1
+    assert "+79990000000" not in str(block)
+    assert calendar_block(records, first, first + timedelta(days=7), "bookings") is None
+    assert clean_blocks([{**block, "days": [block["days"][1], block["days"][0]]}]) == []
+
+
+def test_calendar_free_times_are_explicit_and_large_data_falls_back():
+    from app.schedule.views import calendar_block
+    from app.dispatcher.blocks import clean_blocks
+    data = Schedule.model_validate({"today": TODAY.isoformat(), "free_slots": [
+        {"date": TODAY.isoformat(), "resource": "Мастер", "times": ["09:00", "10:00"]},
+        {"date": TODAY.isoformat(), "resource": "Другой", "times": []}]})
+    block = clean_blocks([calendar_block(data, TODAY, TODAY + timedelta(days=1), "free")])[0]
+    assert block["days"][0]["rows"] == [["Мастер", "09:00, 10:00"]]
+    assert block["days"][0]["summary"] == "Показано вариантов начала: 2"
+    assert block["days"][1]["summary"] == "Нет подтверждённых свободных окон"
+    assert calendar_block(schedule([row(i, TODAY) for i in range(101)]), TODAY, TODAY, "bookings") is None
+
+
+@pytest.mark.asyncio
+async def test_calendar_read_and_table_switch_use_same_scoped_parameters(db, linked, platform):
+    platform.bookings = [row(1, TODAY), row(2, TODAY - timedelta(days=1)),
+                         row(3, TODAY + timedelta(days=7))]
+    answer = await chip(db, linked, "show_schedule",
+                        {"view": "bookings", "period": "week", "schedule_presentation": "calendar"})
+    calendar = next(b for b in answer["blocks"] if b["type"] == "calendar")
+    assert len(calendar["days"]) == 7
+    assert sum(len(day["rows"]) for day in calendar["days"]) == 1
+    assert "Записей на ближайшие 7 дней: 1." in answer["text"]
+    assert not any(b["type"] == "table" for b in answer["blocks"])
+    switch = next(c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
+                  if c["label"] == "Показать таблицу")
+    assert switch["params"] == {"view": "bookings", "period": "week", "schedule_presentation": "table"}
+    table = await chip(db, linked, switch["capability"], switch["params"], key="calendar-table")
+    assert not any(b["type"] == "calendar" for b in table["blocks"])
+    assert len(next(b for b in table["blocks"] if b["type"] == "table")["rows"]) == 1
+    back = next(c for b in table["blocks"] if b["type"] == "chips" for c in b["items"]
+                if c["label"] == "Показать календарь")
+    assert back["params"] == {"view": "bookings", "period": "week", "schedule_presentation": "calendar"}
+    platform.down = True
+    unavailable = await chip(db, linked, "show_schedule",
+        {"view": "bookings", "period": "week", "schedule_presentation": "calendar"}, key="calendar-down")
+    assert not any(b["type"] == "calendar" for b in unavailable["blocks"])

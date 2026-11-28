@@ -149,6 +149,8 @@ class TaskListParams(_Params):
     tab: Literal["all", "active", "approval", "ready", "problems"] = "all"
     kind: Literal["all", "post", "article", "creative", "video", "plan", "edit", "seo", "business"] = "all"
     query: str = Field(default="", max_length=120)
+    page: int = Field(default=1, ge=1, le=1000)
+    list_presentation: Literal["table", "list"] = "table"
 
 
 class TaskDetailParams(_Params):
@@ -178,18 +180,21 @@ class ScheduleParams(_Params):
     # bookings — список записей; free — свободные окна; load — загрузка мастеров; next — кто следующий.
     view: Literal["bookings", "free", "load", "next"] = "bookings"
     period: Literal["today", "tomorrow", "week"] = "today"
+    schedule_presentation: Literal["auto", "table", "calendar"] = Field(
+        default="auto", description="Календарь по дням для записей и свободных окон; table — таблица; auto — обычное представление.")
 
 
 INSIGHT_TOPICS = ("all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming")
 
 
 class InsightsParams(_Params):
-    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming"] = Field(
+    presentation: Literal["auto", "table", "chart"] = Field(default="auto", description="Авто: подходящий график для сравнимых показателей; table: только таблица; chart: график, если есть сопоставимые факты.")
+    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming", "trend"] = Field(
         default="all",
         description="О чём спросил владелец: cancellations — отмены; money — расчётная стоимость записей, не выручка, фактические оплаты неизвестны; "
                     "clients — клиенты, возвраты, постоянные; weekdays — по каким дням недели больше или меньше записей, "
                     "пустые дни; daytime — утро, день, вечер и за сколько дней записываются; services — какие услуги и "
-                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; all — общий вопрос про "
+                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; trend — динамика записей по датам; all — общий вопрос про "
                     "дела бизнеса или почему мало клиентов.")
     days: int | None = Field(
         default=None, ge=7, le=365,
@@ -251,6 +256,8 @@ class VkScheduleParams(_Params):
 class PublicationListParams(_Params):
     channel: Literal["all", "telegram", "vk"] = "all"
     status: Literal["all", "scheduled", "sending", "published", "problems", "cancelled"] = "all"
+    page: int = Field(default=1, ge=1, le=1000)
+    list_presentation: Literal["table", "list"] = "table"
 
 
 class PublicationParams(_Params):

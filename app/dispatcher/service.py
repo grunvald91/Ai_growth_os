@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -31,7 +32,7 @@ from app.llm.costing import usage_cost_details
 from app.llm.lenient import relax
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import CostRecord, ToolCall
+from app.models.domain import CostRecord, Product, ToolCall
 from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
@@ -73,6 +74,10 @@ def to_dict(message: DispatcherMessage) -> dict:
     response = {"id": str(message.id), "seq": message.seq, "role": message.role, "mode": message.input_mode,
                 "text": message.text, "spoken": message.spoken, "blocks": message.blocks, "intent": message.intent,
                 "created_at": message.created_at.isoformat() if message.created_at else None}
+    # The reserved key is assigned only by the server on preparation-form submission.
+    # Expose only the source message ID, not the submitted private parameters.
+    if message.role == "user" and (message.client_key or "").startswith("form:"):
+        response["submitted_form_id"] = message.client_key.removeprefix("form:")
     # A task-result message can reconcile the original task card in a saved
     # conversation. Expose only the known status, never the other task params.
     status = (message.params or {}).get("status") if message.capability == "task_result" else None
@@ -158,18 +163,67 @@ def pending_video_forms(history: list[DispatcherMessage]) -> list[dict]:
     return result
 
 
-def edit_video_form(db, conversation, decision, snapshot):
-    from app.dispatcher.forms import VIDEO_EDIT_FIELDS, form_for
+def pending_read_forms(history: list[DispatcherMessage]) -> list[dict]:
+    """Reusable read forms; only previously persisted controls are editable."""
+    from app.dispatcher.forms import READ_FORMS
+    result = []
+    for message in reversed(history):
+        if (message.role != "assistant" or message.intent != "form"
+                or message.capability not in READ_FORMS):
+            continue
+        for block in message.blocks or []:
+            if block.get("type") == "tool_form" and block.get("capability") == message.capability:
+                result.append({"message_id": str(message.id), "revision": block.get("revision", 0),
+                               "capability": message.capability,
+                               **{f["name"]: f["value"] for f in block["fields"]}})
+                break
+        if len(result) == 2:
+            break
+    return result
+
+
+def pending_prepare_forms(history: list[DispatcherMessage]) -> list[dict]:
+    """Unsubmitted creation forms. Format is context, never an editable control."""
+    from app.dispatcher.forms import PREPARE_FORMS
+    consumed = {m.client_key for m in history if m.role == "user"}
+    result = []
+    for message in reversed(history):
+        if (message.role != "assistant" or message.intent != "form"
+                or message.capability not in PREPARE_FORMS - {"whiteboard_video"}
+                or "form:" + str(message.id) in consumed):
+            continue
+        for block in message.blocks or []:
+            if block.get("type") == "tool_form" and block.get("capability") == message.capability:
+                result.append({"message_id": str(message.id), "revision": block.get("revision", 0),
+                               "capability": message.capability,
+                               **{f["name"]: f["value"] for f in block["fields"]}})
+                break
+        if len(result) == 2:
+            break
+    return result
+
+
+def edit_saved_form(db, conversation, decision, snapshot):
+    from app.dispatcher.forms import PREPARE_FORMS, READ_FORMS, VIDEO_EDIT_FIELDS, form_for
     raw = dict(decision.params)
     target = raw.pop("message_id", None)
     revision = raw.pop("revision", None)
     candidate = next((item for item in snapshot if item["message_id"] == target), None)
-    if candidate is None or revision != str(candidate["revision"]) or not raw or not raw.keys() <= VIDEO_EDIT_FIELDS:
+    if candidate is None or revision != str(candidate["revision"]) or not raw:
         raise ValueError("Уточните параметры открытой формы.")
+    capability = candidate.get("capability", "whiteboard_video")
+    if capability == "whiteboard_video":
+        allowed = VIDEO_EDIT_FIELDS
+    elif capability in READ_FORMS or capability in PREPARE_FORMS:
+        allowed = set(candidate) - {"message_id", "revision", "capability", "format"}
+    else:
+        raise ValueError("Форма недоступна.")
+    if not raw.keys() <= allowed:
+        raise ValueError("Недопустимый параметр формы.")
     source = db.scalar(select(DispatcherMessage).where(
         DispatcherMessage.id == UUID(target), DispatcherMessage.conversation_id == conversation.id,
         DispatcherMessage.role == "assistant", DispatcherMessage.intent == "form",
-        DispatcherMessage.capability == "whiteboard_video").with_for_update().execution_options(populate_existing=True))
+        DispatcherMessage.capability == capability).with_for_update().execution_options(populate_existing=True))
     if source is None:
         raise LookupError("Форма не найдена.")
     if db.scalar(select(DispatcherMessage.id).where(
@@ -177,15 +231,27 @@ def edit_video_form(db, conversation, decision, snapshot):
             DispatcherMessage.client_key == "form:" + target)):
         raise PermissionError("Форма уже отправлена.")
     old = next((b for b in source.blocks or [] if b.get("type") == "tool_form"), None)
-    if old is None or old.get("revision", 0) != candidate["revision"]:
+    if (old is None or old.get("capability") != capability
+            or old.get("revision", 0) != candidate["revision"]):
         raise PermissionError("Форма изменилась.")
+    if not raw.keys() <= {f["name"] for f in old["fields"]}:
+        raise ValueError("Недопустимый параметр формы.")
     values = {f["name"]: f["value"] for f in old["fields"] if f["value"] != ""}
     for key, value in raw.items():
-        if key == "call_to_action" and not value:
+        if not value and ((capability == "whiteboard_video" and key == "call_to_action")
+                          or (capability == "show_insights" and key == "days")
+                          or (capability in PREPARE_FORMS - {"whiteboard_video"}
+                              and key in {"topic", "audience", "editorial_brief", "platform",
+                                          "frame_count", "aspect_ratio", "image_ratio", "image_model"})):
             values.pop(key, None)
         else:
             values[key] = value
-    updated = form_for("whiteboard_video", values)
+    # Changing filters starts a fresh result set unless the owner explicitly
+    # supplied a different page in this same edit.
+    if capability in {"list_tasks", "list_publications"} and "page" not in raw:
+        if raw.keys() & {"tab", "kind", "query", "channel", "status"}:
+            values["page"] = "1"
+    updated = form_for(capability, values)
     updated["revision"] = candidate["revision"] + 1
     source.blocks = clean_blocks([updated if b.get("type") == "tool_form" else b for b in source.blocks])
     db.flush()
@@ -234,7 +300,9 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
             "Не повторяй отказ автоматически. Не выдумывай возможностей и не обходи подтверждения." if recovery else ""),
         messages=[*turns, LLMMessage(role="user", content=build_user_message({**snapshot(ctx.db, ctx.product),
                 "pending_creation_cards": pending_creation_cards(history),
-                "pending_video_forms": pending_video_forms(history)}, text))],
+                "pending_video_forms": pending_video_forms(history),
+                "pending_read_forms": pending_read_forms(history),
+                "pending_prepare_forms": pending_prepare_forms(history)}, text))],
         model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
         max_tokens=900,
         response_schema=DispatcherDecision.model_json_schema(),
@@ -338,6 +406,23 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
     if capability.operation != ToolOperation.ANALYTICS:  # reads leave no ToolCall
         _record_tool_call(ctx.db, ctx, capability_id, params.model_dump(mode="json", exclude_none=True), outcome)
     return outcome, outcome.confirmation, capability_id
+
+
+class FormPreparationError(ValueError):
+    """An owner-facing failure from a validated preparation capability."""
+
+
+async def _prepare_form(ctx: Context, capability_id: str, params: dict):
+    # The caller has flushed the submission and owns the transaction. Existing
+    # executors (notably whiteboard) may commit/rollback their own work. Bind
+    # those commits to savepoints until the reply and draft can commit together.
+    with Session(bind=ctx.db.connection(), join_transaction_mode="create_savepoint") as work:
+        scoped = replace(ctx, db=work, product=work.get(Product, ctx.product.id))
+        outcome, confirmation, capability = await act(scoped, capability_id, params)
+        if not outcome.ok:
+            raise FormPreparationError(outcome.text)
+        work.commit()
+        return outcome, confirmation, capability
 
 
 FOLLOW_UP = [Chip(label="Что в работе", capability="show_work").model_dump()]
@@ -507,7 +592,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
-    if form_submission is None and client_key and client_key.startswith("form:"):
+    preparing = False
+    if client_key and client_key.startswith("form:"):
         raise ValueError("Ключ зарезервирован для отправки формы.")
     if form_submission is not None:
         from app.dispatcher.forms import PREPARE_FORMS, form_for
@@ -528,9 +614,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         submitted = form_submission.params
         if not submitted.keys() <= {f["name"] for f in stored_form["fields"]}:
             raise ValueError("В форме есть неизвестные поля.")
+        if target == "create_creative":
+            saved_format = next((f["value"] for f in stored_form["fields"] if f["name"] == "format"), None)
+            if not saved_format or submitted.get("format") != saved_format:
+                raise ValueError("Формат изменился. Откройте отдельную форму.")
         # Re-check the current registry and validate the complete request.
         form_for(target, submitted, partial=False)
-        if target in PREPARE_FORMS:
+        preparing = target in PREPARE_FORMS
+        if preparing:
             # One preparation per saved form, including cross-tab repeats.
             client_key = "form:" + str(source.id)
         chip = {"label": stored_form["title"], "capability": target, "params": submitted}
@@ -539,6 +630,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         existing = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.client_key == client_key))
         if existing is not None:
+            if preparing:
+                previous = {key: value for key, value in (existing.params or {}).items() if key != "_linked_reply"}
+                if previous != submitted:
+                    raise ValueError("Форма уже отправлена с другими параметрами. Измените карточку подтверждения.")
             reply = db.scalar(select(DispatcherMessage).where(
                 DispatcherMessage.conversation_id == conversation.id,
                 DispatcherMessage.role == "assistant",
@@ -562,13 +657,15 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                                  *([to_dict(reply)] if reply else [])], "replayed": True}
     history = messages(db, conversation)
     edit_snapshot = pending_creation_cards(history)
-    video_snapshot = pending_video_forms(history)
+    form_snapshot = pending_video_forms(history) + pending_read_forms(history) + pending_prepare_forms(history)
     label = (chip or {}).get("label") or text
+    write_message = _add if preparing else _add_committed
     try:
-        user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
+        user = write_message(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
                               capability=(chip or {}).get("capability"),
                               params={**((chip or {}).get("params") or {}), "_linked_reply": True})
     except IntegrityError:
+        db.rollback()
         return {"messages": [], "replayed": True}
 
     selected_topic_request = (
@@ -614,12 +711,16 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             # Already validated owner form values, not model-generated strings.
             decision.params.update(creation.video.model_dump(exclude_none=True))
     else:
-        if (video_params := quick_video_request(text)) is not None:
+        # Explicit references to an existing form/card must reach the semantic
+        # editor, not a shortcut matching words such as "готовые видео".
+        refers_to_card = bool((form_snapshot or edit_snapshot) and re.search(
+            r"(?iu)\b(?:форм(?:а|у|е|ы|ой|ах)|карточк(?:а|у|е|и|ой|ах)|фильтр\w*)\b", text))
+        if not refers_to_card and (video_params := quick_video_request(text)) is not None:
             # Exact topic and duration from the user's explicit request. Existing
             # whiteboard executor still requires paid approval before rendering.
             decision = DispatcherDecision(intent="execute", capability="whiteboard_video",
                                           params=video_params, confidence=1.0)
-        elif (quick := quick_capability(text)) is not None:
+        elif not refers_to_card and (quick := quick_capability(text)) is not None:
             decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
@@ -697,21 +798,21 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                     blocks = [form_for(decision.capability, decision.params)]
                 except ValueError:
                     intent = "clarify"
-                    reply_text = spoken = "Уточните, какие данные и за какой период нужны."
+                    reply_text = spoken = "Уточните параметры: выбранные значения должны подходить для этого действия."
                 else:
                     reply_text = spoken = ("Укажите параметры и нажмите «" + blocks[0]["submit_label"] + "».")
         elif decision.intent == "edit_form":
             chips = []
             if decision.confidence < CONFIDENCE_TO_ACT:
                 intent = "clarify"
-                reply_text = spoken = "Какой параметр видео изменить?"
+                reply_text = spoken = "Какой параметр открытой формы изменить?"
             else:
                 try:
-                    edited = edit_video_form(db, conversation, decision, video_snapshot)
+                    edited = edit_saved_form(db, conversation, decision, form_snapshot)
                     answer = _add(db, conversation, role="assistant", input_mode="text",
-                                  text="Настройки видео обновлены. Проверьте форму перед отправкой.",
-                                  spoken="Настройки видео обновлены.",
-                                  blocks=[{"type": "text", "text": "Настройки видео обновлены. Проверьте форму перед отправкой."}],
+                                  text="Параметры формы обновлены. Проверьте их перед отправкой.",
+                                  spoken="Параметры формы обновлены.",
+                                  blocks=[{"type": "text", "text": "Параметры формы обновлены. Проверьте их перед отправкой."}],
                                   intent="edit_form", params={"_edited_card_id": edited["id"], "_reply_to": str(user.id)},
                                   confidence=decision.confidence, model=model_name)
                     db.commit()
@@ -756,7 +857,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 reply_text = decision.reply_text or "Уточните, пожалуйста, что именно сделать?"
                 spoken = reply_text
             else:
-                outcome, confirmation, capability_id = await act(ctx, decision.capability, decision.params)
+                if preparing:
+                    try:
+                        outcome, confirmation, capability_id = await _prepare_form(ctx, decision.capability, decision.params)
+                    except FormPreparationError:
+                        db.rollback()
+                        raise
+                else:
+                    outcome, confirmation, capability_id = await act(ctx, decision.capability, decision.params)
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
                 blocks = outcome.blocks
                 # Keep validated alternatives when the chosen action cannot run.
@@ -817,12 +925,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     params = {**params, "_reply_to": str(user.id)}
     if workflow_id:
         params = {**params, "_workflow_id": workflow_id}
-    answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
+    answer = write_message(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
                             blocks=clean_blocks(blocks),
                             intent=intent, capability=capability_id or (decision.capability if decision else None),
                             params=params, confidence=(decision.confidence if decision else None),
                             task_id=outcome.task_id if outcome else None, model=model_name,
                             confirmation_id=confirmation_id, confirmation_state="pending" if confirmation else None)
+    if preparing:
+        db.commit()
     return {"messages": [to_dict(user), to_dict(answer)], "replayed": False}
 
 

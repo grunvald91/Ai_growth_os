@@ -32,6 +32,10 @@ def quick_capability(text: str) -> str | None:
     words = " ".join(words.split())
     if not words:
         return None
+    # Requests for a form, a particular representation or filtered results
+    # need the full parameter-aware router, not a parameterless shortcut.
+    if re.search(r"\b(?:форм(?:а|у|е|ы|ой|ах)|фильтр\w*|таблиц\w*|карточк\w*|календар\w*|страниц\w*|график\w*|диаграмм\w*|по\s+статус\w*)\b", words):
+        return None
 
     video = bool(re.search(r"\bвидео\b|\bвидеоролик\w*\b|\bролик\w*\b|\bанимаци\w*\b", words))
     creation = bool(re.match(r"^(сделай|создай|сгенерируй|запусти|нарисуй|подготовь)\s+(?:мне\s+)?(?:нов\w+\s+)?(?:видео|видеоролик|ролик|анимаци)", words))
@@ -62,6 +66,11 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     if not words or len(source) > 1000:
         return None
     if re.search(r"\b(?:не\s+(?:делай|создавай|запускай)|не\s+надо)\b", words):
+        return None
+    # A request to configure a video must reach the form router even before a
+    # card exists. The topic itself may legitimately be about forms.
+    instruction = re.split(r"\b(?:на тему|про)\b", words, maxsplit=1)[0]
+    if re.search(r"\b(?:форм(?:а|у|е|ы|ой)|настройки|параметры)\b", instruction):
         return None
     # Editing and recovery requests must reach the semantic router, not a new video job.
     if re.search(r"\b(?:перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|додел\w*|продолж\w*)\b", words[:120]):

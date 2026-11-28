@@ -6,8 +6,9 @@ validation is dropped; the owner always still has the text.
 """
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -16,10 +17,23 @@ EXTERNAL_HOSTS = frozenset({"servgo.ru", "growth.servgo.ru"})
 
 
 def safe_href(href: str) -> bool:
-    if href.startswith("/studio") or href.startswith("/intelligence"):
-        return "//" not in href.split("?", 1)[0] and "\\" not in href
-    parts = urlsplit(href)
-    return parts.scheme == "https" and (parts.hostname or "") in EXTERNAL_HOSTS and not parts.username
+    # Browsers normalize control characters, backslashes and dot segments;
+    # validate the decoded path, not only the raw prefix.
+    if not href or any(ord(c) < 32 or ord(c) == 127 for c in href) or "\\" in href:
+        return False
+    try:
+        parts = urlsplit(href)
+        path = unquote(parts.path)
+        if (any(ord(c) < 32 or ord(c) == 127 for c in path) or "\\" in path
+                or "//" in path or any(p in {".", ".."} for p in path.split("/"))):
+            return False
+        if not parts.scheme and not parts.netloc:
+            return href.startswith("/") and any(path == p or path.startswith(p + "/")
+                                                for p in ("/studio", "/intelligence"))
+        return (parts.scheme == "https" and (parts.hostname or "") in EXTERNAL_HOSTS
+                and parts.username is None and parts.password is None and parts.port in (None, 443))
+    except ValueError:
+        return False
 
 
 class _Block(BaseModel):
@@ -57,7 +71,7 @@ class ToolFormField(_Block):
 
 class ToolFormBlock(_Block):
     type: Literal["tool_form"] = "tool_form"
-    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights", "create_post", "create_package", "whiteboard_video"]
+    capability: Literal["list_tasks", "list_publications", "show_schedule", "show_insights", "create_post", "create_package", "whiteboard_video", "create_creative"]
     title: str = Field(min_length=1, max_length=100)
     fields: list[ToolFormField] = Field(min_length=1, max_length=12)
     revision: int = Field(default=0, ge=0)
@@ -100,12 +114,70 @@ class TableBlock(_Block):
             raise ValueError("Table rows must match the columns")
 
 
+class ChartPoint(_Block):
+    label: str = Field(min_length=1, max_length=100)
+    value: float = Field(ge=0, allow_inf_nan=False)
+
+
+class ChartBlock(_Block):
+    """Server-computed nonnegative, comparable metrics; never model-produced data."""
+    type: Literal["chart"] = "chart"
+    kind: Literal["bar", "line", "donut"] = "bar"
+    title: str = Field(min_length=1, max_length=120)
+    unit: Literal["шт", "чел", "шт/день"]
+    period: str = Field(min_length=1, max_length=100)
+    source: Literal["BookingBot"] = "BookingBot"
+    note: str = Field(default="", max_length=300)
+    points: list[ChartPoint] = Field(min_length=2, max_length=53)
+
+    def model_post_init(self, __context) -> None:
+        if self.kind != "line" and len(self.points) > 8:
+            raise ValueError("Too many categories")
+        if self.kind == "donut" and (self.unit != "шт" or not any(p.value for p in self.points)):
+            raise ValueError("A distribution requires nonzero counts")
+
+
+class MetricsSummaryBlock(_Block):
+    type: Literal["metrics_summary"] = "metrics_summary"
+    title: str = Field(min_length=1, max_length=120)
+    unit: Literal["шт"] = "шт"
+    period: str = Field(min_length=1, max_length=100)
+    source: Literal["BookingBot"] = "BookingBot"
+    points: list[ChartPoint] = Field(min_length=1, max_length=4)
+
+
+class CalendarDay(_Block):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    label: str = Field(min_length=1, max_length=80)
+    summary: str = Field(min_length=1, max_length=160)
+    rows: list[list[str]] = Field(default_factory=list, max_length=100)
+
+
+class CalendarBlock(_Block):
+    """Read-only scoped schedule, not an availability promise or booking action."""
+    type: Literal["calendar"] = "calendar"
+    title: str = Field(min_length=1, max_length=120)
+    source: Literal["BookingBot"] = "BookingBot"
+    timezone: Literal["Europe/Moscow"] = "Europe/Moscow"
+    columns: list[str] = Field(min_length=1, max_length=5)
+    days: list[CalendarDay] = Field(min_length=1, max_length=7)
+
+    def model_post_init(self, __context) -> None:
+        dates = [date.fromisoformat(day.date) for day in self.days]
+        if any(b - a != timedelta(days=1) for a, b in zip(dates, dates[1:])):
+            raise ValueError("Calendar dates must be consecutive and ordered")
+        if any(len(row) != len(self.columns) for day in self.days for row in day.rows):
+            raise ValueError("Calendar rows must match columns")
+
+
 class ResourceItem(_Block):
     """One clickable resource with its own status, never a detached text/link pair."""
-    kind: Literal["video", "post", "plan", "material", "task"] = "material"
+    kind: Literal["video", "post", "plan", "material", "task", "publication"] = "material"
     title: str = Field(min_length=1, max_length=140)
     status: str = Field(max_length=80)
     href: str
+    detail: str = Field(default="", max_length=1000)
+    link_label: str = Field(default="", max_length=80)
 
     def model_post_init(self, __context) -> None:
         if not safe_href(self.href):
@@ -115,6 +187,8 @@ class ResourceItem(_Block):
 class ResourceListBlock(_Block):
     type: Literal["resource_list"] = "resource_list"
     items: list[ResourceItem] = Field(min_length=1, max_length=16)
+    title: str = Field(default="", max_length=120)
+    filterable: bool = False
 
 
 class TaskBlock(_Block):
@@ -177,7 +251,7 @@ class PlanResultStep(_Block):
     review_href: str | None = None
     detail: str = Field(max_length=600)
     blocks: list[Annotated[
-        TextBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock,
+        TextBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | MetricsSummaryBlock | CalendarBlock | ResourceListBlock | TaskBlock | MaterialBlock,
         Field(discriminator="type"),
     ]] = Field(default_factory=list, max_length=8)
 
@@ -222,7 +296,7 @@ class WorkflowBlock(_Block):
 
 
 Block = Annotated[
-    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
+    TextBlock | ClarificationBlock | ToolFormBlock | ChipsBlock | LinksBlock | TableBlock | ChartBlock | MetricsSummaryBlock | CalendarBlock | ResourceListBlock | TaskBlock | MaterialBlock | ConfirmBlock | WorkflowBlock,
     Field(discriminator="type"),
 ]
 _adapter: TypeAdapter[Block] = TypeAdapter(Block)

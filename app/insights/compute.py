@@ -45,6 +45,8 @@ class Insights:
     line_topics: list[str] = field(default_factory=list)
     row_topics: list[str] = field(default_factory=list)
     topic: str = "base"
+    # Ephemeral aggregate for the owner chart, not extra stored metrics.
+    daily_bookings: list[tuple[date, int]] = field(default_factory=list)
 
     def line(self, text: str) -> None:
         self.lines.append(text)
@@ -102,6 +104,9 @@ def compute(schedule: Schedule, today: date, depth_days: int, ahead_days: int) -
     sold = [b for b in past if b.status in COUNTED]  # every paid line, add-ons included
     completed = [b for b in done if b.status == "completed"]
     result.bookings = len(done)
+    daily = Counter(b.date for b in done)
+    result.daily_bookings = [(first + timedelta(days=i), daily[first + timedelta(days=i)])
+                             for i in range(depth_days)]
     result.low_data = len(done) < LOW_DATA_BOOKINGS
     facts = result.facts
 

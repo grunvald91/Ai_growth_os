@@ -98,8 +98,8 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
         text,
         f"Нашёл {len(items)} видео и заданий. Статусы и ссылки уже на экране.",
         [
-            {"type": "resource_list", "items": [
-                {"title": item["title"], "status": item["status"], "href": item["href"]}
+            {"type": "resource_list", "title": "Последние видео", "filterable": True, "items": [
+                {"kind": "video", "title": item["title"], "status": item["status"], "href": item["href"]}
                 for item in items
             ]},
         ],
