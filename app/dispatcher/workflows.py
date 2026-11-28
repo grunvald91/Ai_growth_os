@@ -63,10 +63,12 @@ def preflight(steps: list[PlannedStep], ctx: Context) -> list[tuple[str, dict]]:
               or cap.cost != Cost.NONE or cap.always_confirm):
             raise ValueError("Действие не разрешено для автоматического просмотра.")
         try:
-            params = cap.params.model_validate(candidate.params).model_dump(exclude_none=True)
+            params = cap.params.model_validate(candidate.params).model_dump(mode="json", exclude_none=True)
         except ValidationError as exc:
             fields = ", ".join(str(e["loc"][0]) for e in exc.errors() if e["loc"])
             raise ValueError("Не хватает или неверны параметры шага: " + fields[:160]) from None
+        if cap.id == "create_post" and params.get("image_model", "none") != "none":
+            raise ValueError("Пост с изображением требует отдельного запуска вне поручения.")
         fingerprint = (cap.id, dumps(params, sort_keys=True, ensure_ascii=True))
         if fingerprint in fingerprints:
             raise ValueError("Повторяющийся шаг в одном поручении запрещён.")
@@ -84,7 +86,7 @@ def _scoped(db: Session, ctx: Context, workflow_id: UUID, *, lock: bool = False)
         DispatcherWorkflow.account == ctx.account,
     )
     if lock:
-        query = query.with_for_update()
+        query = query.with_for_update().execution_options(populate_existing=True)
     workflow = db.scalar(query)
     if workflow is None:
         raise LookupError("Поручение не найдено")
@@ -94,7 +96,7 @@ def _scoped(db: Session, ctx: Context, workflow_id: UUID, *, lock: bool = False)
 def _steps(db: Session, workflow_id: UUID) -> list[DispatcherWorkflowStep]:
     return list(db.scalars(select(DispatcherWorkflowStep).where(
         DispatcherWorkflowStep.workflow_id == workflow_id,
-    ).order_by(DispatcherWorkflowStep.position)))
+    ).order_by(DispatcherWorkflowStep.position).execution_options(populate_existing=True)))
 
 
 def _status(steps: list[DispatcherWorkflowStep]) -> str:
@@ -153,8 +155,9 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
                 try:
                     description = await executors.DESCRIBERS[active.capability](
                         ctx, cap.params.model_validate(active.params))
-                    if not hasattr(description, "params"):
-                        raise ValueError("Нет безопасного описания действия")
+                    if (not hasattr(description, "params") or description.paid
+                            or cap.params.model_validate(active.params).image_model != "none"):
+                        raise ValueError("Нет безопасного описания текстового действия")
                     active.preview = _preview(description)
                     active.status = "waiting_approval"
                     active.result_text = "Требуется отдельное подтверждение этого шага."
@@ -174,11 +177,14 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
         if active.capability not in READ_ONLY_PLAN_CAPABILITIES:
             raise RuntimeError("Workflow capability not permitted")
         position = active.position  # Preserve across Session.rollback() expiry.
+        revision = workflow.revision
         try:
             # Reads use the same authorized, company-scoped executors as the
             # single-action dispatcher. No model-supplied text is persisted.
             outcome = await executors.EXECUTORS[active.capability](
                 ctx, cap.params.model_validate(active.params))
+            if outcome.task_id is not None or outcome.confirmation is not None:
+                raise ValueError("Чтение вернуло результат изменяющего действия")
             active.status = ("failed" if not outcome.ok else
                              "no_data" if outcome.no_data else "completed")
             active.result_text = outcome.text[:600]
@@ -188,6 +194,10 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
             workflow = _scoped(db, ctx, workflow_id, lock=True)
             steps = _steps(db, workflow.id)
             active = next(s for s in steps if s.position == position)
+            # Rollback released the lock. Another request may already have
+            # advanced the workflow. Never overwrite its committed receipt.
+            if workflow.revision != revision or active.status != "pending" or workflow.status != "running":
+                return snapshot(ctx, workflow.id)
             active.status = "failed"
             active.result_text = "Не удалось прочитать данные. Шаг можно повторить вручную."
             _logger.exception("workflow_read_failed")
@@ -199,6 +209,19 @@ async def resume(ctx: Context, workflow_id: UUID) -> dict:
         workflow.revision += 1
         db.commit()
     return snapshot(ctx, workflow_id)
+
+
+async def _resume_existing(ctx: Context, existing: DispatcherWorkflow, parsed: list[tuple[str, dict]]) -> dict:
+    # An idempotency key belongs to exactly one normalized request.
+    stored = [(step.capability, CAPABILITIES[step.capability].params.model_validate(step.params)
+               .model_dump(mode="json", exclude_none=True)) for step in _steps(ctx.db, existing.id)]
+    if stored != parsed:
+        raise ValueError("Ключ поручения уже использован для другого набора шагов.")
+    if existing.status == "running":
+        # A prior request may have committed the plan/approval but stopped
+        # before the next read or approval preview. Resume does not execute writes.
+        return await resume(ctx, existing.id)
+    return snapshot(ctx, existing.id)
 
 
 async def create(ctx: Context, conversation: DispatcherConversation,
@@ -213,7 +236,7 @@ async def create(ctx: Context, conversation: DispatcherConversation,
             DispatcherWorkflow.conversation_id == conversation.id,
             DispatcherWorkflow.client_key == client_key))
         if existing is not None:
-            return snapshot(ctx, existing.id)
+            return await _resume_existing(ctx, existing, parsed)
     workflow = DispatcherWorkflow(conversation_id=conversation.id,
                                   product_id=ctx.product.id, account=ctx.account,
                                   client_key=client_key, status="running", revision=0)
@@ -234,7 +257,7 @@ async def create(ctx: Context, conversation: DispatcherConversation,
                 DispatcherWorkflow.conversation_id == conversation.id,
                 DispatcherWorkflow.client_key == client_key))
             if previous is not None:
-                return snapshot(ctx, previous.id)
+                return await _resume_existing(ctx, previous, parsed)
         raise
     return await resume(ctx, workflow.id)
 
@@ -397,6 +420,8 @@ async def decide(ctx: Context, workflow_id: UUID, *, position: int, revision: in
         raise PermissionError("Для этого действия нет безопасного исполнителя.")
     from app.content.service import queue_content
     params = PostParams.model_validate(current.params)
+    if params.image_model != "none" or (current.preview or {}).get("paid"):
+        raise PermissionError("Пост с изображением требует отдельного запуска вне поручения.")
     # This local operation is transactional (commit=False); it never publishes.
     # A crash before commit rolls both the Task and the step receipt back.
     try:
@@ -426,7 +451,8 @@ async def decide(ctx: Context, workflow_id: UUID, *, position: int, revision: in
         workflow = _scoped(db, ctx, workflow_id, lock=True)
         steps = _steps(db, workflow.id)
         current = next(s for s in steps if s.position == position)
-        if current.status == "waiting_approval":
+        if (workflow.revision == revision and workflow.status == "waiting_approval"
+                and current.status == "waiting_approval"):
             current.status = "failed"
             current.result_text = "Не удалось поставить пост в очередь. Проверьте задания перед повтором."
             for later in steps:
