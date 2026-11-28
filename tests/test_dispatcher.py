@@ -1839,6 +1839,8 @@ async def test_read_form_edit_rejects_unknown_fields_stale_revision_and_invalid_
     valid, _ = llm({"intent": "edit_form", "confidence": 1, "params": {
         "message_id": original["id"], "revision": 0, "tab": "ready"}})
     result = await service.handle_message(db, context(db, product), valid,
-        text="Покажи готовые", client_key="valid-read-edit")
-    assert result["messages"][1]["blocks"][0]["revision"] == 1
+        text="В этой форме поменяй статус на готовые", client_key="valid-read-edit")
+    assert result["messages"][-1]["intent"] == "edit_form"
+    assert result["messages"][1]["id"] == original["id"]
+    assert next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")["revision"] == 1
     assert not list(db.scalars(select(Task)))
