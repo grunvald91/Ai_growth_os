@@ -70,7 +70,7 @@ def test_ui_sdk_dependencies_are_version_pinned():
 
 
 def test_dynamic_widget_styles_are_shared_by_classic_and_growth():
-    css = dispatcher.resource_widgets_css().body.decode("utf-8")
+    css = dispatcher.studio_resource_widgets_css().body.decode("utf-8")
     for selector in (".dp-tool-form", ".dp-chart-track", ".dp-line-chart svg",
                      ".dp-calendar-day", ".dp-resource-filter .dp-resource[hidden]",
                      ".dp-clarification-option"):
