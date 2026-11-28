@@ -824,17 +824,21 @@ def test_calendar_free_times_are_explicit_and_large_data_falls_back():
 
 @pytest.mark.asyncio
 async def test_calendar_read_and_table_switch_use_same_scoped_parameters(db, linked, platform):
-    platform.bookings = [row(1, TODAY)]
+    platform.bookings = [row(1, TODAY), row(2, TODAY - timedelta(days=1)),
+                         row(3, TODAY + timedelta(days=7))]
     answer = await chip(db, linked, "show_schedule",
                         {"view": "bookings", "period": "week", "schedule_presentation": "calendar"})
     calendar = next(b for b in answer["blocks"] if b["type"] == "calendar")
     assert len(calendar["days"]) == 7
+    assert sum(len(day["rows"]) for day in calendar["days"]) == 1
+    assert "Записей на ближайшие 7 дней: 1." in answer["text"]
     assert not any(b["type"] == "table" for b in answer["blocks"])
     switch = next(c for b in answer["blocks"] if b["type"] == "chips" for c in b["items"]
                   if c["label"] == "Показать таблицу")
     assert switch["params"] == {"view": "bookings", "period": "week", "schedule_presentation": "table"}
     table = await chip(db, linked, switch["capability"], switch["params"], key="calendar-table")
     assert not any(b["type"] == "calendar" for b in table["blocks"])
+    assert len(next(b for b in table["blocks"] if b["type"] == "table")["rows"]) == 1
     back = next(c for b in table["blocks"] if b["type"] == "chips" for c in b["items"]
                 if c["label"] == "Показать календарь")
     assert back["params"] == {"view": "bookings", "period": "week", "schedule_presentation": "calendar"}
