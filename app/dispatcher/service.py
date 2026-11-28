@@ -267,13 +267,13 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
 
 async def ask_investigation(ctx: Context, llm: LLMService, text: str, observations: list[dict]):
     """One bounded reasoning turn over actual, scoped read results."""
-    from app.dispatcher.investigation import NextRead, READS
+    from app.dispatcher.investigation import NextRead, READS, recent_task_context
     from app.dispatcher.registry import catalog_for_model
     settings = ctx.settings
     started = time.monotonic()
     try:
         context = {"goal": text, "observations": observations,
-                   "recent_tasks": snapshot(ctx.db, ctx.product)["recent_tasks"],
+                   "recent_tasks": recent_task_context(ctx.db, ctx.product.id),
                    "read_tools": [c for c in catalog_for_model() if c["id"] in READS]}
         request = LLMRequest(
             system_prompt=("Ты анализируешь результаты разрешённых просмотров ServGo. "
@@ -559,7 +559,7 @@ def _visual_preferences(text: str) -> tuple[str | None, str | None]:
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
                          mode: str = "text", chip: dict | None = None, creation=None, form_submission=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
-    turn_deadline = time.monotonic() + 55
+    turn_deadline = time.monotonic() + DECISION_TIMEOUT_SECONDS
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
@@ -678,11 +678,22 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         elif (quick := quick_capability(text)) is not None:
             decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
         elif llm is not None:
-            decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
-            if _decision_needs_recovery(decision):
-                # No tools have run yet. One bounded semantic recovery pass, not a second execution.
-                recovered, recovered_model = await ask_model(
-                    db, llm, ctx.settings, ctx, history, text, recovery=True)
+            async def decide_within_budget(*, recovery=False):
+                remaining = turn_deadline - time.monotonic()
+                if remaining <= 0:
+                    return None, None
+                try:
+                    return await asyncio.wait_for(
+                        ask_model(db, llm, ctx.settings, ctx, history, text, recovery=recovery),
+                        timeout=min(remaining, 12) if recovery else remaining)
+                except asyncio.TimeoutError:
+                    db.rollback()
+                    return None, None
+
+            decision, model_name = await decide_within_budget()
+            if _decision_needs_recovery(decision) and time.monotonic() < turn_deadline:
+                # No tools have run yet; recovery shares the original deadline.
+                recovered, recovered_model = await decide_within_budget(recovery=True)
                 if not _decision_needs_recovery(recovered):
                     decision, model_name = recovered, recovered_model or model_name
 
@@ -834,7 +845,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                         return None
                 outcome = await run_investigation(
                     ctx, PlannedStep(capability=decision.capability, params=decision.params),
-                    act=act, next_read=next_read)
+                    act=act, next_read=next_read, deadline=turn_deadline)
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
                 blocks = outcome.blocks
                 chips = []
