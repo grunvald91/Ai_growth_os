@@ -215,6 +215,8 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
     if schedule is None:
         return Outcome("Сейчас не вижу расписание: онлайн-запись не отвечает. Остальное работает.",
                        "Сейчас не вижу расписание, онлайн-запись не отвечает.", [_links(ctx, "schedule")], no_data=True)
+    # Preserve source field presence before model_copy adds the filtered fields.
+    evidence_fields = frozenset(schedule.model_fields_set)
     # The provider is expected to honour the requested dates; enforce the same
     # bounds for the summary, calendar and table even if it returns extra rows.
     schedule = schedule.model_copy(update={
@@ -250,7 +252,8 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
         view.text += " Для этого вида расписания показываю таблицу."
     from app.dispatcher.specialist_evidence import schedule_facts
     return Outcome(view.text, view.spoken, [*blocks, _links(ctx, "schedule")],
-                   specialist_facts=schedule_facts(schedule, first, last, params.view, period))
+                   specialist_facts=schedule_facts(schedule, first, last, params.view, period,
+                                                   source_fields=evidence_fields))
 
 
 # ---- business insights -------------------------------------------------------------------
