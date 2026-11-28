@@ -176,6 +176,12 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
     if schedule is None:
         return Outcome("Сейчас не вижу расписание: онлайн-запись не отвечает. Остальное работает.",
                        "Сейчас не вижу расписание, онлайн-запись не отвечает.", [_links(ctx, "schedule")], no_data=True)
+    # The provider is expected to honour the requested dates; enforce the same
+    # bounds for the summary, calendar and table even if it returns extra rows.
+    schedule = schedule.model_copy(update={
+        "bookings": [b for b in schedule.bookings if first <= b.date <= last],
+        "free_slots": [s for s in schedule.free_slots if first <= s.date <= last],
+    })
     label = source.business_label
     if params.view == "free":
         view = views.free_view(schedule, period, label)
