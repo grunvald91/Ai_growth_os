@@ -245,6 +245,11 @@ def edit_saved_form(db, conversation, decision, snapshot):
             values.pop(key, None)
         else:
             values[key] = value
+    # Changing filters starts a fresh result set unless the owner explicitly
+    # supplied a different page in this same edit.
+    if capability in {"list_tasks", "list_publications"} and "page" not in raw:
+        if raw.keys() & {"tab", "kind", "query", "channel", "status"}:
+            values["page"] = "1"
     updated = form_for(capability, values)
     updated["revision"] = candidate["revision"] + 1
     source.blocks = clean_blocks([updated if b.get("type") == "tool_form" else b for b in source.blocks])
