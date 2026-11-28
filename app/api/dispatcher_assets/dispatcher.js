@@ -260,6 +260,30 @@
     return figure;
   }
 
+  function renderCalendar(block) {
+    var section = el('section', 'dp-calendar');
+    section.setAttribute('aria-label', block.title);
+    section.appendChild(el('strong', 'dp-chart-title', block.title));
+    section.appendChild(el('p', 'dp-chart-caption', block.source + ' · Время московское'));
+    var days = el('div', 'dp-calendar-days');
+    (block.days || []).forEach(function (day, index) {
+      var details = el('details', 'dp-calendar-day');
+      details.open = index === 0;
+      var summary = el('summary', 'dp-calendar-summary');
+      summary.appendChild(el('strong', '', day.label));
+      summary.appendChild(el('span', '', day.summary));
+      details.appendChild(summary);
+      if (day.rows && day.rows.length) {
+        details.appendChild(renderTable({columns: block.columns, rows: day.rows}));
+      } else {
+        details.appendChild(el('p', 'dp-calendar-empty', 'Нет записей для отображения.'));
+      }
+      days.appendChild(details);
+    });
+    section.appendChild(days);
+    return section;
+  }
+
   function renderTable(block) {
     var wrap = el('div', 'dp-tablewrap');
     var table = el('table', 'dp-table');
@@ -506,6 +530,7 @@
       (step.blocks || []).forEach(function (item) {
         if (item.type === 'text') group.appendChild(el('p', 'dp-text', item.text));
         else if (item.type === 'links') group.appendChild(renderLinks(item.items));
+        else if (item.type === 'calendar') group.appendChild(renderCalendar(item));
         else if (item.type === 'chart') group.appendChild(renderChart(item));
         else if (item.type === 'metrics_summary') group.appendChild(renderMetricsSummary(item));
         else if (item.type === 'table') group.appendChild(renderTable(item));
@@ -1105,6 +1130,7 @@
         }) : block.items;
         if (items.length) bubble.appendChild(renderLinks(items));
       }
+      else if (block.type === 'calendar') bubble.appendChild(renderCalendar(block));
       else if (block.type === 'chart') bubble.appendChild(renderChart(block));
       else if (block.type === 'metrics_summary') bubble.appendChild(renderMetricsSummary(block));
       else if (block.type === 'table') bubble.appendChild(renderTable(block));
