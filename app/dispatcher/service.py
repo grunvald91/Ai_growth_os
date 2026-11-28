@@ -303,6 +303,7 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
         turns = [LLMMessage(role=m.role, content=m.text) for m in history if m.text][-HISTORY_FOR_MODEL:]
         while turns and turns[0].role != "user":
             turns.pop(0)  # Start the shortened thread with the owner's message, as models expect.
+        from app.ai_chat.specialists import specialist_catalog
         request = LLMRequest(
             system_prompt=SYSTEM_PROMPT + ("\nПовторная проверка: первый ответ отсутствовал, был некорректным или не нашёл доступное действие. "
                 "Заново сопоставь исходную цель со всем каталогом. Выбери точное действие с реальными параметрами, "
@@ -312,7 +313,8 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
                     "pending_creation_cards": pending_creation_cards(history),
                     "pending_video_forms": pending_video_forms(history),
                     "pending_read_forms": pending_read_forms(history),
-                    "pending_prepare_forms": pending_prepare_forms(history)}, text))],
+                    "pending_prepare_forms": pending_prepare_forms(history),
+                    "specialist_catalog": specialist_catalog()}, text))],
             model=(settings.dispatcher_llm_model if settings.llm_provider == "xai" else settings.llm_model),
             max_tokens=900,
             response_schema=DispatcherDecision.model_json_schema(),
@@ -377,6 +379,9 @@ def _decision_needs_recovery(decision: DispatcherDecision | None) -> bool:
         return True
     if decision.intent == "execute":
         return decision.capability not in CAPABILITIES
+    if decision.intent == "specialist":
+        from app.ai_chat.specialists import SPECIALISTS
+        return (decision.specialist_id not in SPECIALISTS or bool(decision.capability or decision.params or decision.steps))
     if decision.intent == "investigate":
         from app.dispatcher.investigation import read_params
         try:
@@ -935,6 +940,27 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 # Keep validated alternatives when the chosen action cannot run.
                 # They are opt-in chips, not additional executed operations.
                 chips = [] if confirmation else (chips or FOLLOW_UP)
+        elif decision.intent == "specialist":
+            from app.dispatcher.specialist_consult import consult
+            chips = []
+            if decision.confidence < CONFIDENCE_TO_ACT or _decision_needs_recovery(decision):
+                intent = "clarify"
+                reply_text = spoken = "Уточните, по какому вопросу нужна консультация."
+            elif llm is None:
+                intent = "failed"
+                reply_text = spoken = "Специалист сейчас недоступен. Консультация не выполнена."
+            else:
+                answer_text, expert_model = await consult(
+                    ctx, llm, decision.specialist_id, text, history,
+                    deadline=turn_deadline, record_cost=record_llm_cost)
+                reply_text = spoken = answer_text
+                if expert_model:
+                    model_name = expert_model
+                else:
+                    intent = "failed"
+            # Never persist model-proposed action parameters or capability for a consultation.
+            decision.params = {"specialist_id": decision.specialist_id} if intent == "specialist" else {}
+            decision.capability = None
         elif decision.intent == "investigate":
             from app.dispatcher.investigation import run_investigation
             if decision.confidence < CONFIDENCE_TO_ACT or llm is None or _decision_needs_recovery(decision):
