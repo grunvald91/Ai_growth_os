@@ -9,7 +9,15 @@ from app.dispatcher import service
 from app.dispatcher.decision import DispatcherDecision, PlannedStep
 from app.dispatcher.investigation import MAX_READS, NextRead, run_investigation
 from app.dispatcher.outcome import Context, Outcome
-from app.models.domain import Task
+from app.models.domain import Product, Task
+
+
+@pytest.fixture
+def product(db):
+    row = Product(name="Investigation", slug="investigation")
+    db.add(row)
+    db.commit()
+    return row
 
 
 @pytest.mark.asyncio
