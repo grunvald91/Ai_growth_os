@@ -222,18 +222,44 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
     chips = []
     if params.topic != "all":
         chips.append({"label": "Показать всё", "capability": "show_insights",
-                      "params": {"days": str(params.days)} if params.days else {}})
+                      "params": {"days": str(insights.depth_days), "presentation": params.presentation}})
     if params.topic in ("all", "clients"):
         chips.append({"label": "Кого пригласить повторно", "capability": "show_return_candidates", "params": {}})
     chips.append({"label": "Передать маркетинг-команде", "capability": "send_to_team", "params": {}})
-    if insights.depth_days < 90:
-        chips.append({"label": "Посмотреть за 90 дней", "capability": "show_insights",
-                      "params": {"days": "90", **({"topic": params.topic} if params.topic != "all" else {})}})
+    periods = [{"label": f"За {days} дней", "capability": "show_insights",
+                "params": {"days": str(days), "topic": params.topic, "presentation": params.presentation}}
+               for days in (7, 30, 90) if days != insights.depth_days]
+    if params.topic == "all":
+        chips.append({"label": "Динамика записей", "capability": "show_insights",
+                      "params": {"topic": "trend", "days": str(insights.depth_days),
+                                 "presentation": params.presentation}})
     note = ""
     if params.days and params.days != depth_for(ctx.db, ctx.product.id):
         note = f"\n(Срок {params.days} дн. — только для этого просмотра. Сохранить как обычный: «смотри за {params.days} дней».)"
+    from app.insights.charts import chart_for, metrics_for, trend_points
+    from app.dispatcher.blocks import clean_blocks
+    candidate = chart_for(insights, params.topic)
+    available = clean_blocks([candidate]) if candidate else []
+    chart = available[0] if available and params.presentation != "table" else None
+    summary = metrics_for(insights) if params.topic == "all" and params.presentation != "table" else None
+    if params.presentation == "chart" and chart is None:
+        lines.append("Для этого показателя нет сопоставимых данных для графика; показываю таблицу.")
+    if available:
+        presentation = "table" if chart is not None else "chart"
+        chips.insert(0, {"label": "Только таблица" if presentation == "table" else "Показать график",
+                         "capability": "show_insights",
+                         "params": {"days": str(insights.depth_days), "topic": params.topic,
+                                    "presentation": presentation}})
+    if params.topic == "trend":
+        points, unit, explanation = trend_points(insights)
+        lines.append(explanation)
+        if chart is None:
+            rows = [*rows, *[[p["label"], f'{p["value"]:g} {unit}'] for p in points]]
     return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
-                   [{"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
+                   [*([summary] if summary else []),
+                    {"type": "chips", "items": periods},
+                    *([chart] if chart else []),
+                    {"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
                     {"type": "chips", "items": chips}, _links(ctx, "schedule")])
 
 
