@@ -63,7 +63,7 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
         status = VIDEO_STATES.get(_state(task), _state(task))
         if _state(task) == "completed" and artifact is not None:
             status = "Готово к просмотру"
-        items.append({"title": title, "status": status, "href": href,
+        items.append({"title": title, "status": status, "href": href, "task_id": str(task.id),
                       "created": task.created_at.isoformat() if task.created_at else ""})
     for artifact in artifacts:
         if artifact.task_id in linked_tasks:
@@ -87,7 +87,7 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
         return Outcome(
             "Не нашёл видео или заданий на видео для этой компании.",
             "Видео пока не нашлись.",
-            [links_block(ctx, "whiteboard", "work")],
+            [links_block(ctx, "whiteboard", "work")], no_data=True,
         )
 
     ready = sum(1 for item in items if item["status"] == "Готово к просмотру")
@@ -103,6 +103,8 @@ async def show_recent_videos(ctx: Context, params) -> Outcome:
                 for item in items
             ]},
         ],
+        diagnostic_tasks=[{"task_id": item["task_id"], "title": item["title"], "status": item["status"]}
+                          for item in items if item.get("task_id")],
     )
 
 
