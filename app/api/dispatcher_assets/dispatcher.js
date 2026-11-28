@@ -15,6 +15,7 @@
   // A result may arrive after the original task message, or before it during
   // a reordered update. Keep only confirmed completion/failure events.
   var taskResults = Object.create(null);
+  var submittedForms = Object.create(null);
 
   // Enabled by default for the current owner-led Studio pilot.
   // ?ui_sdk=0 restores the legacy form on this page, without any server changes.
@@ -283,10 +284,16 @@
     var submit = el('button', 'dp-btn primary', block.submit_label);
     submit.type = 'submit';
     fields.appendChild(submit);
+    function lockSubmitted() {
+      submit.disabled = true;
+      submit.textContent = 'Форма отправлена';
+      controls.forEach(function (control) { control.disabled = true; });
+    }
+    if (preparing && submittedForms[messageId]) lockSubmitted();
     var submissionKey = null, previousValues = null;
     fields.addEventListener('submit', function (event) {
       event.preventDefault();
-      if (busy || !fields.reportValidity()) return;
+      if (busy || (preparing && submittedForms[messageId]) || !fields.reportValidity()) return;
       var params = Object.create(null);
       controls.forEach(function (control) {
         if (control.value !== '') params[control.name] = control.value;
@@ -300,8 +307,8 @@
         if (ok) {
           submissionKey = null;
           if (preparing) {
-            submit.textContent = 'Подтверждение подготовлено';
-            controls.forEach(function (control) { control.disabled = true; });
+            submittedForms[messageId] = true;
+            lockSubmitted();
             return;
           }
         }
@@ -1027,7 +1034,21 @@
     });
   }
 
+  function rememberSubmittedForm(message) {
+    if (message.role !== 'user' || !message.submitted_form_id) return;
+    submittedForms[message.submitted_form_id] = true;
+    var source = Array.from(feed.children).find(function (node) {
+      return node.getAttribute('data-id') === message.submitted_form_id;
+    });
+    if (!source) return;
+    source.querySelectorAll('.dp-tool-form input, .dp-tool-form textarea, .dp-tool-form select, .dp-tool-form button').forEach(function (control) {
+      control.disabled = true;
+      if (control.tagName === 'BUTTON') control.textContent = 'Форма отправлена';
+    });
+  }
+
   function upsert(message) {
+    rememberSubmittedForm(message);
     var node = renderMessage(message);
     var existing = feed.querySelector('[data-id="' + message.id + '"]');
     if (Number.isInteger(message.seq)) node.setAttribute('data-seq', String(message.seq));
@@ -1102,6 +1123,7 @@
 
   function applyResult(data) {
     if (root.classList.contains('sg-create-dispatch')) {
+      (data.messages || []).forEach(rememberSubmittedForm);
       // Keep only the current assistant response, not the conversation log.
       var assistantMessages = (data.messages || []).filter(function (message) {
         return message.role === 'assistant';
@@ -1342,7 +1364,7 @@
     // Start a new conversation without opening the Android keyboard.
     if (voiceHoldEnabled) input.blur();
     post('/new', {}).then(function (data) {
-      feed.textContent = ''; syncConversationLayout();
+      feed.textContent = ''; submittedForms = Object.create(null); syncConversationLayout();
       state.hints = data.hints || []; renderHints();
       if (voiceHoldEnabled) {
         input.value = '';
