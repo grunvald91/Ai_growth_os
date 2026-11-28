@@ -28,8 +28,11 @@ _links = links_block
 
 def _task_rows_outcome(ctx: Context, rows: list[dict], total: int, *, params=None, page: int = 1) -> Outcome:
     from app.api.content_studio_activity import ANIMATOR_PHASES, work_url
+    from app.dispatcher.specialist_evidence import task_facts
+    facts = task_facts(rows, total, page)
     if not rows:
-        return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")], no_data=True)
+        return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")],
+                       no_data=True, specialist_facts=facts)
     table = {"type": "table", "columns": ["Задание", "Статус", "Этап / причина"],
              "rows": [[str(row["title"]), str(row["label"]),
                        str(row.get("display_summary") or ANIMATOR_PHASES.get(row.get("animator_stage")) or row.get("current_stage") or row.get("description") or "Не указано")]
@@ -70,7 +73,7 @@ def _task_rows_outcome(ctx: Context, rows: list[dict], total: int, *, params=Non
         text += f" Показаны первые {len(rows)}."
     return Outcome(text, blocks=[*blocks, _links(ctx, "work")],
                    diagnostic_tasks=[{"task_id": str(row["id"]), "title": str(row["title"])[:140],
-                                      "status": str(row["state"])} for row in rows[:8]])
+                                      "status": str(row["state"])} for row in rows[:8]], specialist_facts=facts)
 
 
 async def list_tasks(ctx: Context, params) -> Outcome:
@@ -245,7 +248,9 @@ async def show_schedule(ctx: Context, params: ScheduleParams) -> Outcome:
             view.text += " Календарь недоступен для такого объёма; показываю таблицу."
     elif params.schedule_presentation == "calendar":
         view.text += " Для этого вида расписания показываю таблицу."
-    return Outcome(view.text, view.spoken, [*blocks, _links(ctx, "schedule")])
+    from app.dispatcher.specialist_evidence import schedule_facts
+    return Outcome(view.text, view.spoken, [*blocks, _links(ctx, "schedule")],
+                   specialist_facts=schedule_facts(schedule, first, last, params.view, period))
 
 
 # ---- business insights -------------------------------------------------------------------
@@ -315,12 +320,14 @@ async def show_insights(ctx: Context, params: InsightsParams) -> Outcome:
         lines.append(explanation)
         if chart is None:
             rows = [*rows, *[[p["label"], f'{p["value"]:g} {unit}'] for p in points]]
+    from app.dispatcher.specialist_evidence import insight_facts
     return Outcome("\n".join(lines) + note, " ".join(lines[:2]),
                    [*([summary] if summary else []),
                     {"type": "chips", "items": periods},
                     *([chart] if chart else []),
                     {"type": "table", "columns": ["Показатель", "Значение"], "rows": rows},
-                    {"type": "chips", "items": chips}, _links(ctx, "schedule")])
+                    {"type": "chips", "items": chips}, _links(ctx, "schedule")],
+                   specialist_facts=insight_facts(insights, params.topic))
 
 
 
