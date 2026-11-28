@@ -1909,3 +1909,101 @@ async def test_creative_form_persists_requires_confirmation_and_rejects_tamperin
         form_submission=request)
     assert replay["replayed"] and replay["messages"][-1]["id"] == result["messages"][-1]["id"]
     assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.parametrize("capability,initial,changes,expected", [
+    ("create_post", {"topic": "Онлайн-запись", "channel": "vk", "image_model": "gemini"},
+     {"audience": "Владельцы салонов"}, {"topic": "Онлайн-запись", "channel": "vk", "image_model": "gemini", "audience": "Владельцы салонов"}),
+    ("create_package", {"topic": "Онлайн-запись", "audience": "Салоны", "editorial_brief": "Без скидок"},
+     {"topic": "Работа без звонков", "audience": ""}, {"topic": "Работа без звонков", "audience": "", "editorial_brief": "Без скидок"}),
+    ("create_creative", {"format": "story", "topic": "Онлайн-запись", "platform": "vk", "frame_count": "4"},
+     {"frame_count": "6"}, {"format": "story", "platform": "vk", "frame_count": "6"}),
+    ("create_creative", {"format": "static_image", "topic": "Онлайн-запись", "aspect_ratio": "4:5", "image_model": "gemini"},
+     {"aspect_ratio": "", "image_model": "openai"}, {"format": "static_image", "aspect_ratio": "", "image_model": "openai"}),
+    ("create_creative", {"format": "short_video", "topic": "Онлайн-запись", "platform": "youtube_shorts"},
+     {"platform": "vk_clips"}, {"format": "short_video", "platform": "vk_clips"}),
+])
+@pytest.mark.asyncio
+async def test_creation_form_edit_preserves_format_revision_and_waits_for_confirmation(
+        db, product, capability, initial, changes, expected):
+    from app.api.dispatcher import FormSubmissionIn
+    model, _ = llm({"intent": "form", "capability": capability, "confidence": 1, "params": initial})
+    original = (await send(db, product, text="Покажи форму настройки материала", model=model))["messages"][-1]
+    assert original["intent"] == "form"
+    edit_params = {"message_id": original["id"], "revision": 0, **changes}
+    editor, _ = llm({"intent": "edit_form", "confidence": 1, "params": edit_params})
+    result = await service.handle_message(db, context(db, product), editor,
+        text="В этой форме измени параметры", client_key="creation-edit", mode="voice")
+    assert result["messages"][-1]["intent"] == "edit_form"
+    edited = result["messages"][1]
+    block = next(b for b in edited["blocks"] if b["type"] == "tool_form")
+    assert edited["id"] == original["id"] and block["revision"] == 1
+    values = {f["name"]: f["value"] for f in block["fields"]}
+    assert {k: values[k] for k in expected} == expected
+    assert not list(db.scalars(select(Task)))
+    with pytest.raises(ValueError):
+        await service.handle_message(db, context(db, product), None, text="", client_key="stale-creation",
+            form_submission=FormSubmissionIn(message_id=original["id"], revision=0, params=initial))
+    replay = await service.handle_message(db, context(db, product), editor,
+        text="В этой форме измени параметры", client_key="creation-edit", mode="voice")
+    assert replay["replayed"] and replay["messages"][1]["blocks"] == edited["blocks"]
+    request = FormSubmissionIn(message_id=original["id"], revision=1,
+        params={k: v for k, v in values.items() if v != ""})
+    result = await service.handle_message(db, context(db, product), None, text="", client_key="prepare-edited",
+        form_submission=request)
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["state"] == "pending"
+    assert card["editable"]["topic"] == values["topic"]
+    assert not list(db.scalars(select(Task)))
+    after, _ = llm({"intent": "edit_form", "confidence": 1, "params": {
+        "message_id": original["id"], "revision": 1, "topic": "Новая тема"}})
+    result = await service.handle_message(db, context(db, product), after,
+        text="Измени тему в исходной форме", client_key="consumed-creation")
+    assert result["messages"][-1]["intent"] == "clarify"
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_creation_form_edit_rejects_format_change_bad_values_and_foreign_owner(db, product):
+    model, _ = llm({"intent": "form", "capability": "create_creative", "confidence": 1,
+                    "params": {"format": "story", "topic": "Онлайн-запись", "frame_count": "4"}})
+    original = (await send(db, product, text="Форма Stories", model=model))["messages"][-1]
+    for idx, changes in enumerate((
+        {"format": "static_image"}, {"platform": "youtube_shorts"},
+        {"aspect_ratio": "16:9"}, {"frame_count": "11"}, {"max_api_calls": "999"},
+    )):
+        editor, _ = llm({"intent": "edit_form", "confidence": 1,
+                         "params": {"message_id": original["id"], "revision": 0, **changes}})
+        result = await service.handle_message(db, context(db, product), editor,
+            text="Измени параметры формы", client_key=f"invalid-creative-edit-{idx}")
+        assert result["messages"][-1]["intent"] == "clarify"
+    editor, _ = llm({"intent": "edit_form", "confidence": 1,
+                     "params": {"message_id": original["id"], "revision": 0, "frame_count": "6"}})
+    result = await service.handle_message(db, context(db, product, "other-owner"), editor,
+        text="Измени параметры формы", client_key="foreign-creative-edit")
+    assert result["messages"][-1]["intent"] == "clarify"
+    result = await service.handle_message(db, context(db, product), editor,
+        text="Измени параметры формы", client_key="valid-creative-edit")
+    assert result["messages"][-1]["intent"] == "edit_form"
+    assert next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")["revision"] == 1
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_post_form_edit_incompatible_channel_does_not_discard_image_choice(db, product):
+    model, _ = llm({"intent": "form", "capability": "create_post", "confidence": 1,
+                    "params": {"topic": "Онлайн-запись", "channel": "vk", "image_model": "gemini"}})
+    original = (await send(db, product, text="Форма поста", model=model))["messages"][-1]
+    editor, _ = llm({"intent": "edit_form", "confidence": 1,
+                     "params": {"message_id": original["id"], "revision": 0, "channel": "telegram"}})
+    result = await service.handle_message(db, context(db, product), editor,
+        text="В форме измени площадку", client_key="incompatible-post")
+    assert result["messages"][-1]["intent"] == "clarify"
+    editor, _ = llm({"intent": "edit_form", "confidence": 1,
+                     "params": {"message_id": original["id"], "revision": 0, "channel": "telegram", "image_model": "none"}})
+    result = await service.handle_message(db, context(db, product), editor,
+        text="В форме измени площадку и убери изображение", client_key="compatible-post")
+    assert result["messages"][-1]["intent"] == "edit_form"
+    fields = {f["name"]: f["value"] for f in next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")["fields"]}
+    assert fields["channel"] == "telegram" and fields["image_model"] == "none"
+    assert not list(db.scalars(select(Task)))
