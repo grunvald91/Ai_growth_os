@@ -78,7 +78,11 @@ async def run_investigation(ctx: Context, first: PlannedStep, *, act: Callable,
             break
         try:
             params = read_params(step)
-            signature = (step.capability, json.dumps(params.model_dump(mode="json"), sort_keys=True))
+            # Table vs cards changes presentation, not the underlying read.
+            # Page/filter changes remain valid separate reads.
+            semantic_params = params.model_dump(mode="json")
+            semantic_params.pop("list_presentation", None)
+            signature = (step.capability, json.dumps(semantic_params, sort_keys=True))
             if signature in seen:
                 raise ValueError("Повторный просмотр")
             seen.add(signature)
