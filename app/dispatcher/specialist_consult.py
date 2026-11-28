@@ -9,6 +9,8 @@ import time
 from app.ai_chat.model_access import model_access
 from app.ai_chat.specialists import SPECIALISTS, get_specialist_prompt
 from app.llm.limits import output_ceiling
+from app.llm.model_catalog import resolve_model_capabilities
+from app.llm.model_router import ModelRouter
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.router_store import effective_router_settings
 
@@ -28,8 +30,7 @@ async def consult(ctx, llm, specialist_id, text, history, *, deadline, record_co
         # The XAI dispatcher provider pins its single model (even with routing).
         # Other provider configurations may have an unrelated fallback chain.
         if (settings.llm_provider != "xai" or not model_access(model).enabled
-                or model.split("/")[-1].endswith(("-image", "-image-mini"))
-                or model.split("/")[-1].startswith("gpt-image-")):
+                or not resolve_model_capabilities(model.split("/")[-1]).supports_text):
             return f"{name}: разрешённая текстовая модель сейчас не настроена.", None
         if effective.model_router_max_call_usd and not effective.model_router_enabled:
             return f"{name}: невозможно проверить установленный предел стоимости вызова.", None
@@ -58,6 +59,19 @@ async def consult(ctx, llm, specialist_id, text, history, *, deadline, record_co
             model=model, max_tokens=output_ceiling(1200),
             metadata={"team_role": "dispatcher", "task_type": "dispatcher", "reasoning_effort": "low"},
         )
+        # Independently preflight the current policy: a provider instance may
+        # have been composed before the owner changed the router settings.
+        if effective.model_router_enabled:
+            overrides = json.loads(effective.model_router_overrides or "{}")
+            overrides["dispatcher"] = [model]
+            overrides.pop("dispatcher:main", None)
+            router = ModelRouter(profiles_json=effective.model_router_profiles,
+                                 overrides_json=json.dumps(overrides),
+                                 max_call_usd=effective.model_router_max_call_usd,
+                                 provider_supports_web_search=False)
+            routing = router.select(request)
+            if routing.candidates != (model,):
+                raise ValueError("Unexpected specialist model route")
         started = time.monotonic()
         def observed(stage, response):
             record_cost(ctx.db, ctx.product.id, response, settings.llm_provider,
@@ -69,8 +83,9 @@ async def consult(ctx, llm, specialist_id, text, history, *, deadline, record_co
             llm.generate(request, on_observed=observed, review_enabled=False),
             timeout=min(remaining, 20))
         answer = response.content.strip()
-        if not answer or not model_access(response.model).enabled:
-            raise ValueError("Empty response or unapproved provider model")
+        if (not answer or not model_access(response.model).enabled
+                or response.model.split("/")[-1].lower() != model.split("/")[-1].lower()):
+            raise ValueError("Empty response or unexpected provider model")
         if len(answer) > 12000:
             answer = answer[:12000] + "\n[Ответ сокращён до допустимого размера.]"
         return f"{name} · консультация\n\n{answer}", response.model
