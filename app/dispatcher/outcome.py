@@ -40,6 +40,8 @@ class Outcome:
     ok: bool = True
     # Nothing was done because something is missing (for example no data yet).
     no_data: bool = False
+    # Bounded task references for adaptive reasoning, not a UI block.
+    diagnostic_tasks: list[dict] = field(default_factory=list)
 
 
 def task_block(ctx: Context, task: Task, title: str, href: str) -> dict:

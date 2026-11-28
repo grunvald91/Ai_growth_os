@@ -27,10 +27,18 @@ def requested_story_count(text: str) -> int | None:
     return int(token) if token.isdigit() else numerals.get(token)
 
 
+def explicit_specialist(text: str) -> bool:
+    # A named expert request must reach the semantic dispatcher, not a generic
+    # recommendation or video shortcut. This does not itself grant a role.
+    return bool(re.search(r"(?iu)\b(?:бизнес[-\s]консультант\w*|маркетолог\w*|smm[-\s]специалист\w*|смм[-\s]специалист\w*|копирайтер\w*|менеджер\w*\s+по\s+продажам|специалист\w*\s+по\s+рекламе)\b", text or ""))
+
+
 def quick_capability(text: str) -> str | None:
     words = re.sub(r"[^\w\s-]+", " ", (text or "").casefold().replace("ё", "е"))
     words = " ".join(words.split())
     if not words:
+        return None
+    if explicit_specialist(words):
         return None
     # Requests for a form, a particular representation or filtered results
     # need the full parameter-aware router, not a parameterless shortcut.
@@ -47,7 +55,10 @@ def quick_capability(text: str) -> str | None:
 
     business = bool(re.search(r"\b(бизнес\w*|компани\w*|маркетинг\w*|продвижени\w*)\b", words))
     advice = bool(re.search(r"\b(порекоменд\w*|рекоменд\w*|посовет\w*|совет\w*|что\s+сделать|чем\s+заняться|какие\s+шаги|что\s+улучшить|с\s+чего\s+начать)\b", words))
-    if business and advice and not re.match(r"^(сделай|создай|запусти|опубликуй)\b", words):
+    # The daily priority view is a specific intent, not a substitute for
+    # strategy, advice about a particular channel or expert consultation.
+    if business and advice and re.search(r"\b(?:сегодня|на\s+сегодня)\b", words) and not re.search(
+            r"\b(?:стратеги\w*|реклам\w*|продаж\w*|конверси\w*|бюджет\w*|позиционировани\w*|воронк\w*|контент\w*|план\w*)\b", words):
         return "recommend_today"
     return None
 
@@ -63,7 +74,7 @@ def quick_video_request(text: str) -> dict[str, str] | None:
     source = (text or "").strip()
     words = re.sub(r"[^\w\s-]+", " ", source.casefold().replace("ё", "е"))
     words = " ".join(words.split())
-    if not words or len(source) > 1000:
+    if not words or len(source) > 1000 or explicit_specialist(source):
         return None
     if re.search(r"\b(?:не\s+(?:делай|создавай|запускай)|не\s+надо)\b", words):
         return None

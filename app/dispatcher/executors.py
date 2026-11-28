@@ -29,7 +29,7 @@ _links = links_block
 def _task_rows_outcome(ctx: Context, rows: list[dict], total: int, *, params=None, page: int = 1) -> Outcome:
     from app.api.content_studio_activity import ANIMATOR_PHASES, work_url
     if not rows:
-        return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")])
+        return Outcome("Подходящих заданий не найдено.", blocks=[_links(ctx, "work")], no_data=True)
     table = {"type": "table", "columns": ["Задание", "Статус", "Этап / причина"],
              "rows": [[str(row["title"]), str(row["label"]),
                        str(row.get("display_summary") or ANIMATOR_PHASES.get(row.get("animator_stage")) or row.get("current_stage") or row.get("description") or "Не указано")]
@@ -68,7 +68,9 @@ def _task_rows_outcome(ctx: Context, rows: list[dict], total: int, *, params=Non
         blocks.append({"type": "chips", "items": controls})
     elif total > len(rows):
         text += f" Показаны первые {len(rows)}."
-    return Outcome(text, blocks=[*blocks, _links(ctx, "work")])
+    return Outcome(text, blocks=[*blocks, _links(ctx, "work")],
+                   diagnostic_tasks=[{"task_id": str(row["id"]), "title": str(row["title"])[:140],
+                                      "status": str(row["state"])} for row in rows[:8]])
 
 
 async def list_tasks(ctx: Context, params) -> Outcome:
@@ -108,13 +110,15 @@ async def show_work(ctx: Context, params) -> Outcome:
                     key=lambda row: (row.get("created_at") or "", row["id"]))
     if not active:
         return Outcome("Сейчас ничего не выполняется.", "Сейчас ничего не выполняется.",
-                       [_links(ctx, "work")])
+                       [_links(ctx, "work")], no_data=True)
     table = {"type": "table", "columns": ["Задание", "Статус"],
              "rows": [[row["title"], row["label"]] for row in active]}
     spoken = f"В работе {len(active)}. Подробности на экране."
     links = {"type": "links", "items": [{"label": f"Открыть: {row['title'][:60]}", "href": work_url(ctx.product.id, row)}
                                         for row in active]}
-    return Outcome(f"В работе: {len(active)}.", spoken, [table, links])
+    return Outcome(f"В работе: {len(active)}.", spoken, [table, links],
+                   diagnostic_tasks=[{"task_id": str(row["id"]), "title": str(row["title"])[:140],
+                                      "status": str(row["state"])} for row in active[:8]])
 
 
 async def show_review(ctx: Context, params) -> Outcome:

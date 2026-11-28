@@ -687,7 +687,7 @@ async def test_readonly_plan_is_sequential_persisted_and_replay_safe(db, product
     assert "Уже всё сделал" not in answer["text"]  # server owns truthful status
     workflow = next(b for b in answer["blocks"] if b["type"] == "workflow")
     assert len(workflow["steps"]) == 2
-    assert [s["status"] for s in workflow["steps"]] == ["completed", "completed"]
+    assert [s["status"] for s in workflow["steps"]] == ["no_data", "completed"]
     assert [s["title"] for s in workflow["steps"]] == ["Что в работе", "Показать контент-план"]
     assert len(list(db.scalars(select(ToolCall)))) == 0
     assert len(list(db.scalars(select(Task)))) == 0

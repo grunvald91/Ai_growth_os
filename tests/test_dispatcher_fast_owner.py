@@ -40,7 +40,9 @@ def blocks(reply, kind):
 
 @pytest.mark.parametrize(("prompt", "expected"), [
     ("Что порекомендуешь сегодня сделать для бизнеса?", "recommend_today"),
-    ("Посоветуй, какие шаги сделать для продвижения компании", "recommend_today"),
+    # General marketing strategy must reach the semantic specialist router.
+    ("Посоветуй, какие шаги сделать для продвижения компании", None),
+    ("Посоветуй, какие шаги сделать сегодня для продвижения компании", "recommend_today"),
     ("Покажи последние видео, которые я запускал", "show_recent_videos"),
     ("Где мои готовые ролики?", "show_recent_videos"),
     ("Покажи созданные видео", "show_recent_videos"),
