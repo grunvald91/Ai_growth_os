@@ -73,6 +73,10 @@ def to_dict(message: DispatcherMessage) -> dict:
     response = {"id": str(message.id), "seq": message.seq, "role": message.role, "mode": message.input_mode,
                 "text": message.text, "spoken": message.spoken, "blocks": message.blocks, "intent": message.intent,
                 "created_at": message.created_at.isoformat() if message.created_at else None}
+    # The reserved key is assigned only by the server on preparation-form submission.
+    # Expose only the source message ID, not the submitted private parameters.
+    if message.role == "user" and (message.client_key or "").startswith("form:"):
+        response["submitted_form_id"] = message.client_key.removeprefix("form:")
     # A task-result message can reconcile the original task card in a saved
     # conversation. Expose only the known status, never the other task params.
     status = (message.params or {}).get("status") if message.capability == "task_result" else None
@@ -601,6 +605,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         existing = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.client_key == client_key))
         if existing is not None:
+            if form_submission is not None and target in PREPARE_FORMS:
+                previous = {key: value for key, value in (existing.params or {}).items() if key != "_linked_reply"}
+                if previous != submitted:
+                    raise ValueError("Форма уже отправлена с другими параметрами. Измените карточку подтверждения.")
             reply = db.scalar(select(DispatcherMessage).where(
                 DispatcherMessage.conversation_id == conversation.id,
                 DispatcherMessage.role == "assistant",
@@ -676,12 +684,16 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
             # Already validated owner form values, not model-generated strings.
             decision.params.update(creation.video.model_dump(exclude_none=True))
     else:
-        if (video_params := quick_video_request(text)) is not None:
+        # Explicit references to an existing form/card must reach the semantic
+        # editor, not a shortcut matching words such as "готовые видео".
+        refers_to_card = bool((form_snapshot or edit_snapshot) and re.search(
+            r"(?iu)\b(?:форм(?:а|у|е|ы|ой|ах)|карточк(?:а|у|е|и|ой|ах)|фильтр\w*)\b", text))
+        if not refers_to_card and (video_params := quick_video_request(text)) is not None:
             # Exact topic and duration from the user's explicit request. Existing
             # whiteboard executor still requires paid approval before rendering.
             decision = DispatcherDecision(intent="execute", capability="whiteboard_video",
                                           params=video_params, confidence=1.0)
-        elif (quick := quick_capability(text)) is not None:
+        elif not refers_to_card and (quick := quick_capability(text)) is not None:
             decision = DispatcherDecision(intent="execute", capability=quick, params={}, confidence=1.0)
         elif llm is not None:
             decision, model_name = await ask_model(db, llm, ctx.settings, ctx, history, text)
@@ -759,7 +771,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                     blocks = [form_for(decision.capability, decision.params)]
                 except ValueError:
                     intent = "clarify"
-                    reply_text = spoken = "Уточните, какие данные и за какой период нужны."
+                    reply_text = spoken = "Уточните параметры: выбранные значения должны подходить для этого действия."
                 else:
                     reply_text = spoken = ("Укажите параметры и нажмите «" + blocks[0]["submit_label"] + "».")
         elif decision.intent == "edit_form":
