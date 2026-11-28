@@ -457,6 +457,13 @@
       fields.appendChild(label);
       controls.push(control);
     });
+    if (block.capability === 'list_tasks' || block.capability === 'list_publications') {
+      var pageControl = controls.find(function (control) { return control.name === 'page'; });
+      if (pageControl) controls.forEach(function (control) {
+        if (['tab','kind','query','channel','status'].indexOf(control.name) !== -1)
+          control.addEventListener('change', function () { pageControl.value = '1'; });
+      });
+    }
     var submit = el('button', 'dp-btn primary', block.submit_label);
     submit.type = 'submit';
     fields.appendChild(submit);
@@ -1340,7 +1347,16 @@
     var key = body.client_key || newKey();
     body.client_key = key;
     var echoNode = null;
-    if (root.classList.contains('sg-create-dispatch')) feed.replaceChildren();
+    // Detach rather than destroy the current form. A failed request must
+    // restore its actual controls and the closure holding the retry key.
+    var previousCreateNodes = root.classList.contains('sg-create-dispatch') ? Array.from(feed.children) : null;
+    if (previousCreateNodes) feed.replaceChildren();
+    function restoreCreateDraft() {
+      if (!previousCreateNodes) return;
+      previousCreateNodes.forEach(function (node) { feed.appendChild(node); });
+      previousCreateNodes = null;
+      syncConversationLayout();
+    }
     if (echo && !root.classList.contains('sg-create-dispatch')) {
       echoNode = renderMessage({ id: 'local-' + key, role: 'user', text: echo });
       feed.appendChild(echoNode);
@@ -1349,6 +1365,10 @@
     setBusy(true);
     post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
+      if (previousCreateNodes && !(data.messages || []).some(function (message) { return message.role === 'assistant'; })) {
+        restoreCreateDraft();
+        throw new Error('Ответ ещё не получен. Повторите запрос с теми же параметрами.');
+      }
       applyResult(data);
       if (root.classList.contains('sg-create-dispatch')) {
         root.dispatchEvent(new CustomEvent('sg:dispatcher:response',
@@ -1359,6 +1379,7 @@
       if (voiceRequest) showNote('');
     }).catch(function (error) {
       if (echoNode) echoNode.remove();
+      restoreCreateDraft();
       if (onSettled) onSettled(false);
       notify(error.message);
       if (voiceRequest) {
