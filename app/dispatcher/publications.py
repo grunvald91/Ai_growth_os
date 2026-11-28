@@ -138,7 +138,7 @@ async def list_publications(ctx: Context, params):
         blocks = [links_block(ctx, "channels", "vk")]
         if params.page > 1:
             blocks.insert(0, {"type": "chips", "items": [chip("Первая страница", page=1)]})
-        return Outcome("Подходящих публикаций на этой странице не найдено.", blocks=blocks)
+        return Outcome("Подходящих публикаций на этой странице не найдено.", blocks=blocks, no_data=True)
     shown = rows[:15]
     table = {"type": "table", "columns": ["Материал", "Площадка", "Статус", "Назначено (МСК)"],
              "rows": [[title[:140], CHANNELS[pub.channel], STATES.get(pub.status, pub.status),
