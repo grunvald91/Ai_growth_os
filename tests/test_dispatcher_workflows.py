@@ -414,3 +414,57 @@ async def test_nonreview_artifact_never_reopens_a_completed_post(db, company):
     db.commit()
     assert workflows.snapshot(ctx, wid)["task_summary"]["review_pending"] == 0
     assert all(item["workflow_id"] != str(wid) for item in workflows.recent(ctx))
+
+
+@pytest.mark.asyncio
+async def test_create_replay_recovers_interrupted_plan_and_refuses_changed_payload(db, company):
+    ctx = context(db, company)
+    conv = open_conversation(db, company.id, ctx.account)
+    # Simulate process exit after the plan was committed, before resume ran.
+    wf = DispatcherWorkflow(conversation_id=conv.id, product_id=company.id,
+        account=ctx.account, client_key="interrupted", status="running", revision=0)
+    db.add(wf)
+    db.flush()
+    for position, (cap, params) in enumerate(workflows.preflight(chain(READ, FIRST), ctx)):
+        db.add(DispatcherWorkflowStep(workflow_id=wf.id, position=position, capability=cap,
+            params=params, status="pending", preview={}, result_text="", result_blocks=[]))
+    db.commit()
+    resumed = await workflows.create(ctx, conv, chain(READ, FIRST), "interrupted")
+    assert resumed["workflow_id"] == str(wf.id)
+    assert resumed["status"] == "waiting_approval"
+    assert resumed["steps"][0]["status"] == "no_data"
+    assert not list(db.scalars(select(Task)))
+    with pytest.raises(ValueError, match="другого набора"):
+        await workflows.create(ctx, conv, chain(READ, SECOND), "interrupted")
+    assert len(list(db.scalars(select(DispatcherWorkflow)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_replay_resumes_after_committed_approval_without_duplicate_task(db, company, monkeypatch):
+    ctx = context(db, company)
+    conv = open_conversation(db, company.id, ctx.account)
+    start = await workflows.create(ctx, conv, chain(FIRST, SECOND, READ), "resume-approved")
+    original = workflows.resume
+    async def interrupted(*args, **kwargs):
+        raise RuntimeError("Process interrupted after approved transaction")
+    monkeypatch.setattr(workflows, "resume", interrupted)
+    with pytest.raises(RuntimeError):
+        await workflows.decide(ctx, UUID(start["workflow_id"]), position=0,
+                               revision=start["revision"], accept=True)
+    monkeypatch.setattr(workflows, "resume", original)
+    resumed = await workflows.create(ctx, conv, chain(FIRST, SECOND, READ), "resume-approved")
+    assert resumed["status"] == "waiting_approval"
+    assert resumed["approval"]["position"] == 1
+    assert resumed["steps"][0]["status"] == "completed"
+    assert len(list(db.scalars(select(Task)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_paid_image_post_is_not_silently_downgraded_inside_workflow(db, company):
+    ctx = context(db, company)
+    conv = open_conversation(db, company.id, ctx.account)
+    illustrated = ("create_post", {"topic": "Пост с иллюстрацией", "channel": "vk", "image_model": "auto"})
+    with pytest.raises(ValueError, match="изображением"):
+        await workflows.create(ctx, conv, chain(READ, illustrated), "no-paid-in-chain")
+    assert not list(db.scalars(select(DispatcherWorkflow)))
+    assert not list(db.scalars(select(Task)))
