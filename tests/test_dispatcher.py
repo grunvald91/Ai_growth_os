@@ -1650,10 +1650,11 @@ async def test_conversational_edit_rejects_stale_foreign_and_unknown_fields(db, 
 def test_schema_tool_forms_allow_only_audited_capabilities():
     from app.dispatcher.forms import FORM_CAPABILITIES, form_for
     for capability in FORM_CAPABILITIES:
-        block = form_for(capability, {})
+        params = {"format": "story"} if capability == "create_creative" else {}
+        block = form_for(capability, params)
         assert clean_blocks([block])[0]["type"] == "tool_form"
         assert {f["name"] for f in block["fields"]} == set(CAPABILITIES[capability].params.model_fields)
-    for capability in ["create_creative", "set_insights_depth", "schedule_post", "unknown"]:
+    for capability in ["set_insights_depth", "schedule_post", "unknown"]:
         with pytest.raises(ValueError):
             form_for(capability, {})
     with pytest.raises(ValueError):
@@ -1843,4 +1844,68 @@ async def test_read_form_edit_rejects_unknown_fields_stale_revision_and_invalid_
     assert result["messages"][-1]["intent"] == "edit_form"
     assert result["messages"][1]["id"] == original["id"]
     assert next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")["revision"] == 1
+    assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.parametrize("fmt,platforms,extra", [
+    ("story", {"telegram", "vk", "instagram_reels"}, {"frame_count", "image_model", "aspect_ratio"}),
+    ("static_image", {"telegram", "vk", "dzen", "vc_ru", "tenchat", "instagram_reels"}, {"image_model", "aspect_ratio"}),
+    ("short_video", {"youtube_shorts", "instagram_reels", "vk_clips"}, set()),
+])
+def test_creative_form_has_only_format_specific_fields_and_choices(fmt, platforms, extra):
+    from app.dispatcher.forms import form_for
+    form = clean_blocks([form_for("create_creative", {"format": fmt})])[0]
+    fields = {f["name"]: f for f in form["fields"]}
+    assert set(fields) == {"topic", "format", "platform", "audience", "editorial_brief"} | extra
+    assert fields["topic"]["required"] and fields["topic"]["value"] == ""
+    assert {x["value"] for x in fields["format"]["options"]} == {fmt}
+    assert {x["value"] for x in fields["platform"]["options"]} == platforms | {""}
+    if fmt == "story":
+        assert fields["frame_count"]["minimum"] == 3 and fields["frame_count"]["maximum"] == 10
+        assert {x["value"] for x in fields["aspect_ratio"]["options"]} == {"", "9:16"}
+
+
+@pytest.mark.parametrize("params", [
+    {},
+    {"format": "story", "platform": "youtube_shorts"},
+    {"format": "story", "frame_count": "11"},
+    {"format": "story", "aspect_ratio": "16:9"},
+    {"format": "static_image", "frame_count": "4"},
+    {"format": "short_video", "image_model": "none"},
+    {"format": "short_video", "aspect_ratio": "9:16"},
+])
+def test_creative_form_rejects_invalid_or_incompatible_parameters(params):
+    from app.dispatcher.forms import form_for
+    with pytest.raises(ValueError):
+        form_for("create_creative", params)
+
+
+@pytest.mark.asyncio
+async def test_creative_form_persists_requires_confirmation_and_rejects_tampering(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    model, _ = llm({"intent": "form", "capability": "create_creative", "confidence": 1,
+                    "params": {"format": "story", "frame_count": "4"}})
+    original = (await send(db, product, text="Дай форму настройки Stories", model=model))["messages"][-1]
+    block = next(b for b in original["blocks"] if b["type"] == "tool_form")
+    assert block["submit_label"] == "Подготовить подтверждение"
+    assert not list(db.scalars(select(Task)))
+    for i, params in enumerate((
+        {"topic": "Онлайн-запись", "format": "short_video"},
+        {"topic": "Онлайн-запись", "format": "story", "platform": "youtube_shorts"},
+        {"format": "story"},
+    )):
+        with pytest.raises(ValueError):
+            await service.handle_message(db, context(db, product), None, text="", client_key=f"creative-tamper-{i}",
+                form_submission=FormSubmissionIn(message_id=original["id"], params=params))
+    request = FormSubmissionIn(message_id=original["id"], params={"topic": "Онлайн-запись",
+        "format": "story", "platform": "vk", "frame_count": "4", "aspect_ratio": "9:16"})
+    result = await service.handle_message(db, context(db, product), None, text="", client_key="creative-prepare",
+        form_submission=request)
+    card = next(b for b in result["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["state"] == "pending" and card["editable"]["frame_count"] == 4
+    assert card["editable"]["format"] == "story" and card["editable"]["platform"] == "vk"
+    assert not list(db.scalars(select(Task)))
+    replay = await service.handle_message(db, context(db, product), None, text="", client_key="creative-repeat",
+        form_submission=request)
+    assert replay["replayed"] and replay["messages"][-1]["id"] == result["messages"][-1]["id"]
     assert not list(db.scalars(select(Task)))
