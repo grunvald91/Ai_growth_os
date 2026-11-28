@@ -33,6 +33,10 @@ state.messages.push({
       {name:"days",label:"Количество дней",kind:"integer",value:"",required:false,minimum:7,maximum:365}
     ]}]
 });
+state.messages.push({id:"used-form",seq:4,role:"assistant",blocks:[{
+    type:"tool_form",capability:"create_post",title:"Пост",submit_label:"Подготовить подтверждение",
+    fields:[{name:"topic",label:"Тема",kind:"text",required:true,value:"Тема поста"}]}]});
+state.messages.push({id:"used-form-request",seq:5,role:"user",text:"Пост",submitted_form_id:"used-form"});
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -93,7 +97,10 @@ try{
     assert.equal(await page.locator("#dp-input").inputValue(),"Мой черновик\nПривлечь новых клиентов");
     assert.equal(await clarification.locator("img").count(),0);
     assert.equal(posted.length,0);
-    const form=page.locator('[data-sg-resource-widget="tool_form"]');
+    const used=page.locator('[data-id="used-form"]');
+    assert.equal(await used.getByLabel("Тема").isDisabled(),true);
+    assert.equal(await used.getByRole("button",{name:"Форма отправлена"}).isDisabled(),true);
+    const form=page.locator('[data-id="form-message"] [data-sg-resource-widget="tool_form"]');
     await form.locator("ui-collapsible").waitFor();
     const formCalls=[];
     await page.route("**/fake/messages", async route=>{
@@ -125,7 +132,8 @@ try{
     assert.equal(await legacy.locator(".sg-workflow-result").count(),3);
     await legacy.locator('[data-sg-resource-widget="clarification"]').getByRole("button",{name:"Привлечь новых клиентов"}).click();
     assert.equal(await legacy.locator("#dp-input").inputValue(),"Привлечь новых клиентов");
-    const nativeForm=legacy.locator('[data-sg-resource-widget="tool_form"]');
+    assert.equal(await legacy.locator('[data-id="used-form"]').getByLabel("Тема").isDisabled(),true);
+    const nativeForm=legacy.locator('[data-id="form-message"] [data-sg-resource-widget="tool_form"]');
     assert.equal(await nativeForm.locator("details[open]").count(),1);
     await nativeForm.getByLabel("Количество дней").fill("7");
     assert.equal(await nativeForm.getByLabel("Количество дней").inputValue(),"7");
