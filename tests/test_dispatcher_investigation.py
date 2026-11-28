@@ -259,3 +259,18 @@ def test_investigation_uses_new_resource_cards_without_links_or_actions():
     view = evidence(result, "list_tasks", {"list_presentation": "list"})
     assert view["resources"] == [{"title": "Видео", "status": "Ошибка", "detail": "Озвучка недоступна"}]
     assert "/studio/" not in str(view) and "resume_video" not in str(view)
+
+
+@pytest.mark.asyncio
+async def test_representation_change_is_not_a_new_diagnostic_read():
+    calls = []
+    async def act(ctx, capability, params):
+        calls.append(params)
+        return Outcome("Данные получены"), None, capability
+    async def next_read(observations):
+        return NextRead(next_step=PlannedStep(capability="list_tasks",
+            params={"tab": "problems", "list_presentation": "list"}))
+    result = await run_investigation(SimpleNamespace(), PlannedStep(capability="list_tasks",
+        params={"tab": "problems", "list_presentation": "table"}), act=act, next_read=next_read)
+    assert len(calls) == 1
+    assert not result.ok and "Анализ не завершён" in result.text
