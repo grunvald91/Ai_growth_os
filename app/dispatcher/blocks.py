@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -17,10 +17,23 @@ EXTERNAL_HOSTS = frozenset({"servgo.ru", "growth.servgo.ru"})
 
 
 def safe_href(href: str) -> bool:
-    if href.startswith("/studio") or href.startswith("/intelligence"):
-        return "//" not in href.split("?", 1)[0] and "\\" not in href
-    parts = urlsplit(href)
-    return parts.scheme == "https" and (parts.hostname or "") in EXTERNAL_HOSTS and not parts.username
+    # Browsers normalize control characters, backslashes and dot segments;
+    # validate the decoded path, not only the raw prefix.
+    if not href or any(ord(c) < 32 or ord(c) == 127 for c in href) or "\\" in href:
+        return False
+    try:
+        parts = urlsplit(href)
+        path = unquote(parts.path)
+        if (any(ord(c) < 32 or ord(c) == 127 for c in path) or "\\" in path
+                or "//" in path or any(p in {".", ".."} for p in path.split("/"))):
+            return False
+        if not parts.scheme and not parts.netloc:
+            return href.startswith("/") and any(path == p or path.startswith(p + "/")
+                                                for p in ("/studio", "/intelligence"))
+        return (parts.scheme == "https" and (parts.hostname or "") in EXTERNAL_HOSTS
+                and parts.username is None and parts.password is None and parts.port in (None, 443))
+    except ValueError:
+        return False
 
 
 class _Block(BaseModel):
