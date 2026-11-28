@@ -2007,3 +2007,38 @@ async def test_post_form_edit_incompatible_channel_does_not_discard_image_choice
     fields = {f["name"]: f["value"] for f in next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")["fields"]}
     assert fields["channel"] == "telegram" and fields["image_model"] == "none"
     assert not list(db.scalars(select(Task)))
+
+
+@pytest.mark.asyncio
+async def test_explicit_form_reference_bypasses_fast_video_read(db, product):
+    model, _ = llm({"intent": "form", "capability": "list_tasks", "confidence": 1,
+                    "params": {"kind": "video"}})
+    original = (await send(db, product, text="Фильтры заданий", model=model))["messages"][-1]
+    editor, _ = llm({"intent": "edit_form", "confidence": 1, "params": {
+        "message_id": original["id"], "revision": 0, "tab": "ready"}})
+    result = await service.handle_message(db, context(db, product), editor,
+        text="В этой форме покажи готовые видео", client_key="explicit-filter")
+    assert result["messages"][-1]["intent"] == "edit_form"
+    block = next(b for b in result["messages"][1]["blocks"] if b["type"] == "tool_form")
+    assert block["revision"] == 1
+    assert next(f["value"] for f in block["fields"] if f["name"] == "tab") == "ready"
+
+
+@pytest.mark.asyncio
+async def test_consumed_form_rejects_changed_retry_and_exposes_only_source_id(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    model, _ = llm({"intent": "form", "capability": "create_package", "confidence": 1,
+                    "params": {"topic": "Первая тема"}})
+    original = (await send(db, product, text="Форма пакета", model=model))["messages"][-1]
+    request = FormSubmissionIn(message_id=original["id"], params={"topic": "Первая тема"})
+    result = await service.handle_message(db, context(db, product), None, text="", client_key="first-form",
+        form_submission=request)
+    assert result["messages"][0]["submitted_form_id"] == original["id"]
+    assert "params" not in result["messages"][0]
+    with pytest.raises(ValueError, match="уже отправлена"):
+        await service.handle_message(db, context(db, product), None, text="", client_key="changed-form",
+            form_submission=FormSubmissionIn(message_id=original["id"], params={"topic": "Другая тема"}))
+    replay = await service.handle_message(db, context(db, product), None, text="", client_key="retry-form",
+        form_submission=request)
+    assert replay["replayed"] and replay["messages"][-1]["id"] == result["messages"][-1]["id"]
+    assert not list(db.scalars(select(Task)))
