@@ -55,7 +55,10 @@ def quick_capability(text: str) -> str | None:
 
     business = bool(re.search(r"\b(бизнес\w*|компани\w*|маркетинг\w*|продвижени\w*)\b", words))
     advice = bool(re.search(r"\b(порекоменд\w*|рекоменд\w*|посовет\w*|совет\w*|что\s+сделать|чем\s+заняться|какие\s+шаги|что\s+улучшить|с\s+чего\s+начать)\b", words))
-    if business and advice and not re.match(r"^(сделай|создай|запусти|опубликуй)\b", words):
+    # The daily priority view is a specific intent, not a substitute for
+    # strategy, advice about a particular channel or expert consultation.
+    if business and advice and re.search(r"\b(?:сегодня|на\s+сегодня)\b", words) and not re.search(
+            r"\b(?:стратеги\w*|реклам\w*|продаж\w*|конверси\w*|бюджет\w*|позиционировани\w*|воронк\w*|контент\w*|план\w*)\b", words):
         return "recommend_today"
     return None
 
