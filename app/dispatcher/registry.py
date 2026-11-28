@@ -184,12 +184,13 @@ INSIGHT_TOPICS = ("all", "cancellations", "money", "clients", "weekdays", "dayti
 
 
 class InsightsParams(_Params):
-    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming"] = Field(
+    presentation: Literal["auto", "table", "chart"] = Field(default="auto", description="Авто: подходящий график для сравнимых показателей; table: только таблица; chart: график, если есть сопоставимые факты.")
+    topic: Literal["all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming", "trend"] = Field(
         default="all",
         description="О чём спросил владелец: cancellations — отмены; money — расчётная стоимость записей, не выручка, фактические оплаты неизвестны; "
                     "clients — клиенты, возвраты, постоянные; weekdays — по каким дням недели больше или меньше записей, "
                     "пустые дни; daytime — утро, день, вечер и за сколько дней записываются; services — какие услуги и "
-                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; all — общий вопрос про "
+                    "какие яхты, мастера, залы берут; upcoming — сколько уже записано вперёд; trend — динамика записей по датам; all — общий вопрос про "
                     "дела бизнеса или почему мало клиентов.")
     days: int | None = Field(
         default=None, ge=7, le=365,
