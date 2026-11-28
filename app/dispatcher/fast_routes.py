@@ -67,6 +67,11 @@ def quick_video_request(text: str) -> dict[str, str] | None:
         return None
     if re.search(r"\b(?:не\s+(?:делай|создавай|запускай)|не\s+надо)\b", words):
         return None
+    # A request to configure a video must reach the form router even before a
+    # card exists. The topic itself may legitimately be about forms.
+    instruction = re.split(r"\b(?:на тему|про)\b", words, maxsplit=1)[0]
+    if re.search(r"\b(?:форм(?:а|у|е|ы|ой)|настройки|параметры)\b", instruction):
+        return None
     # Editing and recovery requests must reach the semantic router, not a new video job.
     if re.search(r"\b(?:перерис\w*|передел\w*|перегенер\w*|возобнов\w*|повтори|исправ\w*|додел\w*|продолж\w*)\b", words[:120]):
         return None

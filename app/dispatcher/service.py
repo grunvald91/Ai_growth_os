@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -31,7 +32,7 @@ from app.llm.costing import usage_cost_details
 from app.llm.lenient import relax
 from app.llm.schemas import LLMMessage, LLMRequest
 from app.llm.service import LLMService
-from app.models.domain import CostRecord, ToolCall
+from app.models.domain import CostRecord, Product, ToolCall
 from app.tools import ToolOperation
 
 _logger = logging.getLogger(__name__)
@@ -407,6 +408,23 @@ async def act(ctx: Context, capability_id: str, raw_params: dict) -> tuple[Outco
     return outcome, outcome.confirmation, capability_id
 
 
+class FormPreparationError(ValueError):
+    """An owner-facing failure from a validated preparation capability."""
+
+
+async def _prepare_form(ctx: Context, capability_id: str, params: dict):
+    # The caller has flushed the submission and owns the transaction. Existing
+    # executors (notably whiteboard) may commit/rollback their own work. Bind
+    # those commits to savepoints until the reply and draft can commit together.
+    with Session(bind=ctx.db.connection(), join_transaction_mode="create_savepoint") as work:
+        scoped = replace(ctx, db=work, product=work.get(Product, ctx.product.id))
+        outcome, confirmation, capability = await act(scoped, capability_id, params)
+        if not outcome.ok:
+            raise FormPreparationError(outcome.text)
+        work.commit()
+        return outcome, confirmation, capability
+
+
 FOLLOW_UP = [Chip(label="Что в работе", capability="show_work").model_dump()]
 
 # Explicit allowlist: even an ANALYTICS operation may mutate saved preferences.
@@ -574,7 +592,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
-    if form_submission is None and client_key and client_key.startswith("form:"):
+    preparing = False
+    if client_key and client_key.startswith("form:"):
         raise ValueError("Ключ зарезервирован для отправки формы.")
     if form_submission is not None:
         from app.dispatcher.forms import PREPARE_FORMS, form_for
@@ -601,7 +620,8 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 raise ValueError("Формат изменился. Откройте отдельную форму.")
         # Re-check the current registry and validate the complete request.
         form_for(target, submitted, partial=False)
-        if target in PREPARE_FORMS:
+        preparing = target in PREPARE_FORMS
+        if preparing:
             # One preparation per saved form, including cross-tab repeats.
             client_key = "form:" + str(source.id)
         chip = {"label": stored_form["title"], "capability": target, "params": submitted}
@@ -610,7 +630,7 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         existing = db.scalar(select(DispatcherMessage).where(
             DispatcherMessage.conversation_id == conversation.id, DispatcherMessage.client_key == client_key))
         if existing is not None:
-            if form_submission is not None and target in PREPARE_FORMS:
+            if preparing:
                 previous = {key: value for key, value in (existing.params or {}).items() if key != "_linked_reply"}
                 if previous != submitted:
                     raise ValueError("Форма уже отправлена с другими параметрами. Измените карточку подтверждения.")
@@ -639,11 +659,13 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     edit_snapshot = pending_creation_cards(history)
     form_snapshot = pending_video_forms(history) + pending_read_forms(history) + pending_prepare_forms(history)
     label = (chip or {}).get("label") or text
+    write_message = _add if preparing else _add_committed
     try:
-        user = _add_committed(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
+        user = write_message(db, conversation, role="user", input_mode=mode, text=label, client_key=client_key,
                               capability=(chip or {}).get("capability"),
                               params={**((chip or {}).get("params") or {}), "_linked_reply": True})
     except IntegrityError:
+        db.rollback()
         return {"messages": [], "replayed": True}
 
     selected_topic_request = (
@@ -835,7 +857,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 reply_text = decision.reply_text or "Уточните, пожалуйста, что именно сделать?"
                 spoken = reply_text
             else:
-                outcome, confirmation, capability_id = await act(ctx, decision.capability, decision.params)
+                if preparing:
+                    try:
+                        outcome, confirmation, capability_id = await _prepare_form(ctx, decision.capability, decision.params)
+                    except FormPreparationError:
+                        db.rollback()
+                        raise
+                else:
+                    outcome, confirmation, capability_id = await act(ctx, decision.capability, decision.params)
                 reply_text, spoken = outcome.text, outcome.spoken or outcome.text
                 blocks = outcome.blocks
                 # Keep validated alternatives when the chosen action cannot run.
@@ -896,12 +925,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
     params = {**params, "_reply_to": str(user.id)}
     if workflow_id:
         params = {**params, "_workflow_id": workflow_id}
-    answer = _add_committed(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
+    answer = write_message(db, conversation, role="assistant", input_mode="text", text=reply_text, spoken=spoken,
                             blocks=clean_blocks(blocks),
                             intent=intent, capability=capability_id or (decision.capability if decision else None),
                             params=params, confidence=(decision.confidence if decision else None),
                             task_id=outcome.task_id if outcome else None, model=model_name,
                             confirmation_id=confirmation_id, confirmation_state="pending" if confirmation else None)
+    if preparing:
+        db.commit()
     return {"messages": [to_dict(user), to_dict(answer)], "replayed": False}
 
 

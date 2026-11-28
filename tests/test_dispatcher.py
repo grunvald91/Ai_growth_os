@@ -2045,6 +2045,54 @@ async def test_consumed_form_rejects_changed_retry_and_exposes_only_source_id(db
 
 
 @pytest.mark.asyncio
+async def test_video_preparation_retries_after_refusal_or_interrupted_reply(db, product, monkeypatch):
+    from app.api.dispatcher import FormSubmissionIn
+
+    model, _ = llm({"intent": "form", "capability": "whiteboard_video", "confidence": 1})
+    form = (await send(db, product, text="Подготовь форму для объясняющего видео на тему Онлайн-запись без звонков",
+                       model=model))["messages"][-1]
+    assert form["intent"] == "form"
+    assert not tasks(db, "whiteboard_renderer")
+    params = {"topic": "Онлайн-запись без звонков", "length": "60", "max_api_calls": "19"}
+
+    async def submit():
+        return await service.handle_message(db, context(db, product), None, text="", client_key="retry",
+            form_submission=FormSubmissionIn(message_id=form["id"], params=params))
+
+    with pytest.raises(service.FormPreparationError, match="лимит"):
+        await submit()
+    params.pop("max_api_calls")
+    # Crash after the video executor has staged the draft, before saving the reply.
+    with monkeypatch.context() as patch:
+        def interrupt(*args, **kwargs):
+            raise RuntimeError("interrupted reply")
+
+        patch.setattr(service, "_confirm_block", interrupt)
+        with pytest.raises(RuntimeError, match="interrupted reply"):
+            await submit()
+    db.rollback()  # closing the failed HTTP request rolls its session back
+    assert not tasks(db, "whiteboard_renderer")
+    assert not list(db.scalars(select(DispatcherMessage).where(
+        DispatcherMessage.client_key == "form:" + form["id"])))
+
+    prepared = await submit()
+    replay = await submit()
+    assert prepared["messages"][-1]["blocks"][-1]["type"] == "confirm"
+    assert replay["replayed"] and replay["messages"][-1]["id"] == prepared["messages"][-1]["id"]
+    assert [t.status for t in tasks(db, "whiteboard_renderer")] == [TaskStatus.WAITING_APPROVAL]
+
+
+@pytest.mark.asyncio
+async def test_read_form_accepts_only_client_assigned_request_keys(db, product):
+    from app.api.dispatcher import FormSubmissionIn
+    model, _ = llm({"intent": "form", "capability": "list_tasks", "confidence": 1})
+    source = (await send(db, product, text="Фильтр заданий", model=model))["messages"][-1]
+    with pytest.raises(ValueError, match="зарезервирован"):
+        await service.handle_message(db, context(db, product), None, text="", client_key="form:" + source["id"],
+            form_submission=FormSubmissionIn(message_id=source["id"]))
+
+
+@pytest.mark.asyncio
 async def test_task_resource_cards_paginate_with_same_company_filters(db, product):
     other = Product(name="Foreign", slug="foreign-resource-list")
     db.add(other)

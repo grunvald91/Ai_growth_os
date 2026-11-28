@@ -130,7 +130,8 @@ try{
     const formCalls=[];
     await page.route("**/fake/messages", async route=>{
       formCalls.push(route.request().postDataJSON());
-      await route.fulfill({json:{messages:[],hints:[]}});
+      const messages = formCalls.length === 1 ? [] : [{id:"read-result",role:"assistant",text:"Данные готовы",blocks:[]}];
+      await route.fulfill({json:{messages,hints:[]}});
     });
     await form.getByLabel("Раздел аналитики").selectOption("clients");
     await form.getByLabel("Количество дней").fill("366");
@@ -141,7 +142,11 @@ try{
     assert.equal(await form.locator("img").count(),0);
     await form.getByRole("button",{name:"Показать результат"}).click();
     await page.waitForFunction(()=>!document.querySelector(".dp-home").classList.contains("busy"));
-    assert.equal(formCalls.length,1);
+    await page.getByText("Ответ ещё не получен.", {exact:false}).waitFor();
+    await form.getByRole("button",{name:"Показать результат"}).click();
+    await page.locator('[data-id="read-result"]').waitFor();
+    assert.equal(formCalls.length,2);
+    assert.equal(formCalls[0].client_key, formCalls[1].client_key);
     assert.equal(formCalls[0].mode,"chip");
     assert.equal(formCalls[0].form_submission.message_id,"form-message");
     assert.equal(formCalls[0].chip,undefined);

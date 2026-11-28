@@ -1365,8 +1365,7 @@
     setBusy(true);
     post('/messages', body, 55000).then(function (data) {
       if (echoNode) echoNode.remove();
-      if (previousCreateNodes && !(data.messages || []).some(function (message) { return message.role === 'assistant'; })) {
-        restoreCreateDraft();
+      if ((previousCreateNodes || body.form_submission) && !(data.messages || []).some(function (message) { return message.role === 'assistant'; })) {
         throw new Error('Ответ ещё не получен. Повторите запрос с теми же параметрами.');
       }
       applyResult(data);

@@ -605,10 +605,10 @@ def render_v4(page, request, pid, switch):
     extras += original.outer(original.find(ident='authOverlay'))
     # Bust the voice controller cache only in v4; the classic Studio UX is unchanged.
     if home:
-        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>ui-sdk-review-20261128', extras)
+        extras = re.sub(r'(/studio/assets/dispatcher\.js\?v=)[^"&]+', r'\g<1>ui-sdk-review-20261128-r2', extras)
     if pid and current == base+'/create':
         extras += '<script src="/studio/assets/create-studio.js?v=video-dynamic-forms-20261125"></script>'
-        extras += '<script src="/studio/assets/dispatcher.js?v=ui-sdk-review-20261128"></script>'
+        extras += '<script src="/studio/assets/dispatcher.js?v=ui-sdk-review-20261128-r2"></script>'
     if pid and (home or current == base+'/create'):
         if '/studio/assets/resource-widgets.js' not in extras:
             extras += '<script src="/studio/assets/resource-widgets.js?v=2"></script>'
