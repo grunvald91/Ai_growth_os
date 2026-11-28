@@ -11,7 +11,7 @@ from app.tools import ToolOperation
 
 # Audited individually. ANALYTICS alone is insufficient: some tools save settings.
 READ_FORMS = frozenset({"list_tasks", "list_publications", "show_schedule", "show_insights"})
-PREPARE_FORMS = frozenset({"create_post", "create_package", "whiteboard_video"})
+PREPARE_FORMS = frozenset({"create_post", "create_package", "whiteboard_video", "create_creative"})
 VIDEO_EDIT_FIELDS = frozenset({"topic", "length", "call_to_action", "profile", "image_model", "visual_review", "science_mode"})
 FORM_CAPABILITIES = READ_FORMS | PREPARE_FORMS
 FIELD_LABELS = {
@@ -25,6 +25,8 @@ FIELD_LABELS = {
     "max_api_calls": "Лимит вызовов ИИ", "recovery_budget": "Дополнительный резерв вызовов",
     "source_script": "Исходный сценарий", "background_notes": "Дополнительный контекст",
     "reference_materials": "Справочные материалы",
+    "format": "Формат", "platform": "Площадка", "frame_count": "Количество экранов",
+    "aspect_ratio": "Пропорции изображения",
 }
 OPTION_LABELS = {
     "all": "Все", "active": "В работе", "approval": "На проверке", "ready": "Готовые",
@@ -39,7 +41,9 @@ OPTION_LABELS = {
     "services": "Услуги", "upcoming": "Предстоящие записи",
     "dzen": "Дзен", "vc_ru": "vc.ru", "tenchat": "TenChat",
     "none": "Без изображения", "auto": "Автоматически", "gemini": "Gemini", "openai": "GPT Image",
-    "4:5": "4:5", "1:1": "1:1",
+    "4:5": "4:5", "1:1": "1:1", "9:16": "9:16", "16:9": "16:9",
+    "story": "Stories", "short_video": "Видеосценарий (не MP4)", "static_image": "Изображение",
+    "instagram_reels": "Instagram", "youtube_shorts": "YouTube Shorts", "vk_clips": "VK Клипы",
     "30": "30 секунд", "60": "60 секунд", "configured": "Настроенный профиль",
     "gemini_ru": "Gemini (русская озвучка)", "fish": "Fish Audio", "grok": "Grok",
     "gemini-3.1-flash-image": "Gemini",
@@ -74,8 +78,28 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
     initial = cap.params.model_validate(validation_params).model_dump(mode="json")
     if partial and is_prepare and missing == {"topic"}:
         initial["topic"] = ""
+    creative_format = initial.get("format") if capability_id == "create_creative" else None
+    allowed_fields = None
+    creative_choices = {}
+    if creative_format is not None:
+        from app.dispatcher.editable import CHANNELS, FORMAT_NAMES
+        # Each card is bound to one format. A different format needs its own form.
+        allowed_fields = {"topic", "format", "platform", "audience", "editorial_brief"}
+        if creative_format == "story":
+            allowed_fields |= {"frame_count", "image_model", "aspect_ratio"}
+        elif creative_format == "static_image":
+            allowed_fields |= {"image_model", "aspect_ratio"}
+        if not params.keys() <= allowed_fields:
+            raise ValueError("Параметр не подходит для выбранного формата.")
+        creative_choices = {"format": (creative_format,), "platform": CHANNELS[creative_format]}
+        if creative_format == "story":
+            creative_choices["aspect_ratio"] = ("9:16",)
+        if initial.get("platform") is not None and initial["platform"] not in CHANNELS[creative_format]:
+            raise ValueError("Площадка не подходит для выбранного формата.")
     fields = []
     for name, prop in schema.get("properties", {}).items():
+        if allowed_fields is not None and name not in allowed_fields:
+            continue
         if name not in FIELD_LABELS:
             raise ValueError("Для этого поля пока нет безопасного представления.")
         shape = prop
@@ -91,10 +115,12 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
         field = {"name": name, "label": ("Тема материала" if name == "topic" and is_prepare else FIELD_LABELS[name]), "required": name in required,
                  "value": "" if value is None else str(value).lower() if isinstance(value, bool) else str(value)}
         if shape.get("type") == "string" and "enum" in shape:
-            if optional or not all(v in OPTION_LABELS for v in shape["enum"]):
+            choices = [v for v in shape["enum"] if name not in creative_choices or v in creative_choices[name]]
+            if (optional and creative_format is None) or not choices or not all(v in OPTION_LABELS for v in choices):
                 raise ValueError("Не поддерживается вариант выбора.")
-            field.update(kind="select", options=[
-                {"value": v, "label": OPTION_LABELS[v]} for v in shape["enum"]])
+            options = [{"value": "", "label": "Автоматически"}] if optional else []
+            field.update(kind="select", options=options + [
+                {"value": v, "label": OPTION_LABELS[v]} for v in choices])
         elif shape.get("type") == "boolean":
             field.update(kind="select", options=[{"value": "false", "label": "Нет"},
                                                   {"value": "true", "label": "Да"}])
@@ -116,5 +142,6 @@ def form_for(capability_id: str | None, params: dict, *, partial: bool = True) -
         fields.sort(key=lambda field: order.index(field["name"]))
     if not fields:
         raise ValueError("У этого действия нет параметров для выбора.")
-    return {"type": "tool_form", "capability": cap.id, "title": cap.title,
+    title = "Настроить " + FORMAT_NAMES[creative_format] if creative_format is not None else cap.title
+    return {"type": "tool_form", "capability": cap.id, "title": title,
             "fields": fields, "submit_label": "Подготовить подтверждение" if is_prepare else "Показать результат"}
