@@ -128,17 +128,42 @@ async def list_publications(ctx: Context, params):
         stmt = stmt.where(Publication.status.in_(PROBLEMS))
     elif params.status != "all":
         stmt = stmt.where(Publication.status == params.status)
-    rows = list(ctx.db.execute(stmt.order_by(Publication.created_at.desc(), Publication.id.desc()).limit(16)))
+    rows = list(ctx.db.execute(stmt.order_by(Publication.created_at.desc(), Publication.id.desc())
+                               .offset((params.page - 1) * 15).limit(16)))
+    base = params.model_dump(mode="json")
+    def chip(label, **changes):
+        return {"label": label, "capability": "list_publications",
+                "params": {k: str(v) for k, v in {**base, **changes}.items()}}
     if not rows:
-        return Outcome("Подходящих публикаций не найдено.", blocks=[links_block(ctx, "channels", "vk")])
+        blocks = [links_block(ctx, "channels", "vk")]
+        if params.page > 1:
+            blocks.insert(0, {"type": "chips", "items": [chip("Первая страница", page=1)]})
+        return Outcome("Подходящих публикаций на этой странице не найдено.", blocks=blocks)
     shown = rows[:15]
     table = {"type": "table", "columns": ["Материал", "Площадка", "Статус", "Назначено (МСК)"],
              "rows": [[title[:140], CHANNELS[pub.channel], STATES.get(pub.status, pub.status),
                        _local(pub.scheduled_at)] for pub, title in shown]}
-    text = "Публикации выбранной компании." + (" Показаны последние 15." if len(rows) > 15 else "")
+    text = f"Публикации выбранной компании. Страница {params.page}, показано: {len(shown)}."
     if any(pub.status == "delivery_unknown" for pub, _ in shown):
         text += " Неопределённую доставку нужно сверить с площадкой; повторно отправлять такой пост нельзя."
-    return Outcome(text, blocks=[table, links_block(ctx, "channels", "vk")])
+    blocks = [table]
+    if params.list_presentation == "list":
+        from app.dispatcher.blocks import clean_blocks
+        cards = clean_blocks([{"type": "resource_list", "title": "Публикации", "filterable": True,
+            "items": [{"kind": "publication", "title": title.strip()[:140] or "Публикация",
+                       "status": STATES.get(pub.status, pub.status)[:80],
+                       "detail": f"{CHANNELS[pub.channel]} · Назначено (МСК): {_local(pub.scheduled_at)}",
+                       "href": f"/studio/products/{ctx.product.id}/materials/{pub.artifact_id}",
+                       "link_label": "Открыть исходный материал"} for pub, title in shown]}])
+        if cards:
+            blocks = cards
+    controls = [chip("Показать таблицу" if params.list_presentation == "list" else "Показать карточки",
+                     list_presentation="table" if params.list_presentation == "list" else "list")]
+    if params.page > 1:
+        controls.append(chip("Предыдущая страница", page=params.page - 1))
+    if len(rows) > 15 and params.page < 1000:
+        controls.append(chip("Следующая страница", page=params.page + 1))
+    return Outcome(text, blocks=[*blocks, {"type": "chips", "items": controls}, links_block(ctx, "channels", "vk")])
 
 
 async def describe_schedule_vk_post(ctx: Context, params):
