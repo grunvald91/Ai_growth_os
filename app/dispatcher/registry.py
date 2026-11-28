@@ -178,6 +178,8 @@ class ScheduleParams(_Params):
     # bookings — список записей; free — свободные окна; load — загрузка мастеров; next — кто следующий.
     view: Literal["bookings", "free", "load", "next"] = "bookings"
     period: Literal["today", "tomorrow", "week"] = "today"
+    schedule_presentation: Literal["auto", "table", "calendar"] = Field(
+        default="auto", description="Календарь по дням для записей и свободных окон; table — таблица; auto — обычное представление.")
 
 
 INSIGHT_TOPICS = ("all", "cancellations", "money", "clients", "weekdays", "daytime", "services", "upcoming")
