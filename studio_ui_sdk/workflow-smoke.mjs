@@ -184,6 +184,9 @@ try{
     await resources.getByLabel("Поиск на этой странице").fill("");
     assert.equal(await resources.locator(".dp-resource:visible").count(),2);
     assert.equal(posted.length,beforeFilter);
+    // Shared stylesheet must style the dynamic blocks, not only the classic layout.
+    assert.equal(await chart.locator(".dp-chart-track").first().evaluate(n=>getComputedStyle(n).height),"9px");
+    assert.equal(await resources.locator(".dp-resource-search input").evaluate(n=>getComputedStyle(n).minHeight),"44px");
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -208,6 +211,29 @@ try{
     await legacy.getByLabel("Поиск на этой странице").fill("ВКонтакте");
     assert.equal(await legacy.locator('[data-id="list-message"] .dp-resource:visible').count(),1);
     await legacy.close();
+    const create=await browser.newPage({viewport:{width,height:840}});
+    await create.route(url, async route=>{
+      await route.fulfill({contentType:"text/html",body:html().replace('class="dp-home"','class="dp-home sg-create-dispatch"')});
+    });
+    const retries=[];
+    await create.route("**/fake/messages", async route=>{
+      retries.push(route.request().postDataJSON());
+      if(retries.length===1) await route.abort();
+      else await route.fulfill({json:{messages:[{id:"result",seq:12,role:"assistant",text:"Результат",blocks:[]}],hints:[]}});
+    });
+    await create.goto(url,{waitUntil:"networkidle"});
+    const draft=create.locator('[data-id="form-message"]');
+    await draft.getByLabel("Количество дней").fill("30");
+    await draft.getByRole("button",{name:"Показать результат"}).click();
+    await create.locator(".dp-error").waitFor();
+    await create.waitForFunction(()=>!document.querySelector(".dp-home").classList.contains("busy"));
+    assert.equal(await draft.getByLabel("Количество дней").inputValue(),"30");
+    await draft.getByRole("button",{name:"Показать результат"}).click();
+    await create.locator('[data-id="result"]').waitFor();
+    assert.equal(retries.length,2);
+    assert.equal(retries[0].client_key,retries[1].client_key);
+    assert.deepEqual(retries[0].form_submission,retries[1].form_submission);
+    await create.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");
 }finally{
