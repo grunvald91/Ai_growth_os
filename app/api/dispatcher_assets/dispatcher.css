@@ -324,3 +324,11 @@
 .dp-calendar-summary:focus-visible{outline:2px solid var(--dp-accent,#3478d6);outline-offset:-2px}
 .dp-calendar-day .dp-tablewrap{margin:0;max-width:100%}
 .dp-calendar-empty{font-size:13px;padding:8px 12px;margin:0}
+
+/* Scoped resource page: a local filter does not trigger any tool. */
+.dp-resource-filter{display:grid;gap:8px;min-width:0}
+.dp-resource-search{display:grid;gap:5px;font-size:13px;min-width:0}
+.dp-resource-search input{box-sizing:border-box;min-width:0;width:100%;min-height:44px;font:inherit;font-size:16px;padding:8px 10px;border:1px solid var(--dp-line,#dce6f1);border-radius:8px;background:var(--dp-soft,#f6f9fd);color:inherit}
+.dp-resource-filter .dp-resource[hidden]{display:none!important}
+.dp-resource-detail,.dp-resource-link-label{display:block;overflow-wrap:anywhere;white-space:normal;font-size:12px}
+.dp-resource-link-label{font-weight:600}
