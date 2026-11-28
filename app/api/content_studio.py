@@ -2197,6 +2197,7 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
     choice = request.query_params.get("design")
     choice = choice if choice in {"v4", "classic"} else request.cookies.get("growth_design")
     modern = choice == "v4" or (choice != "classic" and _canonical_pwa(request, settings))
+    account_level = getattr(request.state, "studio_account_level", False)
     if modern:
         # The last company is a preference, never an access grant. Resolve it
         # only against the companies already authorised for this request.
@@ -2205,8 +2206,9 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
             from app.sso.tickets import COOKIE, read_session
             session = read_session(settings, request.cookies.get(COOKIE))
             selected = next((p for p in products if session and str(p.id) == session.product_id), None)
-        selected = selected or preferred or next(iter(products), None)
-        if selected is not None:
+        if not account_level:
+            selected = selected or preferred or next(iter(products), None)
+        if selected is not None and not (account_level and choose):
             params = []
             if choose:
                 params.append("companies=1")
@@ -2216,10 +2218,11 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
             return RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
         # First-time accounts have the same header dropdown, without a second
         # full-page company selector or an implicitly created workspace.
-        return HTMLResponse('<!doctype html><html lang="ru"><head><title>ServGo</title></head>'
-            '<body><main><section class="sg-studio-welcome"><h1>Добро пожаловать</h1>'
-            '<p>Откройте список компаний справа вверху, чтобы начать работу.</p>'
-            '</section></main></body></html>', headers={"Cache-Control": "no-store"})
+        if not account_level:
+            return HTMLResponse('<!doctype html><html lang="ru"><head><title>ServGo</title></head>'
+                '<body><main><section class="sg-studio-welcome"><h1>Добро пожаловать</h1>'
+                '<p>Откройте список компаний справа вверху, чтобы начать работу.</p>'
+                '</section></main></body></html>', headers={"Cache-Control": "no-store"})
     # On canonical ServGo, even a linked Growth operator sees the common
     # chooser. The old automatic operator redirect remains on the legacy host.
     if canonical_user is None and not choose and (len(products) == 1 or (preferred is not None and allowed is None)):
@@ -2235,7 +2238,8 @@ def studio(request: Request, choose: bool = False, db: Session = Depends(get_db)
         linked_ids = tuple(link.servgo_business_id for link in links)
         business_product_ids = {str(link.servgo_business_id): str(link.product_id) for link in links}
     response = HTMLResponse(product_selector(
-        products, can_add=allowed is None and canonical_user is None,
+        products, can_add=(canonical_user is not None and getattr(request.state, "studio_servgo_user_id", None) == canonical_user)
+        or (allowed is None and canonical_user is None),
         can_link=bool(request.cookies.get(SSO_COOKIE)) and canonical_user is None,
         unified_user_id=canonical_user, linked_business_ids=linked_ids,
         business_product_ids=business_product_ids,

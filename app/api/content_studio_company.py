@@ -220,9 +220,18 @@ async def _run_job(product_id: UUID, session_id: UUID, website: str, identifier:
         db.close()
 
 
+def _creator_account(request: Request) -> int | None:
+    """Only verified central account sessions or existing legacy operators may create."""
+    user_id = getattr(request.state, "studio_servgo_user_id", None)
+    if type(user_id) is int and user_id > 0:
+        return user_id
+    _require_operator(request)
+    return None
+
+
 @router.get("/studio/new", response_class=HTMLResponse)
 def new_company_form(request: Request, db: Session = Depends(get_db)):
-    _require_operator(request)
+    _creator_account(request)
     return HTMLResponse(_new_company_page(registry_hint=_identifier_hint(_service(db))),
                         headers={"Cache-Control": "no-store"})
 
@@ -300,7 +309,7 @@ async def _add_materials(service: CompanyIntakeService, product_id: UUID, sessio
 
 @router.post("/studio/new")
 async def new_company_submit(request: Request, background: BackgroundTasks, db: Session = Depends(get_db)):
-    _require_operator(request)
+    creator = _creator_account(request)
     fields, files = await _read_form(request)
     name = " ".join(fields.get("name", "").split())
     about = fields.get("about", "").strip()
@@ -313,6 +322,10 @@ async def new_company_submit(request: Request, background: BackgroundTasks, db: 
                             status_code=422, headers={"Cache-Control": "no-store"})
     product = Product(name=name, slug="company-" + uuid4().hex[:12], description=about[:10000])
     db.add(product)
+    if creator is not None:
+        from app.sso.models import StudioAccountProduct
+        db.flush()
+        db.add(StudioAccountProduct(servgo_user_id=creator, product_id=product.id))
     db.commit()
     try:
         session = service.start(product.id, actor=ACTOR)

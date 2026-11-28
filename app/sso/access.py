@@ -157,3 +157,18 @@ def servgo_business(settings, user_id: int, business_id: int) -> dict | None:
         _logger.warning("studio_sso_business_failed %s", type(exc).__name__)
         return None
     return data if isinstance(data, dict) and isinstance(data.get("name"), str) else None
+
+
+def servgo_account_active(settings, user_id: int) -> bool:
+    """A current central account is required even with zero BookingBot businesses."""
+    key = settings.servgo_internal_key or ""
+    if len(key) < 32:
+        return False
+    try:
+        with httpx.Client(timeout=TIMEOUT_SECONDS, transport=_transport) as client:
+            response = client.get(settings.servgo_api_url.rstrip("/") + "/internal/studio/account",
+                                  params={"user_id": user_id}, headers={"X-Studio-Key": key})
+        data = response.json()
+        return response.status_code == 200 and isinstance(data, dict) and data.get("allowed") is True
+    except (httpx.HTTPError, ValueError):
+        return False

@@ -195,24 +195,37 @@ def _sso_login(request: Request, settings, db=None, *, users: dict | None = None
     if session is None or not tickets.configured(settings):
         return None
     from app.api.studio_sso import _canonical_pwa
-    if _canonical_pwa(request, settings):
+    canonical = _canonical_pwa(request, settings)
+    account_level = session.role == tickets.ACCOUNT_ROLE
+    if account_level and not canonical:
+        return None
+    if canonical:
         from app.sso.browser_identity import COOKIE as ID_COOKIE, read_identity
         current = read_identity(settings, request.cookies.get(ID_COOKIE))
         if (current is None or current[0] != session.user_id or
                 not session.identity_hash or not secrets.compare_digest(current[1], session.identity_hash)):
             return None
-    if db is None or not _sso_link_current(db, session):
-        return None  # The studio owner disconnected or re-linked this business: the old session ends.
+    if db is None:
+        return None
+    if account_level:
+        if not access.servgo_account_active(settings, session.user_id):
+            return None
+    elif not _sso_link_current(db, session):
+        return None  # A business-scoped session cannot survive disconnection or re-linking.
     # The protected internal list already contains verified, current roles.
     # One fresh network round-trip covers both membership and role revocation.
     business_roles = access.servgo_business_roles(settings, session.user_id)
     if business_roles is None:
-        # An old/unavailable API may authorize only the original ticket scope.
-        role = access.servgo_role(settings, session.user_id, session.business_id, fresh=True)
-        if role is None:
-            return None
-        request.state.studio_sso_role = role
-        allowed = {session.product_id}
+        if account_level:
+            # No business access is inferred from an account ticket.
+            allowed = set()
+        else:
+            # An old/unavailable API may authorize only the original ticket scope.
+            role = access.servgo_role(settings, session.user_id, session.business_id, fresh=True)
+            if role is None:
+                return None
+            request.state.studio_sso_role = role
+            allowed = {session.product_id}
     else:
         # Losing access to the entry business must not log the user out of
         # another company they still manage. An empty list is authoritative.
@@ -231,8 +244,18 @@ def _sso_login(request: Request, settings, db=None, *, users: dict | None = None
                 allowed.discard(str(current))
             else:
                 request.state.studio_sso_role = role
-        if not allowed:
+        if not allowed and not account_level:
             return None
+    if canonical:
+        from sqlalchemy import select
+        from app.sso.models import StudioAccountProduct
+        owned = {str(value) for value in db.scalars(select(StudioAccountProduct.product_id).where(
+            StudioAccountProduct.servgo_user_id == session.user_id))}
+        allowed.update(owned)
+        if str(request.path_params.get("product_id")) in owned:
+            request.state.studio_sso_role = "owner"
+        request.state.studio_servgo_user_id = session.user_id
+        request.state.studio_account_level = account_level
     # Platform-wide access is NEVER inferred from a BookingBot owner/admin role.
     # It is unlocked only after the person has explicitly proved control of an
     # existing Growth operator credential in a live ServGo SSO session.

@@ -60,8 +60,9 @@ async def before_company_search(
     query: str = Query(min_length=2, max_length=100),
     city: str = Query(min_length=2, max_length=80),
 ):
-    """For the admin-only 'new company' form, before a company ID exists."""
-    _require_operator(request)
+    """Verified central account or legacy operator, before a company ID exists."""
+    from app.api.content_studio_company import _creator_account
+    _creator_account(request)
     value = await _lookup(query, city, limit=10)
     for item in value["organizations"]:
         item["selection_token"] = sign_organization(item, scope="new", query=query, city=city)

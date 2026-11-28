@@ -223,7 +223,7 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
 
     counter = iter(range(1000, 100000))
     # Dictation bookkeeping belongs to accounts, not companies: counts and timings only, no company data.
-    account_level = {"voice_usage", "voice_cost_alerts"}
+    account_level = {"voice_usage", "voice_cost_alerts", "studio_account_tickets"}
 
     def fill(connection, table, ids, product_id):
         row = {}
@@ -240,7 +240,8 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
                 target = next(iter(column.foreign_keys)).column.table.name
                 row[column.name] = product_id if target == "products" else ids.get(target)
             elif column.primary_key:
-                row[column.name] = uuid.uuid4()
+                kind = column.type.python_type
+                row[column.name] = next(counter) if kind is int else (uuid.uuid4().hex if kind is str else uuid.uuid4())
             elif not (column.nullable or column.default is not None or column.server_default is not None):
                 if getattr(column.type, "enums", None):
                     row[column.name] = column.type.enums[0]
@@ -266,7 +267,14 @@ def test_deletion_respects_foreign_keys_and_spares_other_companies(tmp_path):
                 if table.name != "products" and table.name not in account_level:
                     fill(db.connection(), table, ids, product.id)
             db.commit()
+        # Account-wide replay protection is not owned by a company.
+        from app.sso.models import StudioAccountTicket, StudioAccountProduct
+        db.add(StudioAccountTicket(jti="account-ticket-fixture", expires_at=datetime.datetime.now(datetime.timezone.utc)))
+        db.commit()
         delete_company(db, tmp_path, products[0].id)
+        assert db.get(StudioAccountTicket, "account-ticket-fixture") is not None
+        remaining = db.scalars(select(StudioAccountProduct)).all()
+        assert len(remaining) == 1 and remaining[0].product_id == products[1].id
         for table in Base.metadata.sorted_tables:
             if table.name in account_level:
                 continue

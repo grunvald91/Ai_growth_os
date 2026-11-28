@@ -26,7 +26,7 @@ from app.models.domain import Product
 from app.sso import access, tickets
 from app.sso.browser_identity import COOKIE as IDENTITY_COOKIE, read_identity
 from app.sso.company import MIN_ABOUT, about_text
-from app.sso.models import StudioBusinessLink, StudioSsoTicket
+from app.sso.models import StudioAccountTicket, StudioBusinessLink, StudioSsoTicket
 
 router = APIRouter()
 SETUP_COOKIE = "sg_growth_setup"
@@ -312,8 +312,28 @@ def sso_landing(request: Request, background: BackgroundTasks, t: str | None = N
     if _canonical_pwa(request, settings):
         identity = read_identity(settings, request.cookies.get(IDENTITY_COOKIE))
         if identity is None or identity[0] != claims.user_id:
+            if claims.role == tickets.ACCOUNT_ROLE:
+                return _message("Другой аккаунт", "Подтвердите вход в текущий аккаунт ServGo.", 403,
+                                action=("Войти", "/workspace/studio-entry"))
             return _native_error(request, settings, "identity", "Другой аккаунт",
                                  "Войдите в ServGo под пользователем, которому принадлежит компания.", 403)
+    if claims.role == tickets.ACCOUNT_ROLE:
+        # The account ticket is canonical-only, bound to the live browser identity
+        # above. It must not confer a company role or require a BookingBot record.
+        if not _canonical_pwa(request, settings) or not access.servgo_account_active(settings, claims.user_id):
+            return _message("Нет доступа", "Войдите в ServGo ещё раз.", 403,
+                            action=("Войти", "/workspace/studio-entry"))
+        try:
+            db.execute(delete(StudioAccountTicket).where(
+                StudioAccountTicket.expires_at < datetime.now(timezone.utc) - timedelta(hours=1)))
+            db.add(StudioAccountTicket(jti=claims.jti,
+                                       expires_at=datetime.fromtimestamp(claims.expires, timezone.utc)))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            return _message("Ссылка устарела", "Откройте Studio повторно.", 400,
+                            action=("Открыть Studio", "/workspace/studio-entry"))
+        return _cookie_redirect(settings, claims, tickets.ACCOUNT_ROLE, "", "/studio", request)
     # ServGo confirms access right now: the link alone is not enough.
     access.forget(claims.user_id, claims.business_id)
     role = access.servgo_role(settings, claims.user_id, claims.business_id)
