@@ -232,3 +232,31 @@ def test_expert_preflight_rejects_duplicate_representation():
     with pytest.raises(ValueError):
         preflight([PlannedStep(capability="show_insights", params={"presentation": "table"}),
                    PlannedStep(capability="show_insights", params={"presentation": "chart"})])
+
+
+def test_missing_schedule_fields_are_not_zero_and_private_staff_stays_private():
+    from datetime import date
+    from app.schedule.source import Schedule, Booking, Resource
+    from app.dispatcher.specialist_evidence import schedule_facts
+    day = date(2026, 11, 28)
+    missing = Schedule(today=day, working_hours="09:00-18:00")
+    assert schedule_facts(missing, day, day, "free", "today")["status"] == "unavailable"
+    assert schedule_facts(missing, day, day, "load", "today")["status"] == "unavailable"
+    explicit = Schedule(today=day, free_slots=[])
+    assert schedule_facts(explicit, day, day, "free", "today")["rows"] == [[day.isoformat(), "0"]]
+    schedule = Schedule(today=day, working_hours="09:00-18:00",
+        resources=[Resource(id=1, name="PRIVATE_STAFF", working_dates=[day])],
+        bookings=[Booking(id=1, date=day, time="10:00", status="confirmed",
+            service="PRIVATE_SERVICE", client_name="PRIVATE_CLIENT")])
+    facts = schedule_facts(schedule, day, day, "load", "today")
+    assert facts["status"] == "unavailable"
+    assert "PRIVATE" not in str(facts)
+
+
+def test_expert_aggregate_does_not_round_large_booking_values():
+    from datetime import date
+    from app.insights.compute import Insights, Fact, METRIC_PREFIX
+    from app.dispatcher.specialist_evidence import insight_facts
+    data = Insights(30, date(2026, 10, 1), date(2026, 10, 30), facts=[
+        Fact(METRIC_PREFIX + "estimated_booking_value_total", "Стоимость", 123456789, "₽")])
+    assert insight_facts(data, "money")["rows"] == [["Стоимость", "123456789 ₽"]]
