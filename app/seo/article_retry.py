@@ -11,7 +11,7 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.models.domain import AgentRun, Artifact, Product, Task, TaskStatus
-from app.seo.activation import require_enabled
+from app.seo.activation import is_enabled, require_enabled
 from app.seo.queue import SEO_TASK_PREFIX
 from app.workflows.article_contracts import ArticleProductionInput
 
@@ -24,28 +24,52 @@ def retry_failed_article(db: Session, *, product_id: UUID, task_id: UUID,
 AUTO_RECOVERY = "seo_article_auto_recovery"
 
 
+class RecoveryBlocked(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def recovery_blocker(db: Session, *, product_id: UUID, task_id: UUID) -> str | None:
+    """Inspect the same recovery gates without locks, mutations or model calls."""
+    try:
+        _retry(db, product_id=product_id, task_id=task_id, actor="audit",
+               automatic=True, inspect_only=True)
+    except RecoveryBlocked as exc:
+        return exc.code
+    except LookupError:
+        return "not_found"
+    except ValueError:
+        return "not_eligible"
+    return None
+
+
 def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
-           automatic: bool) -> Task:
+           automatic: bool, inspect_only: bool = False) -> Task:
     # The same company lock serializes this operator action with SEO opt-out.
-    if db.scalar(select(Product.id).where(Product.id == product_id).with_for_update()) is None:
+    product_query = select(Product.id).where(Product.id == product_id)
+    if db.scalar(product_query if inspect_only else product_query.with_for_update()) is None:
         raise LookupError("Компания не найдена")
+    if not is_enabled(db, product_id):
+        raise RecoveryBlocked("seo_disabled", "SEO-завод выключен для этой компании. Подключите его в разделе SEO-завод.")
     require_enabled(db, product_id)
-    task = db.scalar(select(Task).where(
+    task_query = select(Task).where(
         Task.id == task_id, Task.product_id == product_id,
         Task.assigned_agent == "content_factory",
         Task.title.like(f"{SEO_TASK_PREFIX}%"),
-    ).with_for_update())
+    )
+    task = db.scalar(task_query if inspect_only else task_query.with_for_update())
     if task is None:
         raise LookupError("Задание SEO-статьи не найдено")
     if task.status != TaskStatus.FAILED:
-        raise ValueError("Повторить можно только статью со статусом ошибки")
+        raise RecoveryBlocked("not_failed", "Повторить можно только статью со статусом ошибки")
     parts = task.title.split(":", 2)
     if len(parts) != 3:
-        raise ValueError("Некорректная ссылка на SEO-план")
+        raise RecoveryBlocked("invalid_plan_reference", "Некорректная ссылка на SEO-план")
     try:
         plan_id = UUID(parts[1])
     except ValueError:
-        raise ValueError("Некорректная ссылка на SEO-план") from None
+        raise RecoveryBlocked("invalid_plan_reference", "Некорректная ссылка на SEO-план") from None
     plan = db.scalar(select(Artifact.id).where(
         Artifact.id == plan_id, Artifact.product_id == product_id,
         Artifact.kind == "seo_content_plan",
@@ -55,24 +79,24 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
         Artifact.kind == "content_request",
     ))
     if plan is None or request is None:
-        raise ValueError("Не найден исходный SEO-план или задание статьи")
+        raise RecoveryBlocked("missing_plan_or_request", "Не найден исходный SEO-план или задание статьи")
     try:
         original = ArticleProductionInput.model_validate_json(request.content)
     except (ValueError, TypeError):
-        raise ValueError("Исходные данные статьи не прошли проверку") from None
+        raise RecoveryBlocked("invalid_request_schema", "Исходные данные статьи не прошли проверку") from None
     if (original.product_id != product_id or original.task_id not in (None, task.id)
             or original.seo_brief is None
             or original.seo_brief.plan_item_id != parts[2]
             or original.channel != "own_site" or not original.light
             or original.produce_ready_assets):
-        raise ValueError("Задание не соответствует исходному SEO-плану")
+        raise RecoveryBlocked("request_plan_mismatch", "Задание не соответствует исходному SEO-плану")
     # A finished artifact must never be generated a second time under its ID.
     article = db.scalar(select(Artifact.id).where(
         Artifact.product_id == product_id, Artifact.task_id == task.id,
         Artifact.kind == "article",
     ).limit(1))
     if article is not None:
-        raise ValueError("Для этого задания уже существует статья; проверьте её статус")
+        raise RecoveryBlocked("article_exists", "Для этого задания уже существует статья; проверьте её статус")
     if automatic:
         from app.seo.failure_guard import paused_products
         from app.seo.failure_report import safe_error
@@ -80,21 +104,21 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
         now = datetime.now(timezone.utc)
         cutoff = db_time(db, now - timedelta(minutes=30))
         if product_id in paused_products(db, now):
-            raise ValueError("Automatic recovery paused")
+            raise RecoveryBlocked("failure_circuit_breaker", "Automatic recovery paused")
         if db.scalar(select(exists().where(
             Artifact.product_id == product_id, Artifact.task_id == task.id,
             Artifact.kind == "seo_article_manual_retry",
         ))):
-            raise ValueError("Owner already retried this task")
+            raise RecoveryBlocked("manual_retry_exists", "Owner already retried this task")
         if db.scalar(select(exists().where(
             Artifact.product_id == product_id, Artifact.kind == AUTO_RECOVERY,
             (Artifact.task_id == task.id) | (Artifact.created_at >= cutoff),
         ))):
-            raise ValueError("Automatic recovery already attempted or cooling down")
+            raise RecoveryBlocked("recovery_attempt_or_cooldown", "Automatic recovery already attempted or cooling down")
         if task.updated_at is None or (
                 task.updated_at.replace(tzinfo=timezone.utc) if task.updated_at.tzinfo is None
                 else task.updated_at) > now - timedelta(minutes=30):
-            raise ValueError("Recent failure; wait for cooldown")
+            raise RecoveryBlocked("recent_failure", "Recent failure; wait for cooldown")
         latest = db.scalar(select(AgentRun).where(
             AgentRun.task_id == task.id, AgentRun.started_at.is_not(None),
         ).order_by(AgentRun.started_at.desc(), AgentRun.id.desc()).limit(1))
@@ -108,11 +132,13 @@ def _retry(db: Session, *, product_id: UUID, task_id: UUID, actor: str,
             (family == "assembly_failed" and stage == "invalid_marketing_editor_grounding"))
         if (latest is None or latest.status not in {"failed", "completed"}
                 or latest.finished_at is None or not eligible):
-            raise ValueError("Failure is not eligible for automatic schema recovery")
+            raise RecoveryBlocked("failure_evidence_not_eligible", "Failure is not eligible for automatic schema recovery")
         if db.scalar(select(exists().where(
             AgentRun.task_id == task.id, AgentRun.status == "running"
         ))):
-            raise ValueError("An agent is still running")
+            raise RecoveryBlocked("agent_still_running", "An agent is still running")
+    if inspect_only:
+        return task
     # Requeued tasks are subject to the usual per-company daily limits,
     # original article grounding, and final critic validation.
     task.status = TaskStatus.QUEUED

@@ -46,6 +46,7 @@ def test_failed_article_report_is_scoped_and_preserves_state(env):
         assert row["last_recorded_error_family"] == "invalid_article_output"
         assert row["checkpoint_records"] == 1
         assert row["article_exists"] is False
+        assert row["automatic_recovery_blocker"] == "invalid_plan_reference"
         assert "private" not in json.dumps(report)
         assert str(other_task.id) not in json.dumps(report)
         assert task.status == TaskStatus.FAILED
@@ -61,3 +62,24 @@ def test_report_without_agent_error_does_not_guess(env):
         row = failure_report(db, company)["tasks"][0]
         assert row["last_recorded_error_family"] == "not_recorded"
         assert row["last_recorded_error_stage"] is None
+
+
+def test_planning_failure_report_allowlists_metadata(env):
+    factory, _, company = env
+    with factory() as db:
+        task = Task(product_id=company, title="SEO plan", assigned_agent="seo_factory",
+                    status=TaskStatus.FAILED)
+        db.add(task)
+        db.flush()
+        db.add(Artifact(product_id=company, task_id=task.id, kind="seo_factory_report",
+                        title="Report", content=json.dumps({
+                            "stage": "build_plan", "error_code": "plan_validation_failed",
+                            "plan_issue": "private value", "error": "private response",
+                            "attempt": 2, "retryable": False})))
+        db.commit()
+        result = failure_report(db, company)["latest_planning_failure"]
+        assert result == {"task_id": str(task.id), "stage": "build_plan",
+                          "error_code": "plan_validation_failed", "plan_issue": "unclassified",
+                          "attempt": 2, "retryable": False}
+        assert "private" not in json.dumps(result)
+        assert not db.new and not db.dirty and not db.deleted

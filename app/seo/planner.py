@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
 from app.company_profile import load_company_profile
@@ -206,26 +206,28 @@ async def _ask(llm: LLMService, *, model: str, prompt: str, payload: dict, schem
     is_plan = schema is SeoContentPlan
     response = await llm.generate(request, validate_revision=check,
                                   review_enabled=False if is_plan else None)
-    parsed = schema.model_validate_json(response.content)
     try:
+        parsed = schema.model_validate_json(response.content)
         validate(parsed)
         return parsed
-    except PlanError as exc:
-        if not is_plan:
+    except (ValidationError, PlanError) as exc:
+        if isinstance(exc, PlanError) and not is_plan:
             raise
-        # One bounded corrective generation; the engine does not silently
-        # invent clusters, demand, or replace the real collected queries.
+        # A malformed JSON/schema response also gets one bounded correction.
+        # Do not echo raw validation inputs into prompts or diagnostic logs.
+        problem = (str(exc)[:450] if isinstance(exc, PlanError)
+                   else "The response was invalid JSON or did not match the supplied schema")
         corrected = request.model_copy(update={
             "messages": [
                 *request.messages,
                 LLMMessage(
                     role="user",
-                    content="The previous proposed plan failed deterministic validation: "
-                            + str(exc)[:450]
-                            + ". Regenerate a corrected plan. Every cluster id and primary "
-                              "query must exist verbatim in the provided real search data, "
-                              "and stage/intent must equal that cluster. Keep all distinct "
-                              "relevant topics without duplicating primary queries.",
+                    content=("The previous response failed validation: " + problem
+                             + ". Return a corrected complete JSON object matching the schema. "
+                             + ("Every cluster id and primary query must exist in the provided "
+                                "real search data, and stage/intent must equal that cluster. "
+                                "Keep distinct relevant topics without duplicating queries."
+                                if is_plan else "Return relevant buyer search seeds only.")),
                 ),
             ],
         })
