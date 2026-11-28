@@ -256,9 +256,11 @@ async def ask_model(db: Session, llm: LLMService, settings, ctx: Context, histor
             data = json.loads(data)
         return DispatcherDecision.model_validate(relax(DispatcherDecision, data)), (seen[-1] if seen else reply.model)
     except (asyncio.TimeoutError, ValueError, ValidationError, TypeError):
+        db.rollback()
         _logger.warning("dispatcher_decision_failed", exc_info=True)
         return None, (seen[-1] if seen else None)
     except Exception:  # A provider outage must never break the page; the owner still gets chips and links.
+        db.rollback()
         _logger.warning("dispatcher_provider_failed", exc_info=True)
         return None, (seen[-1] if seen else None)
 
@@ -557,6 +559,7 @@ def _visual_preferences(text: str) -> tuple[str | None, str | None]:
 async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, text: str, client_key: str | None,
                          mode: str = "text", chip: dict | None = None, creation=None, form_submission=None) -> dict:
     """Process one owner message and return the user and assistant messages."""
+    turn_deadline = time.monotonic() + 55
     conversation = open_conversation(db, ctx.product.id, ctx.account)
     # One message at a time per conversation; a retry with the same key returns the first answer.
     db.scalar(select(DispatcherConversation).where(DispatcherConversation.id == conversation.id).with_for_update())
@@ -821,7 +824,14 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
                 chips = []
             else:
                 async def next_read(observations):
-                    return await ask_investigation(ctx, llm, text, observations)
+                    remaining = turn_deadline - time.monotonic()
+                    if remaining <= 0:
+                        return None
+                    try:
+                        return await asyncio.wait_for(
+                            ask_investigation(ctx, llm, text, observations), timeout=remaining)
+                    except asyncio.TimeoutError:
+                        return None
                 outcome = await run_investigation(
                     ctx, PlannedStep(capability=decision.capability, params=decision.params),
                     act=act, next_read=next_read)
