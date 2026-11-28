@@ -162,3 +162,47 @@ async def test_dispatcher_exhausted_recovery_offers_clarification(db, tmp_path, 
     assert any(block["type"] == "chips" for block in answer["blocks"])
     assert "Я записал" not in answer["text"]
     assert not list(db.scalars(select(Task).where(Task.product_id == product.id)))
+
+
+@pytest.mark.asyncio
+async def test_submitted_video_form_creates_only_one_unapproved_job(db, tmp_path, monkeypatch):
+    from app.api.dispatcher import FormSubmissionIn
+    product = Product(name="Video form", slug="video-form")
+    db.add(product)
+    db.commit()
+    ctx = Context(db=db, product=product, account="owner", settings=Settings(
+        _env_file=None, products_root=tmp_path, whiteboard_storyboard_model="story-model",
+        whiteboard_image_model="google/image", whiteboard_speech_model="speech-model",
+        whiteboard_regions_model="regions-model"))
+
+    async def fake_ask(*args, recovery=False):
+        return DispatcherDecision(intent="form", capability="whiteboard_video",
+            confidence=0.95, params={"topic": "Как устроена онлайн-запись", "length": "60"}), "test-model"
+
+    monkeypatch.setattr(service, "ask_model", fake_ask)
+    response = await service.handle_message(db, ctx, object(), text="Покажи форму настроек",
+                                            client_key="initial-video-form")
+    source = response["messages"][-1]
+    assert not list(db.scalars(select(Task).where(Task.product_id == product.id)))
+    request = FormSubmissionIn(message_id=source["id"], revision=0,
+        params={"topic": "Как устроена онлайн-запись", "length": "60",
+                "max_api_calls": "45", "visual_review": "false"})
+    prepared = await service.handle_message(db, ctx, None, text="", client_key="submit-video",
+                                             form_submission=request)
+    card = next(b for b in prepared["messages"][-1]["blocks"] if b["type"] == "confirm")
+    assert card["paid"] and card["state"] == "pending"
+    tasks = list(db.scalars(select(Task).where(Task.product_id == product.id)))
+    assert len(tasks) == 1 and tasks[0].status == TaskStatus.WAITING_APPROVAL
+    repeated = await service.handle_message(db, ctx, None, text="", client_key="second-tab",
+                                             form_submission=request)
+    assert repeated["replayed"]
+    assert len(list(db.scalars(select(Task).where(Task.product_id == product.id)))) == 1
+
+
+@pytest.mark.parametrize("profile", ["configured", "gemini_ru", "fish", "grok"])
+def test_video_form_projects_current_speech_profiles(profile):
+    from app.dispatcher.forms import form_for
+    block = form_for("whiteboard_video", {"topic": "Как устроена онлайн-запись", "profile": profile})
+    field = next(field for field in block["fields"] if field["name"] == "profile")
+    assert field["value"] == profile
+    assert {option["value"] for option in field["options"]} == {"configured", "gemini_ru", "fish", "grok"}

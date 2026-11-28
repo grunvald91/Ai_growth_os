@@ -540,3 +540,23 @@ def test_home_has_a_microphone_that_only_fills_the_input_field(env):
     js = client.get("/studio/assets/dispatcher.js").text
     # Dictation never sends anything by itself: it talks only to the voice endpoint and writes into the field.
     assert "voiceUrl" in js and "input.value = before + inserted" in js
+
+
+def test_saved_form_submission_http_scope_and_payload(env):
+    db, settings, servgo, other, _ = env
+    from app.dispatcher import service
+    from app.dispatcher.forms import form_for
+    conversation = service.open_conversation(db, servgo.id, "local-owner")
+    form = service._add_committed(db, conversation, role="assistant", input_mode="text",
+        text="Выберите параметры", blocks=[form_for("create_package", {})],
+        intent="form", capability="create_package")
+    body = {"mode": "chip", "client_key": "http-form",
+            "form_submission": {"message_id": str(form.id), "params": {"topic": "План продвижения"}}}
+    client = TestClient(app)
+    assert client.post(f"/studio/products/{other.id}/dispatch/messages", json=body).status_code == 404
+    mixed = {**body, "chip": chip_body()["chip"]}
+    assert client.post(f"/studio/products/{servgo.id}/dispatch/messages", json=mixed).status_code == 422
+    result = client.post(f"/studio/products/{servgo.id}/dispatch/messages", json=body)
+    assert result.status_code == 200
+    assert any(b["type"] == "confirm" for b in result.json()["messages"][-1]["blocks"])
+    assert not list(db.scalars(select(Task)))
