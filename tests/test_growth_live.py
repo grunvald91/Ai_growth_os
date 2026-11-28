@@ -362,7 +362,7 @@ def test_home_keeps_real_dispatcher_and_voice(live):
     assert page.text.index('id="dp-feed"') < page.text.index('id="dp-new"')
     assert '/studio/assets/growth-live.css?v=31-create-video-controls' in page.text
     assert '/studio/assets/dispatcher-review.css?v=2' in page.text
-    assert '/studio/assets/dispatcher.js?v=voice-start-fast-20261121' in page.text
+    assert '/studio/assets/dispatcher.js?v=ui-sdk-review-20261128' in page.text
     assert page.text.count('href="/studio/assets/resource-widgets.css') == 1
     assert page.text.count('src="/studio/assets/resource-widgets.js') == 1
     assert '/studio/assets/growth-live.js?v=14' in page.text
