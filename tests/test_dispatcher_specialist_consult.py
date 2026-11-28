@@ -114,3 +114,41 @@ def test_role_validation_and_explicit_routing():
         intent="specialist", specialist_id="marketer"))
     assert quick_capability("Маркетолог, посоветуй что сделать для бизнеса") is None
     assert quick_video_request("Копирайтер, подготовь объясняющее видео про записи") is None
+
+
+def test_specific_advice_does_not_get_swallowed_by_daily_recommendations():
+    assert quick_capability("Посоветуй стратегию продвижения бизнеса") is None
+    assert quick_capability("Что улучшить в маркетинге компании?") is None
+    assert quick_capability("Посоветуй рекламный бюджет бизнеса на сегодня") is None
+    assert quick_capability("Что порекомендуешь сегодня сделать для бизнеса") == "recommend_today"
+    assert service._decision_needs_recovery(DispatcherDecision.model_validate({
+        "intent": "specialist", "specialist_id": "marketer",
+        "next_chips": [{"label": "Опубликовать", "capability": "schedule_post", "params": {}}]}))
+
+
+@pytest.mark.asyncio
+async def test_expert_checks_fresh_router_limit_before_provider_call(db, tmp_path):
+    ctx = context(db, tmp_path, model_router_enabled=True, model_router_max_call_usd="0.00000001",
+                  model_router_profiles=json.dumps([{
+                      "model": "deepseek-v4.1-flash", "tier": "economy", "enabled": True,
+                      "input_usd_per_million": "1", "output_usd_per_million": "1"}]))
+    llm, provider = model([])
+    answer, actual = await consult(ctx, llm, "marketer", "Совет", [],
+        deadline=time.monotonic()+10, record_cost=service.record_llm_cost)
+    assert actual is None and not provider.requests
+    assert "Консультация не выполнена" in answer
+
+
+@pytest.mark.asyncio
+async def test_expert_rejects_provider_model_substitution(db, tmp_path):
+    ctx = context(db, tmp_path)
+    class Substituted:
+        async def generate(self, request):
+            return LLMResponse(content="Нельзя показывать как проверенную консультацию",
+                               model="gpt-4o-mini", usage=LLMUsage(input_tokens=50, output_tokens=20))
+    llm = LLMService(privacy_gateway=PrivacyGateway(), provider=Substituted())
+    answer, actual = await consult(ctx, llm, "marketer", "Совет", [],
+        deadline=time.monotonic()+10, record_cost=service.record_llm_cost)
+    assert actual is None and "Консультация не выполнена" in answer
+    assert "Нельзя показывать" not in answer
+    assert len(list(db.scalars(select(CostRecord)))) == 1
