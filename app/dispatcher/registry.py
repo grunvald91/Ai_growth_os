@@ -149,6 +149,8 @@ class TaskListParams(_Params):
     tab: Literal["all", "active", "approval", "ready", "problems"] = "all"
     kind: Literal["all", "post", "article", "creative", "video", "plan", "edit", "seo", "business"] = "all"
     query: str = Field(default="", max_length=120)
+    page: int = Field(default=1, ge=1, le=1000)
+    list_presentation: Literal["table", "list"] = "table"
 
 
 class TaskDetailParams(_Params):
@@ -254,6 +256,8 @@ class VkScheduleParams(_Params):
 class PublicationListParams(_Params):
     channel: Literal["all", "telegram", "vk"] = "all"
     status: Literal["all", "scheduled", "sending", "published", "problems", "cancelled"] = "all"
+    page: int = Field(default=1, ge=1, le=1000)
+    list_presentation: Literal["table", "list"] = "table"
 
 
 class PublicationParams(_Params):
