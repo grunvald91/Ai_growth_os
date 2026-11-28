@@ -561,6 +561,10 @@ async def handle_message(db: Session, ctx: Context, llm: LLMService | None, *, t
         submitted = form_submission.params
         if not submitted.keys() <= {f["name"] for f in stored_form["fields"]}:
             raise ValueError("В форме есть неизвестные поля.")
+        if target == "create_creative":
+            saved_format = next((f["value"] for f in stored_form["fields"] if f["name"] == "format"), None)
+            if not saved_format or submitted.get("format") != saved_format:
+                raise ValueError("Формат изменился. Откройте отдельную форму.")
         # Re-check the current registry and validate the complete request.
         form_for(target, submitted, partial=False)
         if target in PREPARE_FORMS:
