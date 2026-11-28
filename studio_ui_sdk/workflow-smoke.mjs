@@ -50,6 +50,12 @@ state.messages.push({id:"distribution-message",seq:8,role:"assistant",text:"Ст
     unit:"шт",points:[{label:"Выполнены",value:8},{label:"Отменены",value:2}]},
     {type:"metrics_summary",title:"Записи за период",source:"BookingBot",period:"01.11.2026–03.11.2026",
     unit:"шт",points:[{label:"Записей без отмен",value:8},{label:"Отменено",value:2}]}]});
+state.messages.push({id:"calendar-message",seq:9,role:"assistant",text:"Расписание",blocks:[{
+  type:"calendar",title:"Календарь записей",source:"BookingBot",timezone:"Europe/Moscow",
+  columns:["Время","Клиент","Услуга","Мастер","Статус"],
+  days:[{date:"2026-11-28",label:"Сб 28.11.2026",summary:"Записей: 1",rows:[["09:00","<img src=x>","Услуга","Мастер","подтверждена"]]},
+        {date:"2026-11-29",label:"Вс 29.11.2026",summary:"Записей: 0",rows:[]}]
+}]});
 function html(){
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -148,6 +154,17 @@ try{
     assert.equal(await page.locator(".dp-donut-ring").count(),1);
     assert.match(await page.locator(".dp-donut-ring").evaluate(n=>n.style.background),/conic-gradient/);
     assert.equal(await page.locator(".dp-metrics-grid .dp-metric").count(),2);
+    const calendar=page.locator('[data-id="calendar-message"] .dp-calendar');
+    assert.equal(await calendar.count(),1);
+    assert.equal(await calendar.locator("details[open]").count(),1);
+    assert.equal(await calendar.locator("img").count(),0);
+    assert.match(await calendar.innerText(),/09:00/);
+    const requestsBeforeDay=posted.length;
+    await calendar.locator("summary").nth(1).focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await calendar.locator("details[open]").count(),2);
+    assert.match(await calendar.innerText(),/Нет записей для отображения/);
+    assert.equal(posted.length,requestsBeforeDay);
     assert.deepEqual(errors,[]);
     await page.screenshot({path:`../studio-workflow-${width}.png`,fullPage:true});
     await page.close();
@@ -166,6 +183,9 @@ try{
     assert.equal(await legacy.locator(".dp-chart-row").count(),3);
     assert.equal(await legacy.locator(".dp-line-chart circle").count(),3);
     assert.equal(await legacy.locator(".dp-donut-ring").count(),1);
+    assert.equal(await legacy.locator(".dp-calendar-day").count(),2);
+    await legacy.locator(".dp-calendar-day summary").nth(1).click();
+    assert.equal(await legacy.locator(".dp-calendar-day[open]").count(),2);
     await legacy.close();
   }
   console.log("Dispatcher readonly workflow browser smoke: steps, keyboard, safe links, XSS, mobile and fallback OK");
